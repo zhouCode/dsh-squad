@@ -823,8 +823,12 @@ async function main() {
     await waitFor("two Todo checkboxes", async () =>
       (await checkboxes.count()) === 2 ? true : undefined,
     );
-    assert.equal(await checkboxes.nth(0).isChecked(), true);
-    assert.equal(await checkboxes.nth(1).isChecked(), true);
+    await waitFor("both Todo checkboxes to be selected by default", async () =>
+      (await checkboxes.nth(0).isChecked()) &&
+      (await checkboxes.nth(1).isChecked())
+        ? true
+        : undefined,
+    );
     await checkboxes.nth(1).uncheck();
     await dialog
       .getByLabel("Response for the receiving Agent")
