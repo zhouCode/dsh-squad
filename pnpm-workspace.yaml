@@ -1,0 +1,6 @@
+packages:
+  - packages/plugin
+
+onlyBuiltDependencies:
+  - "@deepseek-ai/node-addon-landlock-run"
+  - esbuild

@@ -1,0 +1,3 @@
+- insert:
+    - id: dsh-squad
+      name: "@dsh-squad/plugin"

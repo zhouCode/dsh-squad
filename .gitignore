@@ -1,0 +1,36 @@
+# Dependencies
+node_modules/
+.pnpm-store/
+
+# Build outputs
+dist/
+*.tsbuildinfo
+
+# Local plugin state
+.squad/
+*.sqlite
+*.sqlite-shm
+*.sqlite-wal
+*.db
+*.db-shm
+*.db-wal
+*.log
+
+# Secrets and local environment
+.env
+.env.*
+!.env.example
+
+# Generated package archives
+*.tar.gz
+*.tgz
+
+# Editor/OS
+.DS_Store
+*.swp
+*.swo
+.vscode/
+.idea/
+
+# Test coverage
+coverage/

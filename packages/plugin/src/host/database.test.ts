@@ -1,0 +1,234 @@
+import { mkdtempSync } from "node:fs";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
+import { randomUUID } from "node:crypto";
+import { describe, expect, it } from "vitest";
+import { envelopeDigest } from "../shared/canonical.ts";
+import { NodeIdentity } from "./identity.ts";
+import { SquadDatabase } from "./database.ts";
+
+describe("SquadDatabase", () => {
+  it("migrates repeatedly and deduplicates request envelopes", () => {
+    const root = mkdtempSync(join(tmpdir(), "dsh-squad-db-"));
+    const dbPath = join(root, "node.sqlite");
+    const identity = NodeIdentity.load(join(root, "identity.json"));
+    const sender = NodeIdentity.load(join(root, "sender.json"));
+    const db = new SquadDatabase(dbPath);
+    db.bindIdentity(identity.nodeId, identity.publicKey, identity.createdAt);
+    db.upsertPeer({
+      nodeId: sender.nodeId,
+      displayName: "Sender",
+      publicKey: sender.publicKey,
+      enabled: true,
+      policy: {
+        canMessage: false,
+        canDelegate: true,
+        autoExecute: "NEVER",
+        maxConcurrent: 1,
+        maxDelegationDepth: 1,
+        maxRuntimeMinutes: 30,
+      },
+    });
+    const now = new Date();
+    const delegationId = randomUUID();
+    const unsigned = {
+      protocolVersion: 1 as const,
+      envelopeId: randomUUID(),
+      kind: "DELEGATION_REQUEST" as const,
+      senderNodeId: sender.nodeId,
+      recipientNodeId: identity.nodeId,
+      correlationId: delegationId,
+      createdAt: now.toISOString(),
+      expiresAt: new Date(now.getTime() + 60_000).toISOString(),
+      payload: {
+        delegationId,
+        objective: "Count the entries",
+        acceptanceCriteria: ["Return an exact count"],
+        attachmentRefs: [],
+        delegationDepth: 0,
+      },
+    };
+    const envelope = sender.signEnvelope(unsigned);
+    const digest = envelopeDigest(envelope);
+    expect(db.receiveRequest(envelope, digest)).toBe("INSERTED");
+    expect(db.receiveRequest(envelope, digest)).toBe("DUPLICATE");
+    expect(db.listDelegations()).toHaveLength(1);
+    db.close();
+
+    const reopened = new SquadDatabase(dbPath);
+    expect(reopened.identityNodeId()).toBe(identity.nodeId);
+    expect(reopened.listDelegations()).toHaveLength(1);
+    reopened.close();
+  });
+
+  it("commits selected HumanTodos and resumes only after every item is done", () => {
+    const root = mkdtempSync(join(tmpdir(), "dsh-squad-todo-"));
+    const identity = NodeIdentity.load(join(root, "receiver.json"));
+    const sender = NodeIdentity.load(join(root, "sender.json"));
+    const db = new SquadDatabase(join(root, "node.sqlite"));
+    db.bindIdentity(identity.nodeId, identity.publicKey, identity.createdAt);
+    db.upsertPeer({
+      nodeId: sender.nodeId,
+      displayName: "Sender",
+      publicKey: sender.publicKey,
+      enabled: true,
+      policy: {
+        canMessage: false,
+        canDelegate: true,
+        autoExecute: "NEVER",
+        maxConcurrent: 1,
+        maxDelegationDepth: 1,
+        maxRuntimeMinutes: 30,
+      },
+    });
+    const delegationId = randomUUID();
+    const now = new Date();
+    const envelope = sender.signEnvelope({
+      protocolVersion: 1,
+      envelopeId: randomUUID(),
+      kind: "DELEGATION_REQUEST",
+      senderNodeId: sender.nodeId,
+      recipientNodeId: identity.nodeId,
+      correlationId: delegationId,
+      createdAt: now.toISOString(),
+      expiresAt: new Date(now.getTime() + 60_000).toISOString(),
+      payload: {
+        delegationId,
+        objective: "Finish two physical checks",
+        acceptanceCriteria: [],
+        attachmentRefs: [],
+        delegationDepth: 0,
+      },
+    });
+    db.receiveRequest(envelope, envelopeDigest(envelope));
+    db.transition(delegationId, "TRIAGING");
+    db.transition(delegationId, "RUNNING", {
+      sessionId: `squad-${delegationId}`,
+    });
+    const firstId = randomUUID();
+    const secondId = randomUUID();
+    db.handoff(
+      delegationId,
+      [firstId, secondId].map((id, index) => ({
+        id,
+        delegationId,
+        title: `Check ${index + 1}`,
+        blockingReason: "requires the owner",
+        status: "OPEN" as const,
+        attachmentRefs: [],
+        createdAt: new Date().toISOString(),
+      })),
+      "Automatic portion complete",
+    );
+    const partial = db.resolveTodosAndMaybeResume(delegationId, {
+      todoIds: [firstId],
+      response: "first done",
+      attachmentRefs: [],
+    });
+    expect(partial.resumed).toBe(false);
+    expect(partial.delegation.status).toBe("WAITING_HUMAN");
+    expect(
+      partial.delegation.todos.find((todo) => todo.id === firstId)?.status,
+    ).toBe("DONE");
+    expect(
+      partial.delegation.todos.find((todo) => todo.id === secondId)?.status,
+    ).toBe("OPEN");
+    db.close();
+
+    const reopened = new SquadDatabase(join(root, "node.sqlite"));
+    const finished = reopened.resolveTodosAndMaybeResume(delegationId, {
+      todoIds: [secondId],
+      response: "second done",
+      attachmentRefs: [],
+    });
+    expect(finished.resumed).toBe(true);
+    expect(finished.delegation.status).toBe("RUNNING");
+    expect(finished.delegation.sessionId).toBe(`squad-${delegationId}`);
+    expect(
+      finished.delegation.todos.every((todo) => todo.status === "DONE"),
+    ).toBe(true);
+    reopened.close();
+  });
+
+  it("backs off the same outbox envelope and ignores remote state regressions", () => {
+    const root = mkdtempSync(join(tmpdir(), "dsh-squad-outbox-"));
+    const identity = NodeIdentity.load(join(root, "sender.json"));
+    const peer = NodeIdentity.load(join(root, "peer.json"));
+    const db = new SquadDatabase(join(root, "node.sqlite"));
+    db.bindIdentity(identity.nodeId, identity.publicKey, identity.createdAt);
+    db.upsertPeer({
+      nodeId: peer.nodeId,
+      displayName: "Peer",
+      publicKey: peer.publicKey,
+      enabled: true,
+      policy: {
+        canMessage: false,
+        canDelegate: true,
+        autoExecute: "NEVER",
+        maxConcurrent: 1,
+        maxDelegationDepth: 1,
+        maxRuntimeMinutes: 30,
+      },
+    });
+    const delegationId = randomUUID();
+    const now = new Date();
+    const envelope = identity.signEnvelope({
+      protocolVersion: 1,
+      envelopeId: randomUUID(),
+      kind: "DELEGATION_REQUEST",
+      senderNodeId: identity.nodeId,
+      recipientNodeId: peer.nodeId,
+      correlationId: delegationId,
+      createdAt: now.toISOString(),
+      expiresAt: new Date(now.getTime() + 60_000).toISOString(),
+      payload: {
+        delegationId,
+        objective: "Summarize",
+        acceptanceCriteria: [],
+        attachmentRefs: [],
+        delegationDepth: 0,
+      },
+    });
+    db.createOutgoing(envelope.payload, envelope, envelopeDigest(envelope));
+    expect(db.pendingEnvelopes()).toHaveLength(1);
+    db.markEnvelopeAttemptFailed(
+      envelope.envelopeId,
+      new Error("token=hidden"),
+    );
+    expect(db.pendingEnvelopes()).toHaveLength(0);
+    db.retryEnvelopeNow(envelope.envelopeId);
+    expect(db.pendingEnvelopes()).toHaveLength(1);
+    db.applyRemoteUpdate({
+      delegationId,
+      status: "RUNNING",
+      revision: 2,
+      updatedAt: new Date().toISOString(),
+    });
+    db.applyRemoteUpdate({
+      delegationId,
+      status: "QUEUED",
+      revision: 3,
+      updatedAt: new Date().toISOString(),
+    });
+    expect(db.getDelegation(delegationId)?.status).toBe("RUNNING");
+    db.applyRemoteResult({
+      delegationId,
+      status: "COMPLETED",
+      summary: "stale",
+      outputs: [],
+      revision: 2,
+      completedAt: new Date().toISOString(),
+    });
+    expect(db.getDelegation(delegationId)?.status).toBe("RUNNING");
+    db.applyRemoteResult({
+      delegationId,
+      status: "COMPLETED",
+      summary: "done",
+      outputs: [],
+      revision: 4,
+      completedAt: new Date().toISOString(),
+    });
+    expect(db.getDelegation(delegationId)?.status).toBe("COMPLETED");
+    db.close();
+  });
+});

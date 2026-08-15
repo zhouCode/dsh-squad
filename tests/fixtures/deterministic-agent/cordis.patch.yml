@@ -1,0 +1,8 @@
+- id: agent-default-model
+  config:
+    provider: squad-fixture
+    model: deterministic
+
+- insert:
+    - id: squad-deterministic-agent-fixture
+      name: "@dsh-squad/deterministic-agent-fixture"

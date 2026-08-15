@@ -1,0 +1,60 @@
+{
+  "name": "dsh-squad",
+  "version": "0.2.0",
+  "description": "DSH-native delegation for distributed teams of independently owned personal Agents",
+  "private": true,
+  "license": "MIT",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/zhouCode/dsh-squad.git"
+  },
+  "homepage": "https://github.com/zhouCode/dsh-squad#readme",
+  "bugs": {
+    "url": "https://github.com/zhouCode/dsh-squad/issues"
+  },
+  "keywords": [
+    "dsh-plugin",
+    "deepseek-harness",
+    "personal-agent",
+    "agent-delegation",
+    "multi-agent"
+  ],
+  "type": "module",
+  "packageManager": "pnpm@10.28.2",
+  "engines": {
+    "node": ">=24.18.0 <25"
+  },
+  "pnpm": {
+    "onlyBuiltDependencies": [
+      "@deepseek-ai/dsh-subprocess-local",
+      "@google/genai",
+      "koffi",
+      "node-pty",
+      "protobufjs"
+    ]
+  },
+  "scripts": {
+    "build": "pnpm --filter @dsh-squad/plugin build",
+    "typecheck": "pnpm --filter @dsh-squad/plugin typecheck",
+    "verify:pins": "tsx scripts/verify-version-pins.ts",
+    "test": "vitest run",
+    "test:watch": "vitest",
+    "format:check": "prettier --check .",
+    "pack": "pnpm build && pnpm --filter @dsh-squad/plugin pack:check",
+    "smoke:dsh": "pnpm smoke:delegation",
+    "smoke:delegation": "node scripts/smoke-delegation.mjs"
+  },
+  "devDependencies": {
+    "@deepseek-ai/dsh": "0.1.0-rc.6",
+    "@types/node": "24.10.13",
+    "@types/react": "18.3.27",
+    "@types/react-dom": "18.3.7",
+    "playwright": "1.62.1",
+    "prettier": "3.6.2",
+    "react": "18.3.1",
+    "react-dom": "18.3.1",
+    "tsx": "4.20.6",
+    "typescript": "5.9.3",
+    "vitest": "3.2.4"
+  }
+}

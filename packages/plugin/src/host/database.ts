@@ -1,0 +1,1098 @@
+import { mkdirSync } from "node:fs";
+import { dirname } from "node:path";
+import { DatabaseSync } from "node:sqlite";
+import {
+  attachmentRefSchema,
+  delegationRequestSchema,
+  envelopeSchema,
+  humanTodoSchema,
+  peerPolicySchema,
+  resultOutputSchema,
+  type AttachmentRef,
+  type DelegationRequest,
+  type DelegationResult,
+  type DelegationUpdate,
+  type Envelope,
+  type HumanTodo,
+  type HumanInput,
+  type PeerPolicy,
+  type ResultOutput,
+} from "../shared/contracts.ts";
+import {
+  assertTransition,
+  isTerminalStatus,
+  type DelegationStatus,
+} from "../shared/state.ts";
+
+export type DelegationDirection = "INCOMING" | "OUTGOING";
+export type DeliveryStatus =
+  | "QUEUED_LOCAL"
+  | "DELIVERED_TO_RELAY"
+  | "RECEIVED_LOCAL";
+
+export interface PeerRecord {
+  nodeId: string;
+  displayName: string;
+  publicKey: string;
+  enabled: boolean;
+  policy: PeerPolicy;
+  createdAt: string;
+  updatedAt: string;
+}
+
+export interface DelegationRecord {
+  id: string;
+  direction: DelegationDirection;
+  peerNodeId: string;
+  parentDelegationId?: string;
+  objective: string;
+  context?: string;
+  acceptanceCriteria: string[];
+  attachmentRefs: AttachmentRef[];
+  delegationDepth: number;
+  status: DelegationStatus;
+  revision: number;
+  deliveryStatus: DeliveryStatus;
+  requestEnvelopeId: string;
+  sessionId?: string;
+  summary?: string;
+  outputs: ResultOutput[];
+  errorCode?: string;
+  createdAt: string;
+  updatedAt: string;
+  completedAt?: string;
+  todos: HumanTodo[];
+}
+
+export interface PendingEnvelope {
+  envelope: Envelope;
+  attempts: number;
+  lastError?: string;
+}
+
+type SqlRow = Record<string, unknown>;
+
+function asBoolean(value: unknown): boolean {
+  return value === 1 || value === true;
+}
+
+function optionalString(value: unknown): string | undefined {
+  return typeof value === "string" && value.length > 0 ? value : undefined;
+}
+
+function parseJson<T>(value: unknown, parse: (input: unknown) => T): T {
+  if (typeof value !== "string") throw new Error("invalid SQLite JSON column");
+  return parse(JSON.parse(value) as unknown);
+}
+
+function redactError(error: unknown): string {
+  const message = error instanceof Error ? error.message : String(error);
+  return message
+    .replace(
+      /(token|secret|credential|private[-_ ]?key)=[^\s,;]+/giu,
+      "$1=[REDACTED]",
+    )
+    .slice(0, 2_000);
+}
+
+export class SquadDatabase {
+  readonly #db: DatabaseSync;
+
+  constructor(path: string) {
+    mkdirSync(dirname(path), { recursive: true, mode: 0o700 });
+    this.#db = new DatabaseSync(path);
+    this.#db.exec(
+      "PRAGMA foreign_keys = ON; PRAGMA busy_timeout = 5000; PRAGMA journal_mode = WAL;",
+    );
+    this.migrate();
+  }
+
+  private migrate(): void {
+    this.#db.exec(`
+      CREATE TABLE IF NOT EXISTS schema_meta (
+        singleton INTEGER PRIMARY KEY CHECK (singleton = 1),
+        version INTEGER NOT NULL
+      );
+      INSERT OR IGNORE INTO schema_meta(singleton, version) VALUES (1, 1);
+
+      CREATE TABLE IF NOT EXISTS node_identity (
+        singleton INTEGER PRIMARY KEY CHECK (singleton = 1),
+        node_id TEXT NOT NULL UNIQUE,
+        public_key TEXT NOT NULL,
+        created_at TEXT NOT NULL
+      );
+
+      CREATE TABLE IF NOT EXISTS peer_policies (
+        node_id TEXT PRIMARY KEY,
+        display_name TEXT NOT NULL,
+        public_key TEXT NOT NULL,
+        enabled INTEGER NOT NULL CHECK (enabled IN (0, 1)),
+        can_message INTEGER NOT NULL CHECK (can_message IN (0, 1)),
+        can_delegate INTEGER NOT NULL CHECK (can_delegate IN (0, 1)),
+        auto_execute TEXT NOT NULL CHECK (auto_execute IN ('NEVER', 'SAFE', 'TRUSTED')),
+        max_concurrent INTEGER NOT NULL,
+        max_delegation_depth INTEGER NOT NULL,
+        max_runtime_minutes INTEGER NOT NULL,
+        max_tokens INTEGER,
+        created_at TEXT NOT NULL,
+        updated_at TEXT NOT NULL
+      );
+
+      CREATE TABLE IF NOT EXISTS local_delegations (
+        id TEXT PRIMARY KEY,
+        direction TEXT NOT NULL CHECK (direction IN ('INCOMING', 'OUTGOING')),
+        peer_node_id TEXT NOT NULL,
+        parent_delegation_id TEXT,
+        objective TEXT NOT NULL,
+        context TEXT,
+        acceptance_criteria_json TEXT NOT NULL,
+        attachment_refs_json TEXT NOT NULL,
+        delegation_depth INTEGER NOT NULL,
+        status TEXT NOT NULL,
+        revision INTEGER NOT NULL,
+        delivery_status TEXT NOT NULL,
+        request_envelope_id TEXT NOT NULL UNIQUE,
+        session_id TEXT UNIQUE,
+        summary TEXT,
+        outputs_json TEXT NOT NULL DEFAULT '[]',
+        error_code TEXT,
+        created_at TEXT NOT NULL,
+        updated_at TEXT NOT NULL,
+        completed_at TEXT,
+        FOREIGN KEY(peer_node_id) REFERENCES peer_policies(node_id)
+      );
+      CREATE INDEX IF NOT EXISTS local_delegations_status_idx
+        ON local_delegations(direction, status, updated_at DESC);
+
+      CREATE TABLE IF NOT EXISTS envelope_receipts (
+        envelope_id TEXT PRIMARY KEY,
+        digest TEXT NOT NULL,
+        delegation_id TEXT,
+        kind TEXT NOT NULL,
+        received_at TEXT NOT NULL
+      );
+
+      CREATE TABLE IF NOT EXISTS human_todos (
+        id TEXT PRIMARY KEY,
+        delegation_id TEXT NOT NULL,
+        title TEXT NOT NULL,
+        instructions TEXT,
+        blocking_reason TEXT NOT NULL,
+        status TEXT NOT NULL CHECK (status IN ('OPEN', 'DONE', 'DISMISSED')),
+        human_response TEXT,
+        attachment_refs_json TEXT NOT NULL DEFAULT '[]',
+        created_at TEXT NOT NULL,
+        resolved_at TEXT,
+        FOREIGN KEY(delegation_id) REFERENCES local_delegations(id) ON DELETE CASCADE
+      );
+
+      CREATE TABLE IF NOT EXISTS mailbox_cursors (
+        relay_url TEXT PRIMARY KEY,
+        cursor INTEGER NOT NULL CHECK (cursor >= 0),
+        updated_at TEXT NOT NULL
+      );
+
+      CREATE TABLE IF NOT EXISTS local_outbox (
+        envelope_id TEXT PRIMARY KEY,
+        envelope_json TEXT NOT NULL,
+        digest TEXT NOT NULL,
+        attempts INTEGER NOT NULL DEFAULT 0,
+        last_error TEXT,
+        next_attempt_at TEXT NOT NULL,
+        created_at TEXT NOT NULL,
+        delivered_at TEXT
+      );
+
+      CREATE TABLE IF NOT EXISTS local_messages (
+        message_id TEXT PRIMARY KEY,
+        envelope_id TEXT NOT NULL UNIQUE,
+        sender_node_id TEXT NOT NULL,
+        text TEXT NOT NULL,
+        created_at TEXT NOT NULL
+      );
+
+      CREATE TABLE IF NOT EXISTS diagnostics (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        code TEXT NOT NULL,
+        delegation_id TEXT,
+        detail TEXT NOT NULL,
+        created_at TEXT NOT NULL
+      );
+    `);
+    const version = this.#db
+      .prepare("SELECT version FROM schema_meta WHERE singleton = 1")
+      .get() as SqlRow | undefined;
+    if (version?.version === 1) {
+      const todoColumns = this.#db
+        .prepare("PRAGMA table_info(human_todos)")
+        .all() as SqlRow[];
+      if (
+        !todoColumns.some((column) => column.name === "attachment_refs_json")
+      ) {
+        this.#db.exec(
+          "ALTER TABLE human_todos ADD COLUMN attachment_refs_json TEXT NOT NULL DEFAULT '[]'",
+        );
+      }
+      const outboxColumns = this.#db
+        .prepare("PRAGMA table_info(local_outbox)")
+        .all() as SqlRow[];
+      if (!outboxColumns.some((column) => column.name === "next_attempt_at")) {
+        this.#db.exec(
+          "ALTER TABLE local_outbox ADD COLUMN next_attempt_at TEXT",
+        );
+        this.#db.exec(
+          "UPDATE local_outbox SET next_attempt_at = created_at WHERE next_attempt_at IS NULL",
+        );
+      }
+      this.#db.exec("UPDATE schema_meta SET version = 2 WHERE singleton = 1");
+    } else if (version?.version !== 2) {
+      throw new Error(
+        `unsupported Squad database version ${String(version?.version)}`,
+      );
+    }
+  }
+
+  private transaction<T>(operation: () => T): T {
+    this.#db.exec("BEGIN IMMEDIATE");
+    try {
+      const result = operation();
+      this.#db.exec("COMMIT");
+      return result;
+    } catch (error) {
+      this.#db.exec("ROLLBACK");
+      throw error;
+    }
+  }
+
+  close(): void {
+    this.#db.close();
+  }
+
+  identityNodeId(): string | undefined {
+    const row = this.#db
+      .prepare("SELECT node_id FROM node_identity WHERE singleton = 1")
+      .get() as SqlRow | undefined;
+    return optionalString(row?.node_id);
+  }
+
+  bindIdentity(nodeId: string, publicKey: string, createdAt: string): void {
+    const existing = this.#db
+      .prepare(
+        "SELECT node_id, public_key FROM node_identity WHERE singleton = 1",
+      )
+      .get() as SqlRow | undefined;
+    if (existing !== undefined) {
+      if (existing.node_id !== nodeId || existing.public_key !== publicKey) {
+        throw new Error("Squad database is bound to a different node identity");
+      }
+      return;
+    }
+    this.#db
+      .prepare(
+        "INSERT INTO node_identity(singleton, node_id, public_key, created_at) VALUES (1, ?, ?, ?)",
+      )
+      .run(nodeId, publicKey, createdAt);
+  }
+
+  upsertPeer(input: {
+    nodeId: string;
+    displayName: string;
+    publicKey: string;
+    enabled: boolean;
+    policy: PeerPolicy;
+  }): void {
+    const policy = peerPolicySchema.parse(input.policy);
+    const now = new Date().toISOString();
+    const existing = this.#db
+      .prepare(
+        "SELECT public_key, created_at FROM peer_policies WHERE node_id = ?",
+      )
+      .get(input.nodeId) as SqlRow | undefined;
+    if (existing !== undefined && existing.public_key !== input.publicKey) {
+      throw new Error(
+        `peer ${input.nodeId} public key conflicts with its pinned key`,
+      );
+    }
+    this.#db
+      .prepare(
+        `
+        INSERT INTO peer_policies(
+          node_id, display_name, public_key, enabled, can_message, can_delegate,
+          auto_execute, max_concurrent, max_delegation_depth,
+          max_runtime_minutes, max_tokens, created_at, updated_at
+        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+        ON CONFLICT(node_id) DO UPDATE SET
+          display_name = excluded.display_name,
+          enabled = excluded.enabled,
+          can_message = excluded.can_message,
+          can_delegate = excluded.can_delegate,
+          auto_execute = excluded.auto_execute,
+          max_concurrent = excluded.max_concurrent,
+          max_delegation_depth = excluded.max_delegation_depth,
+          max_runtime_minutes = excluded.max_runtime_minutes,
+          max_tokens = excluded.max_tokens,
+          updated_at = excluded.updated_at
+      `,
+      )
+      .run(
+        input.nodeId,
+        input.displayName,
+        input.publicKey,
+        input.enabled ? 1 : 0,
+        policy.canMessage ? 1 : 0,
+        policy.canDelegate ? 1 : 0,
+        policy.autoExecute,
+        policy.maxConcurrent,
+        policy.maxDelegationDepth,
+        policy.maxRuntimeMinutes,
+        policy.maxTokens ?? null,
+        optionalString(existing?.created_at) ?? now,
+        now,
+      );
+  }
+
+  private peerFromRow(row: SqlRow): PeerRecord {
+    return {
+      nodeId: String(row.node_id),
+      displayName: String(row.display_name),
+      publicKey: String(row.public_key),
+      enabled: asBoolean(row.enabled),
+      policy: peerPolicySchema.parse({
+        canMessage: asBoolean(row.can_message),
+        canDelegate: asBoolean(row.can_delegate),
+        autoExecute: row.auto_execute,
+        maxConcurrent: row.max_concurrent,
+        maxDelegationDepth: row.max_delegation_depth,
+        maxRuntimeMinutes: row.max_runtime_minutes,
+        ...(typeof row.max_tokens === "number"
+          ? { maxTokens: row.max_tokens }
+          : {}),
+      }),
+      createdAt: String(row.created_at),
+      updatedAt: String(row.updated_at),
+    };
+  }
+
+  listPeers(): PeerRecord[] {
+    return (
+      this.#db
+        .prepare(
+          "SELECT * FROM peer_policies ORDER BY lower(display_name), node_id",
+        )
+        .all() as SqlRow[]
+    ).map((row) => this.peerFromRow(row));
+  }
+
+  findPeer(selector: string): PeerRecord | undefined {
+    const rows = this.#db
+      .prepare(
+        "SELECT * FROM peer_policies WHERE node_id = ? OR lower(display_name) = lower(?) ORDER BY node_id",
+      )
+      .all(selector, selector) as SqlRow[];
+    if (rows.length > 1) {
+      throw new Error(`peer name ${selector} is ambiguous; use a nodeId`);
+    }
+    return rows[0] === undefined ? undefined : this.peerFromRow(rows[0]);
+  }
+
+  createOutgoing(
+    request: DelegationRequest,
+    envelope: Envelope,
+    digest: string,
+  ): void {
+    const now = new Date().toISOString();
+    this.transaction(() => {
+      this.#db
+        .prepare(
+          `
+          INSERT INTO local_delegations(
+            id, direction, peer_node_id, parent_delegation_id, objective, context,
+            acceptance_criteria_json, attachment_refs_json, delegation_depth,
+            status, revision, delivery_status, request_envelope_id,
+            outputs_json, created_at, updated_at
+          ) VALUES (?, 'OUTGOING', ?, ?, ?, ?, ?, ?, ?, 'QUEUED', 1,
+            'QUEUED_LOCAL', ?, '[]', ?, ?)
+        `,
+        )
+        .run(
+          request.delegationId,
+          envelope.recipientNodeId,
+          request.parentDelegationId ?? null,
+          request.objective,
+          request.context ?? null,
+          JSON.stringify(request.acceptanceCriteria),
+          JSON.stringify(request.attachmentRefs),
+          request.delegationDepth,
+          envelope.envelopeId,
+          now,
+          now,
+        );
+      this.insertOutboxUnsafe(envelope, digest, now);
+    });
+  }
+
+  receiveRequest(
+    envelope: Extract<Envelope, { kind: "DELEGATION_REQUEST" }>,
+    digest: string,
+  ): "INSERTED" | "DUPLICATE" {
+    return this.transaction(() => {
+      const receipt = this.#db
+        .prepare("SELECT digest FROM envelope_receipts WHERE envelope_id = ?")
+        .get(envelope.envelopeId) as SqlRow | undefined;
+      if (receipt !== undefined) {
+        if (receipt.digest !== digest) {
+          throw new Error(
+            `envelope ${envelope.envelopeId} conflicts with its receipt`,
+          );
+        }
+        return "DUPLICATE";
+      }
+      const request = delegationRequestSchema.parse(envelope.payload);
+      const existing = this.#db
+        .prepare(
+          "SELECT request_envelope_id FROM local_delegations WHERE id = ?",
+        )
+        .get(request.delegationId) as SqlRow | undefined;
+      if (existing !== undefined) {
+        throw new Error(
+          `delegation ${request.delegationId} conflicts with an existing record`,
+        );
+      }
+      const now = new Date().toISOString();
+      this.#db
+        .prepare(
+          `
+          INSERT INTO local_delegations(
+            id, direction, peer_node_id, parent_delegation_id, objective, context,
+            acceptance_criteria_json, attachment_refs_json, delegation_depth,
+            status, revision, delivery_status, request_envelope_id,
+            outputs_json, created_at, updated_at
+          ) VALUES (?, 'INCOMING', ?, ?, ?, ?, ?, ?, ?, 'RECEIVED', 1,
+            'RECEIVED_LOCAL', ?, '[]', ?, ?)
+        `,
+        )
+        .run(
+          request.delegationId,
+          envelope.senderNodeId,
+          request.parentDelegationId ?? null,
+          request.objective,
+          request.context ?? null,
+          JSON.stringify(request.acceptanceCriteria),
+          JSON.stringify(request.attachmentRefs),
+          request.delegationDepth,
+          envelope.envelopeId,
+          now,
+          now,
+        );
+      this.insertReceiptUnsafe(envelope, digest, request.delegationId, now);
+      return "INSERTED";
+    });
+  }
+
+  recordReceipt(envelope: Envelope, digest: string): "INSERTED" | "DUPLICATE" {
+    const existing = this.#db
+      .prepare("SELECT digest FROM envelope_receipts WHERE envelope_id = ?")
+      .get(envelope.envelopeId) as SqlRow | undefined;
+    if (existing !== undefined) {
+      if (existing.digest !== digest) {
+        throw new Error(
+          `envelope ${envelope.envelopeId} conflicts with its receipt`,
+        );
+      }
+      return "DUPLICATE";
+    }
+    const delegationId =
+      "delegationId" in envelope.payload
+        ? envelope.payload.delegationId
+        : undefined;
+    this.insertReceiptUnsafe(
+      envelope,
+      digest,
+      delegationId,
+      new Date().toISOString(),
+    );
+    return "INSERTED";
+  }
+
+  private insertReceiptUnsafe(
+    envelope: Envelope,
+    digest: string,
+    delegationId: string | undefined,
+    now: string,
+  ): void {
+    this.#db
+      .prepare(
+        "INSERT INTO envelope_receipts(envelope_id, digest, delegation_id, kind, received_at) VALUES (?, ?, ?, ?, ?)",
+      )
+      .run(
+        envelope.envelopeId,
+        digest,
+        delegationId ?? null,
+        envelope.kind,
+        now,
+      );
+  }
+
+  recordMessage(
+    envelope: Extract<Envelope, { kind: "MESSAGE" }>,
+    digest: string,
+  ): void {
+    this.transaction(() => {
+      const inserted = this.recordReceipt(envelope, digest);
+      if (inserted === "DUPLICATE") return;
+      this.#db
+        .prepare(
+          "INSERT INTO local_messages(message_id, envelope_id, sender_node_id, text, created_at) VALUES (?, ?, ?, ?, ?)",
+        )
+        .run(
+          envelope.payload.messageId,
+          envelope.envelopeId,
+          envelope.senderNodeId,
+          envelope.payload.text,
+          envelope.createdAt,
+        );
+    });
+  }
+
+  private delegationFromRow(row: SqlRow): DelegationRecord {
+    const todos = (
+      this.#db
+        .prepare(
+          "SELECT * FROM human_todos WHERE delegation_id = ? ORDER BY created_at, id",
+        )
+        .all(String(row.id)) as SqlRow[]
+    ).map((todo) => {
+      const instructions = optionalString(todo.instructions);
+      const humanResponse = optionalString(todo.human_response);
+      const resolvedAt = optionalString(todo.resolved_at);
+      return humanTodoSchema.parse({
+        id: todo.id,
+        delegationId: todo.delegation_id,
+        title: todo.title,
+        ...(instructions === undefined ? {} : { instructions }),
+        blockingReason: todo.blocking_reason,
+        status: todo.status,
+        ...(humanResponse === undefined ? {} : { humanResponse }),
+        attachmentRefs: parseJson(todo.attachment_refs_json, (input) =>
+          attachmentRefSchema.array().parse(input),
+        ),
+        createdAt: todo.created_at,
+        ...(resolvedAt === undefined ? {} : { resolvedAt }),
+      });
+    });
+    const parentDelegationId = optionalString(row.parent_delegation_id);
+    const context = optionalString(row.context);
+    const sessionId = optionalString(row.session_id);
+    const summary = optionalString(row.summary);
+    const errorCode = optionalString(row.error_code);
+    const completedAt = optionalString(row.completed_at);
+    return {
+      id: String(row.id),
+      direction: row.direction as DelegationDirection,
+      peerNodeId: String(row.peer_node_id),
+      ...(parentDelegationId === undefined ? {} : { parentDelegationId }),
+      objective: String(row.objective),
+      ...(context === undefined ? {} : { context }),
+      acceptanceCriteria: parseJson(row.acceptance_criteria_json, (input) =>
+        delegationRequestSchema.shape.acceptanceCriteria.parse(input),
+      ),
+      attachmentRefs: parseJson(row.attachment_refs_json, (input) =>
+        attachmentRefSchema.array().parse(input),
+      ),
+      delegationDepth: Number(row.delegation_depth),
+      status: row.status as DelegationStatus,
+      revision: Number(row.revision),
+      deliveryStatus: row.delivery_status as DeliveryStatus,
+      requestEnvelopeId: String(row.request_envelope_id),
+      ...(sessionId === undefined ? {} : { sessionId }),
+      ...(summary === undefined ? {} : { summary }),
+      outputs: parseJson(row.outputs_json, (input) =>
+        resultOutputSchema.array().parse(input),
+      ),
+      ...(errorCode === undefined ? {} : { errorCode }),
+      createdAt: String(row.created_at),
+      updatedAt: String(row.updated_at),
+      ...(completedAt === undefined ? {} : { completedAt }),
+      todos,
+    };
+  }
+
+  getDelegation(id: string): DelegationRecord | undefined {
+    const row = this.#db
+      .prepare("SELECT * FROM local_delegations WHERE id = ?")
+      .get(id) as SqlRow | undefined;
+    return row === undefined ? undefined : this.delegationFromRow(row);
+  }
+
+  getDelegationBySession(sessionId: string): DelegationRecord | undefined {
+    const row = this.#db
+      .prepare("SELECT * FROM local_delegations WHERE session_id = ?")
+      .get(sessionId) as SqlRow | undefined;
+    return row === undefined ? undefined : this.delegationFromRow(row);
+  }
+
+  listDelegations(): DelegationRecord[] {
+    return (
+      this.#db
+        .prepare("SELECT * FROM local_delegations ORDER BY updated_at DESC, id")
+        .all() as SqlRow[]
+    ).map((row) => this.delegationFromRow(row));
+  }
+
+  countRunningFromPeer(nodeId: string): number {
+    const row = this.#db
+      .prepare(
+        "SELECT count(*) AS count FROM local_delegations WHERE direction = 'INCOMING' AND peer_node_id = ? AND status = 'RUNNING'",
+      )
+      .get(nodeId) as SqlRow;
+    return Number(row.count);
+  }
+
+  transition(
+    id: string,
+    next: DelegationStatus,
+    fields: {
+      sessionId?: string;
+      summary?: string;
+      outputs?: ResultOutput[];
+      errorCode?: string;
+      completedAt?: string;
+    } = {},
+  ): DelegationRecord {
+    return this.transaction(() => {
+      const current = this.getDelegation(id);
+      if (current === undefined) throw new Error(`unknown delegation ${id}`);
+      assertTransition(current.status, next);
+      if (current.status === next) return current;
+      const now = new Date().toISOString();
+      this.#db
+        .prepare(
+          `
+          UPDATE local_delegations SET
+            status = ?, revision = revision + 1, updated_at = ?,
+            session_id = coalesce(?, session_id),
+            summary = coalesce(?, summary),
+            outputs_json = coalesce(?, outputs_json),
+            error_code = coalesce(?, error_code),
+            completed_at = coalesce(?, completed_at)
+          WHERE id = ?
+        `,
+        )
+        .run(
+          next,
+          now,
+          fields.sessionId ?? null,
+          fields.summary ?? null,
+          fields.outputs === undefined ? null : JSON.stringify(fields.outputs),
+          fields.errorCode ?? null,
+          fields.completedAt ?? null,
+          id,
+        );
+      const updated = this.getDelegation(id);
+      if (updated === undefined)
+        throw new Error(`delegation ${id} disappeared`);
+      return updated;
+    });
+  }
+
+  applyRemoteUpdate(update: DelegationUpdate): void {
+    const current = this.getDelegation(update.delegationId);
+    if (current === undefined || current.direction !== "OUTGOING") return;
+    if (isTerminalStatus(current.status) || update.revision <= current.revision)
+      return;
+    const allowed =
+      current.status === "QUEUED"
+        ? ["QUEUED", "RUNNING", "WAITING_HUMAN"]
+        : current.status === "RUNNING"
+          ? ["RUNNING", "WAITING_HUMAN"]
+          : current.status === "WAITING_HUMAN"
+            ? ["WAITING_HUMAN", "RUNNING"]
+            : [];
+    if (!allowed.includes(update.status)) {
+      this.diagnostic(
+        "REMOTE_STATE_REGRESSION",
+        update.delegationId,
+        `ignored ${current.status} -> ${update.status} at revision ${update.revision}`,
+      );
+      return;
+    }
+    this.#db
+      .prepare(
+        "UPDATE local_delegations SET status = ?, revision = ?, summary = coalesce(?, summary), updated_at = ? WHERE id = ?",
+      )
+      .run(
+        update.status,
+        update.revision,
+        update.shareableSummary ?? null,
+        update.updatedAt,
+        update.delegationId,
+      );
+  }
+
+  applyRemoteResult(result: DelegationResult): void {
+    const current = this.getDelegation(result.delegationId);
+    if (current === undefined || current.direction !== "OUTGOING") return;
+    if (isTerminalStatus(current.status)) {
+      if (
+        current.status !== result.status ||
+        current.summary !== result.summary ||
+        JSON.stringify(current.outputs) !== JSON.stringify(result.outputs)
+      ) {
+        this.diagnostic(
+          "LATE_TERMINAL_CONFLICT",
+          result.delegationId,
+          `ignored conflicting ${result.status} result`,
+        );
+      }
+      return;
+    }
+    if (result.revision <= current.revision) {
+      this.diagnostic(
+        "STALE_REMOTE_RESULT",
+        result.delegationId,
+        `ignored revision ${result.revision} after ${current.revision}`,
+      );
+      return;
+    }
+    this.#db
+      .prepare(
+        `
+        UPDATE local_delegations SET status = ?, revision = ?, summary = ?,
+          outputs_json = ?, error_code = ?, completed_at = ?, updated_at = ?
+        WHERE id = ?
+      `,
+      )
+      .run(
+        result.status,
+        result.revision,
+        result.summary,
+        JSON.stringify(result.outputs),
+        result.errorCode ?? null,
+        result.completedAt,
+        result.completedAt,
+        result.delegationId,
+      );
+  }
+
+  createTodos(delegationId: string, todos: HumanTodo[]): void {
+    this.transaction(() => {
+      for (const todo of todos) {
+        const parsed = humanTodoSchema.parse(todo);
+        this.#db
+          .prepare(
+            `
+            INSERT INTO human_todos(
+              id, delegation_id, title, instructions, blocking_reason,
+              status, human_response, attachment_refs_json, created_at, resolved_at
+            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+          `,
+          )
+          .run(
+            parsed.id,
+            parsed.delegationId,
+            parsed.title,
+            parsed.instructions ?? null,
+            parsed.blockingReason,
+            parsed.status,
+            parsed.humanResponse ?? null,
+            JSON.stringify(parsed.attachmentRefs),
+            parsed.createdAt,
+            parsed.resolvedAt ?? null,
+          );
+      }
+    });
+  }
+
+  handoff(
+    delegationId: string,
+    todos: HumanTodo[],
+    summary: string,
+  ): DelegationRecord {
+    return this.transaction(() => {
+      const current = this.getDelegation(delegationId);
+      if (current === undefined)
+        throw new Error(`unknown delegation ${delegationId}`);
+      assertTransition(current.status, "WAITING_HUMAN");
+      for (const todo of todos) {
+        const parsed = humanTodoSchema.parse(todo);
+        this.#db
+          .prepare(
+            `
+          INSERT INTO human_todos(
+            id, delegation_id, title, instructions, blocking_reason,
+            status, human_response, attachment_refs_json, created_at, resolved_at
+          ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+        `,
+          )
+          .run(
+            parsed.id,
+            parsed.delegationId,
+            parsed.title,
+            parsed.instructions ?? null,
+            parsed.blockingReason,
+            parsed.status,
+            parsed.humanResponse ?? null,
+            JSON.stringify(parsed.attachmentRefs),
+            parsed.createdAt,
+            parsed.resolvedAt ?? null,
+          );
+      }
+      const now = new Date().toISOString();
+      this.#db
+        .prepare(
+          `
+        UPDATE local_delegations
+        SET status = 'WAITING_HUMAN', revision = revision + 1,
+            summary = ?, updated_at = ?
+        WHERE id = ?
+      `,
+        )
+        .run(summary, now, delegationId);
+      const updated = this.getDelegation(delegationId);
+      if (updated === undefined)
+        throw new Error(`delegation ${delegationId} disappeared`);
+      return updated;
+    });
+  }
+
+  resolveTodosAndMaybeResume(
+    delegationId: string,
+    input: HumanInput,
+  ): { delegation: DelegationRecord; resumed: boolean } {
+    return this.transaction(() => {
+      const current = this.getDelegation(delegationId);
+      if (
+        current === undefined ||
+        current.direction !== "INCOMING" ||
+        current.status !== "WAITING_HUMAN"
+      ) {
+        throw new Error(
+          `delegation ${delegationId} is not waiting for human input`,
+        );
+      }
+      const open = new Set(
+        current.todos
+          .filter((todo) => todo.status === "OPEN")
+          .map((todo) => todo.id),
+      );
+      if (input.todoIds.some((id) => !open.has(id))) {
+        throw new Error(
+          "todoIds must identify open HumanTodo items in this delegation",
+        );
+      }
+      const now = new Date().toISOString();
+      const update = this.#db.prepare(`
+        UPDATE human_todos
+        SET status = 'DONE', human_response = ?, attachment_refs_json = ?, resolved_at = ?
+        WHERE id = ? AND delegation_id = ? AND status = 'OPEN'
+      `);
+      let changed = 0;
+      for (const todoId of input.todoIds) {
+        changed += Number(
+          update.run(
+            input.response?.trim() || null,
+            JSON.stringify(input.attachmentRefs),
+            now,
+            todoId,
+            delegationId,
+          ).changes,
+        );
+      }
+      if (changed !== input.todoIds.length) {
+        throw new Error(
+          "HumanTodo state changed concurrently; reload before submitting",
+        );
+      }
+      const row = this.#db
+        .prepare(
+          "SELECT count(*) AS count FROM human_todos WHERE delegation_id = ? AND status = 'OPEN'",
+        )
+        .get(delegationId) as SqlRow;
+      const resumed = Number(row.count) === 0;
+      if (resumed) {
+        if (current.sessionId === undefined) {
+          throw new Error("original DSH session is unavailable");
+        }
+        assertTransition(current.status, "RUNNING");
+        this.#db
+          .prepare(
+            `
+          UPDATE local_delegations
+          SET status = 'RUNNING', revision = revision + 1,
+              summary = 'Resumed after local human input.', updated_at = ?
+          WHERE id = ?
+        `,
+          )
+          .run(now, delegationId);
+      } else {
+        this.#db
+          .prepare("UPDATE local_delegations SET updated_at = ? WHERE id = ?")
+          .run(now, delegationId);
+      }
+      const delegation = this.getDelegation(delegationId);
+      if (delegation === undefined)
+        throw new Error(`delegation ${delegationId} disappeared`);
+      return { delegation, resumed };
+    });
+  }
+
+  dismissTodos(delegationId: string): void {
+    this.#db
+      .prepare(
+        `
+        UPDATE human_todos SET status = 'DISMISSED', resolved_at = ?
+        WHERE delegation_id = ? AND status = 'OPEN'
+      `,
+      )
+      .run(new Date().toISOString(), delegationId);
+  }
+
+  enqueue(envelope: Envelope, digest: string): void {
+    const parsed = envelopeSchema.parse(envelope);
+    this.insertOutboxUnsafe(parsed, digest, new Date().toISOString());
+  }
+
+  private insertOutboxUnsafe(
+    envelope: Envelope,
+    digest: string,
+    now: string,
+  ): void {
+    const existing = this.#db
+      .prepare("SELECT digest FROM local_outbox WHERE envelope_id = ?")
+      .get(envelope.envelopeId) as SqlRow | undefined;
+    if (existing !== undefined) {
+      if (existing.digest !== digest) {
+        throw new Error(`outbox envelope ${envelope.envelopeId} conflicts`);
+      }
+      return;
+    }
+    this.#db
+      .prepare(
+        "INSERT INTO local_outbox(envelope_id, envelope_json, digest, created_at, next_attempt_at) VALUES (?, ?, ?, ?, ?)",
+      )
+      .run(envelope.envelopeId, JSON.stringify(envelope), digest, now, now);
+  }
+
+  pendingEnvelopes(limit = 100): PendingEnvelope[] {
+    return (
+      this.#db
+        .prepare(
+          "SELECT envelope_json, attempts, last_error FROM local_outbox WHERE delivered_at IS NULL AND next_attempt_at <= ? ORDER BY next_attempt_at, created_at LIMIT ?",
+        )
+        .all(new Date().toISOString(), limit) as SqlRow[]
+    ).map((row) => {
+      const lastError = optionalString(row.last_error);
+      return {
+        envelope: parseJson(row.envelope_json, (input) =>
+          envelopeSchema.parse(input),
+        ),
+        attempts: Number(row.attempts),
+        ...(lastError === undefined ? {} : { lastError }),
+      };
+    });
+  }
+
+  markEnvelopeDelivered(envelopeId: string): void {
+    const now = new Date().toISOString();
+    this.transaction(() => {
+      this.#db
+        .prepare(
+          "UPDATE local_outbox SET delivered_at = ?, last_error = NULL WHERE envelope_id = ?",
+        )
+        .run(now, envelopeId);
+      this.#db
+        .prepare(
+          "UPDATE local_delegations SET delivery_status = 'DELIVERED_TO_RELAY', updated_at = ? WHERE request_envelope_id = ?",
+        )
+        .run(now, envelopeId);
+    });
+  }
+
+  markEnvelopeAttemptFailed(envelopeId: string, error: unknown): void {
+    const row = this.#db
+      .prepare(
+        "SELECT attempts FROM local_outbox WHERE envelope_id = ? AND delivered_at IS NULL",
+      )
+      .get(envelopeId) as SqlRow | undefined;
+    if (row === undefined) return;
+    const delayMs = Math.min(
+      5 * 60_000,
+      1_000 * 2 ** Math.min(8, Number(row.attempts)),
+    );
+    this.#db
+      .prepare(
+        "UPDATE local_outbox SET attempts = attempts + 1, last_error = ?, next_attempt_at = ? WHERE envelope_id = ?",
+      )
+      .run(
+        redactError(error),
+        new Date(Date.now() + delayMs).toISOString(),
+        envelopeId,
+      );
+  }
+
+  retryEnvelopeNow(envelopeId: string): void {
+    this.#db
+      .prepare(
+        "UPDATE local_outbox SET next_attempt_at = ?, last_error = NULL WHERE envelope_id = ? AND delivered_at IS NULL",
+      )
+      .run(new Date().toISOString(), envelopeId);
+  }
+
+  discardPendingEnvelope(envelopeId: string): void {
+    this.#db
+      .prepare(
+        "DELETE FROM local_outbox WHERE envelope_id = ? AND delivered_at IS NULL",
+      )
+      .run(envelopeId);
+  }
+
+  mailboxCursor(relayUrl: string): number {
+    const row = this.#db
+      .prepare("SELECT cursor FROM mailbox_cursors WHERE relay_url = ?")
+      .get(relayUrl) as SqlRow | undefined;
+    return row === undefined ? 0 : Number(row.cursor);
+  }
+
+  advanceMailboxCursor(relayUrl: string, cursor: number): void {
+    const current = this.mailboxCursor(relayUrl);
+    if (cursor < current)
+      throw new Error("mailbox cursor cannot move backwards");
+    this.#db
+      .prepare(
+        `
+        INSERT INTO mailbox_cursors(relay_url, cursor, updated_at) VALUES (?, ?, ?)
+        ON CONFLICT(relay_url) DO UPDATE SET
+          cursor = max(mailbox_cursors.cursor, excluded.cursor),
+          updated_at = excluded.updated_at
+      `,
+      )
+      .run(relayUrl, cursor, new Date().toISOString());
+  }
+
+  interruptedExecutions(): DelegationRecord[] {
+    return (
+      this.#db
+        .prepare(
+          "SELECT * FROM local_delegations WHERE direction = 'INCOMING' AND status = 'RUNNING'",
+        )
+        .all() as SqlRow[]
+    ).map((row) => this.delegationFromRow(row));
+  }
+
+  diagnostic(
+    code: string,
+    delegationId: string | undefined,
+    detail: string,
+  ): void {
+    this.#db
+      .prepare(
+        "INSERT INTO diagnostics(code, delegation_id, detail, created_at) VALUES (?, ?, ?, ?)",
+      )
+      .run(
+        code,
+        delegationId ?? null,
+        redactError(detail),
+        new Date().toISOString(),
+      );
+  }
+}
