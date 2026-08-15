@@ -12,7 +12,7 @@ import {
 } from "node:fs/promises";
 import { createServer } from "node:net";
 import { tmpdir } from "node:os";
-import { dirname, join, resolve } from "node:path";
+import { basename, dirname, join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 import { zstdDecompressSync } from "node:zlib";
 import { chromium } from "playwright";
@@ -327,7 +327,7 @@ async function chooseWorkspace(page) {
   await pathInput.press("Enter");
   await pathInput.waitFor({ state: "hidden" });
   await page
-    .getByRole("button", { name: "Squad", exact: true })
+    .getByRole("button", { name: basename(root), exact: true })
     .last()
     .waitFor({ state: "visible" });
   await page.getByRole("button", { name: "Open", exact: true }).click();
