@@ -212,9 +212,13 @@ class DshHost {
   }
 }
 
-async function installProfile(home, withFixture) {
+async function installProfile(home, withFixture, cacheHome) {
   await mkdir(home, { recursive: true });
-  const env = { DSH_HOME: home, DSH_TELEMETRY_MODE: "DISABLED" };
+  const env = {
+    DSH_HOME: home,
+    DSH_TELEMETRY_MODE: "DISABLED",
+    XDG_CACHE_HOME: cacheHome,
+  };
   run(
     "pnpm",
     [
@@ -579,6 +583,7 @@ async function main() {
   );
 
   const temporaryRoot = await mkdtemp(join(tmpdir(), "dsh-squad-delegation-"));
+  const cleanPackageCache = join(temporaryRoot, "pnpm-cache");
   const aliceHome = join(temporaryRoot, "alice-home");
   const bobHome = join(temporaryRoot, "bob-home");
   const relayHome = join(temporaryRoot, "relay-home");
@@ -594,9 +599,9 @@ async function main() {
 
   try {
     log(`using isolated DSH homes under ${temporaryRoot}`);
-    await installProfile(aliceHome, true);
-    await installProfile(bobHome, true);
-    await installProfile(relayHome, false);
+    await installProfile(aliceHome, true, cleanPackageCache);
+    await installProfile(bobHome, true, cleanPackageCache);
+    await installProfile(relayHome, false, cleanPackageCache);
 
     log("bootstrapping stable Alice and Bob Ed25519 identities");
     const aliceIdentity = await bootstrapIdentity(alice);

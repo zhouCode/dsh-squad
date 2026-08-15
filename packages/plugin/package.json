@@ -50,7 +50,7 @@
     "README.zh-CN.md"
   ],
   "scripts": {
-    "build": "tsc -p tsconfig.build.json && node scripts/build-client.mjs",
+    "build": "tsc -p tsconfig.build.json && node scripts/build-runtime.mjs && node scripts/build-client.mjs",
     "typecheck": "tsc -p tsconfig.json --noEmit",
     "test": "vitest run",
     "pack:check": "pnpm pack --pack-destination ../../artifacts"
@@ -68,9 +68,6 @@
         "@deepseek-ai/dsh-client-ui-sidebar"
       ]
     }
-  },
-  "dependencies": {
-    "zod": "4.0.17"
   },
   "peerDependencies": {
     "@deepseek-ai/cordis": "4.0.1",
@@ -111,6 +108,7 @@
     "esbuild": "0.25.12",
     "react": "18.3.1",
     "typescript": "5.9.3",
-    "vitest": "3.2.4"
+    "vitest": "3.2.4",
+    "zod": "4.0.17"
   }
 }

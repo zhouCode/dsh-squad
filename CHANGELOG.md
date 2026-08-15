@@ -17,6 +17,7 @@ All notable changes to this project are documented in this file. The format is b
 - `Agent Inbox` / `智能体收件箱` WebUI for incoming, running, sent, completed, and settings views.
 - First-class Simplified Chinese and English localization following DSH's global browser-language preference.
 - Validated HTTPS attachment references with declared size and SHA-256 checks.
+- A self-contained plugin tarball bundling its `zod` runtime dependency for installation with `dsh plugin add --offline` on a clean machine.
 - SQLite-backed local state, idempotent at-least-once delivery, cancellation, retry, and interruption handling.
 - A real three-Node Chromium smoke test covering pairing, offline delivery, restarts, HumanTodo resume, privacy boundaries, and reversible disablement.
 
