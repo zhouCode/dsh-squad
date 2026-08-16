@@ -13,6 +13,37 @@ const attachmentItem = {
   },
 };
 
+const teamPlanItem = {
+  type: "object" as const,
+  additionalProperties: false,
+  properties: {
+    to: {
+      type: "string" as const,
+      required: true as const,
+      description: "Paired peer display name or stable nodeId.",
+    },
+    objective: {
+      type: "string" as const,
+      required: true as const,
+      description: "The result this team member should achieve.",
+    },
+    context: {
+      type: "string" as const,
+      description: "Optional task-specific background.",
+    },
+    acceptanceCriteria: {
+      type: "array" as const,
+      items: { type: "string" as const },
+      description: "Observable completion criteria.",
+    },
+    attachmentRefs: {
+      type: "array" as const,
+      items: attachmentItem,
+      description: "HTTPS references with expected SHA-256 and byte size.",
+    },
+  },
+};
+
 export function registerSquadTools(
   ctx: Context,
   squad: SquadService,
@@ -150,5 +181,101 @@ export function registerSquadTools(
     }),
   );
 
-  return [delegate, status];
+  const peers = ctx.tools.register(
+    defineTool({
+      name: "list_squad_peers",
+      description:
+        "列出本节点已配对的 Squad 成员及其委派可用状态。List locally paired Squad members and whether delegation is currently allowed.",
+      parameters: {},
+      output: {
+        schema: { type: "json" },
+        render: (_args, value) => [
+          { type: "text", text: JSON.stringify(value) },
+        ],
+      },
+      async execute() {
+        const records = await squad.listPeers();
+        return {
+          peers: records.map((peer) => ({
+            nodeId: peer.nodeId,
+            displayName: peer.displayName,
+            enabled: peer.enabled,
+            canDelegate: peer.policy.canDelegate,
+            autoExecute: peer.policy.autoExecute,
+          })),
+        };
+      },
+    }),
+  );
+
+  const proposePlan = ctx.tools.register(
+    defineTool({
+      name: "propose_team_plan",
+      description:
+        "创建本地团队分派草案，供负责人在 Squad 界面审核；此工具绝不会直接发送任务。Create a local team delegation draft for owner review; this tool never dispatches tasks.",
+      parameters: {
+        title: {
+          type: "string",
+          required: true,
+          description: "Short plan title.",
+        },
+        sourceSummary: {
+          type: "string",
+          description:
+            "Optional meeting summary, request summary, or planning rationale.",
+        },
+        items: {
+          type: "array",
+          required: true,
+          items: teamPlanItem,
+          description: "One proposed delegation per team member or objective.",
+        },
+      },
+      output: {
+        schema: {
+          type: "object",
+          additionalProperties: false,
+          properties: {
+            planId: { type: "string", required: true },
+            status: { type: "string", required: true },
+            itemCount: { type: "integer", required: true },
+            requiresApproval: { type: "boolean", required: true },
+          },
+        },
+        render: (_args, value) => [
+          {
+            type: "text",
+            text: `团队分派计划 / team plan ${value.planId}: ${value.status} (${value.itemCount} items; approval required)`,
+          },
+        ],
+      },
+      async execute(args) {
+        const plan = await squad.createTeamPlan({
+          title: args.title,
+          ...(args.sourceSummary === undefined
+            ? {}
+            : { sourceSummary: args.sourceSummary }),
+          items: args.items.map((item) => ({
+            to: item.to,
+            objective: item.objective,
+            ...(item.context === undefined ? {} : { context: item.context }),
+            ...(item.acceptanceCriteria === undefined
+              ? {}
+              : { acceptanceCriteria: item.acceptanceCriteria }),
+            ...(item.attachmentRefs === undefined
+              ? {}
+              : { attachmentRefs: item.attachmentRefs }),
+          })),
+        });
+        return {
+          planId: plan.id,
+          status: plan.status,
+          itemCount: plan.items.length,
+          requiresApproval: true,
+        };
+      },
+    }),
+  );
+
+  return [delegate, status, peers, proposePlan];
 }

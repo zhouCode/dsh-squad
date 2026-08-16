@@ -8,7 +8,7 @@ DSH Squad turns personal Agents running on different computers, networks, and lo
 
 ## Highlights
 
-- **Individually owned, collectively useful**: every Agent remains independently operated and authorized by its owner. Squad creates neither a shared super-Agent nor a path from remote task text to direct Shell, Skill, MCP, or credential access.
+- **Locally coordinated, individually controlled**: Team Coordinator can turn a meeting or team objective into a multi-person delegation draft, but it is not a shared super-Agent holding everyone's authority. The coordinator's owner must approve dispatch, and every recipient still decides execution through their own policy and approval boundary.
 - **Cross-location without direct node connectivity**: personal nodes only need an outbound connection to an always-on Relay, so they can sit behind NAT, home networks, corporate networks, or national borders without public IP addresses or inbound ports.
 - **Offline members do not lose work**: the Relay provides an authenticated, durable mailbox. A recipient resumes pulling after reconnecting, and duplicate delivery cannot create duplicate Sessions or executions.
 - **Trust is configured per person**: every Peer has its own pinned public key, enabled state, delegation permissions, concurrency limits, and `NEVER`, `SAFE`, or `TRUSTED` automatic-execution policy.
@@ -33,6 +33,18 @@ Alice Agent --signed Delegation--> durable Relay mailbox --> Bob's DSH
 - The sender sees only the status, summary, and Outcome that the recipient explicitly publishes.
 
 Use native DSH Sub-agents for parallel decomposition within one person's DSH. Use Squad when work crosses into a Personal Agent owned by another person.
+
+## Team Coordinator: review before dispatch
+
+The local Agent can inspect currently paired members and turn meeting notes or a team objective into a persistent delegation-plan draft. Draft creation performs no network request or remote execution. The owner reviews every recipient, objective, context, acceptance criterion, and attachment under `Agent Inbox → Plans`, then selects `Approve and dispatch`.
+
+A typical prompt is:
+
+> Use `list_squad_peers` to inspect available members, then turn these meeting decisions into a team delegation plan. Create a draft only; do not delegate directly: …
+
+The Agent calls `propose_team_plan`. Only owner approval creates one signed Delegation from the existing protocol per plan item. Every item receives its final Delegation ID when the draft is created, so a lost approval response, process restart, or partial-failure retry cannot create duplicate assignments. Sender-side approval is not recipient authorization: the receiver may still reject, require local acceptance, or execute under its own `SAFE` / `TRUSTED` policy.
+
+The same local Plan API is available for future connectors such as Feishu/Lark to create drafts or read status projections. The current Unreleased version does not include a Feishu/Lark connector and never executes work merely because an external board was edited.
 
 ## Typical deployment: a cross-location team
 
@@ -128,12 +140,14 @@ The Relay API is registered under `/squad/v1` on the Host WebServer. It validate
 
 ## Agent and WebUI
 
-The plugin registers two native tools with the Personal Agent:
+The plugin registers four native tools with the Personal Agent:
 
 - `delegate_to_agent`: create a delegation by Peer display name or stable `nodeId`;
-- `get_delegation_status`: read the public projection visible to the local Node.
+- `get_delegation_status`: read the public projection visible to the local Node;
+- `list_squad_peers`: list locally paired members and current delegation availability;
+- `propose_team_plan`: create a local draft for owner review without dispatching it.
 
-`Agent Inbox` provides `Waiting for me`, `Running`, `Sent`, `Completed`, and `Settings` views. A recipient can select one or more Todos, submit text or SHA-256/size-validated attachment references, continue after restart, and open the associated native DSH Session.
+`Agent Inbox` provides `Plans`, `Waiting for me`, `Running`, `Sent`, `Completed`, and `Settings` views. An owner can review, approve, retry, or cancel a plan's remaining items. A recipient can select one or more Todos, submit text or SHA-256/size-validated attachment references, continue after restart, and open the associated native DSH Session.
 
 ## Languages
 
@@ -178,7 +192,7 @@ pnpm test
 pnpm smoke:delegation
 ```
 
-`smoke:delegation` builds a real tarball, installs it into isolated Alice, Bob, and Relay DSH homes, and uses real Chromium to verify WebUI pairing, delivery while Bob is offline, Relay and Node restarts, a recipient-only Skill, partial HumanTodo completion, same-Session resume, Outcome privacy boundaries, and reversible plugin disablement.
+`smoke:delegation` builds a real tarball, installs it into isolated Alice, Bob, and Relay DSH homes, and uses real Chromium to verify WebUI pairing, Coordinator draft approval and idempotent dispatch, delivery while Bob is offline, Relay and Node restarts, a recipient-only Skill, partial HumanTodo completion, same-Session resume, Outcome privacy boundaries, and reversible plugin disablement.
 
 ## License
 

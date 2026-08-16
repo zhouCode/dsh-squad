@@ -8,7 +8,7 @@ DSH Squad 把运行在不同电脑、网络和地点上的个人 Agent，组成�
 
 ## 核心亮点
 
-- **属于个人，协作于团队**：每个 Agent 仍由其所有者独立运行和授权，Squad 不创建共享超级 Agent，也不把远程任务转换成直接的 Shell、Skill、MCP 或凭据访问。
+- **本地协调，权力仍属于个人**：Team Coordinator 可以把会议或团队目标整理成多人分派草案，但它不是持有全员权限的共享超级 Agent；负责人确认后才会发送，每位接收方仍由自己的策略和审批边界决定是否执行。
 - **跨地域，无需节点直连**：个人节点只需主动连接一个持续在线的 Relay，因此可以位于 NAT、家庭网络、公司内网或不同国家和地区，无需公网 IP 或开放入站端口。
 - **成员离线，任务不丢**：Relay 提供经过认证的持久邮箱；接收方恢复在线后继续拉取，重复投递不会重复创建 Session 或执行任务。
 - **信任可以逐人配置**：每个 Peer 都有独立的公钥固定、启停状态、委派权限、并发限制和 `NEVER`、`SAFE`、`TRUSTED` 自动执行策略。
@@ -33,6 +33,18 @@ Alice Agent --签名 Delegation--> Relay 持久邮箱 --> Bob 的 DSH
 - 发送方只能看到接收方明确发布的状态、摘要和 Outcome。
 
 同一真人、同一 DSH 内的并行拆解继续使用 DSH 原生 Sub-agent；跨到另一个真人拥有的 Personal Agent 时才使用 Squad。
+
+## Team Coordinator：先审阅，再分派
+
+本地 Agent 可以读取当前已配对成员，依据会议纪要或团队目标生成一份持久化分派草案。生成草案不会产生任何网络请求或远程执行；负责人需要在`智能体收件箱 → 分派计划`中逐项检查接收人、目标、上下文、验收条件和附件，再点击`确认并分派`。
+
+一个典型提示词是：
+
+> 先使用 `list_squad_peers` 查看可用成员，再把下面的会议结论拆成一份团队分派计划。只创建草案，不要直接委派：……
+
+Agent 会调用 `propose_team_plan`。负责人确认后，Squad 才为每个计划项创建现有协议中的签名 Delegation。每个计划项预先固定唯一 Delegation ID，因此审批响应丢失、进程重启或部分失败后的重试都不会重复派单。发送方的本地确认不是接收方授权：接收方仍可拒绝、要求本人接受，或按自己的 `SAFE` / `TRUSTED` 策略执行。
+
+同一套本地 Plan API 可供后续飞书等 Connector 写入草案或读取状态投影；当前 Unreleased 版本尚不包含飞书 Connector，也不会因外部看板编辑而自动执行任务。
 
 ## 典型部署：异地组成团队
 
@@ -127,12 +139,14 @@ Relay API 注册在宿主 WebServer 的 `/squad/v1` 下；它验证 enrollment�
 
 ## Agent 与 WebUI
 
-插件向 Personal Agent 注册两个原生工具：
+插件向 Personal Agent 注册四个原生工具：
 
 - `delegate_to_agent`：按 Peer 名称或稳定 `nodeId` 创建委派；
-- `get_delegation_status`：读取本 Node 可见的公开状态投影。
+- `get_delegation_status`：读取本 Node 可见的公开状态投影；
+- `list_squad_peers`：列出本地已配对成员及其当前委派可用状态；
+- `propose_team_plan`：创建等待负责人审阅的本地分派草案，绝不直接发送。
 
-`智能体收件箱` 提供`待我处理`、`运行中`、`已发送`、`已完成`和`设置`；英文界面对应 `Agent Inbox`、`Waiting for me`、`Running`、`Sent`、`Completed` 和 `Settings`。接收方可选择一个或多个 Todo，提交文本或经 SHA-256/大小验证的附件引用，重启后继续处理，并打开对应的原生 DSH Session。
+`智能体收件箱` 提供`分派计划`、`待我处理`、`运行中`、`已发送`、`已完成`和`设置`；英文界面对应 `Plans`、`Waiting for me`、`Running`、`Sent`、`Completed` 和 `Settings`。负责人可以审阅、确认、重试或取消计划的剩余项；接收方可以选择一个或多个 Todo，提交文本或经 SHA-256/大小验证的附件引用，重启后继续处理，并打开对应的原生 DSH Session。
 
 ## 语言
 
@@ -177,7 +191,7 @@ pnpm test
 pnpm smoke:delegation
 ```
 
-`smoke:delegation` 会构建真实 tarball，安装到 Alice、Bob、Relay 三套隔离 DSH Home，并用真实 Chromium 验证：WebUI 配对、Bob 离线投递、Relay/Node 重启、接收端专属 Skill、HumanTodo 部分完成、相同 Session 恢复、Outcome 隐私边界和插件可逆禁用。
+`smoke:delegation` 会构建真实 tarball，安装到 Alice、Bob、Relay 三套隔离 DSH Home，并用真实 Chromium 验证：WebUI 配对、Coordinator 草案审批与幂等分派、Bob 离线投递、Relay/Node 重启、接收端专属 Skill、HumanTodo 部分完成、相同 Session 恢复、Outcome 隐私边界和插件可逆禁用。
 
 ## 许可证
 

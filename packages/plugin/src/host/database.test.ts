@@ -2,6 +2,7 @@ import { mkdtempSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { randomUUID } from "node:crypto";
+import { DatabaseSync } from "node:sqlite";
 import { describe, expect, it } from "vitest";
 import { envelopeDigest } from "../shared/canonical.ts";
 import { NodeIdentity } from "./identity.ts";
@@ -55,10 +56,26 @@ describe("SquadDatabase", () => {
     expect(db.listDelegations()).toHaveLength(1);
     db.close();
 
+    const versionTwo = new DatabaseSync(dbPath);
+    versionTwo.exec(`
+      DROP TABLE team_plan_items;
+      DROP TABLE team_plans;
+      UPDATE schema_meta SET version = 2 WHERE singleton = 1;
+    `);
+    versionTwo.close();
+
     const reopened = new SquadDatabase(dbPath);
     expect(reopened.identityNodeId()).toBe(identity.nodeId);
     expect(reopened.listDelegations()).toHaveLength(1);
+    expect(reopened.listTeamPlans()).toEqual([]);
     reopened.close();
+
+    const migrated = new DatabaseSync(dbPath);
+    const schema = migrated
+      .prepare("SELECT version FROM schema_meta WHERE singleton = 1")
+      .get();
+    expect(schema?.version).toBe(3);
+    migrated.close();
   });
 
   it("commits selected HumanTodos and resumes only after every item is done", () => {
@@ -230,5 +247,78 @@ describe("SquadDatabase", () => {
     });
     expect(db.getDelegation(delegationId)?.status).toBe("COMPLETED");
     db.close();
+  });
+
+  it("persists team plans and resumes partial dispatch with stable delegation IDs", () => {
+    const root = mkdtempSync(join(tmpdir(), "dsh-squad-plan-"));
+    const dbPath = join(root, "node.sqlite");
+    const bob = NodeIdentity.load(join(root, "bob.json"));
+    const carol = NodeIdentity.load(join(root, "carol.json"));
+    const db = new SquadDatabase(dbPath);
+    const policy = {
+      canMessage: false,
+      canDelegate: true,
+      autoExecute: "NEVER" as const,
+      maxConcurrent: 1,
+      maxDelegationDepth: 1,
+      maxRuntimeMinutes: 30,
+    };
+    db.upsertPeer({
+      nodeId: bob.nodeId,
+      displayName: "Bob",
+      publicKey: bob.publicKey,
+      enabled: true,
+      policy,
+    });
+    db.upsertPeer({
+      nodeId: carol.nodeId,
+      displayName: "Carol",
+      publicKey: carol.publicKey,
+      enabled: true,
+      policy,
+    });
+    const peers = [db.findPeer("Bob"), db.findPeer("Carol")];
+    expect(peers.every((peer) => peer !== undefined)).toBe(true);
+    const plan = db.createTeamPlan(
+      {
+        title: "Release follow-up",
+        sourceSummary: "Two owners, two deliverables.",
+        items: [
+          { to: "Bob", objective: "Draft release notes" },
+          { to: "Carol", objective: "Verify the installation guide" },
+        ],
+      },
+      peers.filter((peer) => peer !== undefined),
+    );
+    expect(plan.status).toBe("DRAFT");
+    expect(plan.items).toHaveLength(2);
+
+    db.beginTeamPlanDispatch(plan.id);
+    const first = plan.items[0];
+    const second = plan.items[1];
+    expect(first).toBeDefined();
+    expect(second).toBeDefined();
+    db.markTeamPlanItemDispatched(plan.id, first!.id, first!.id);
+    db.markTeamPlanItemFailed(
+      plan.id,
+      second!.id,
+      new Error("token=hidden temporary failure"),
+    );
+    const partial = db.finishTeamPlanDispatch(plan.id);
+    expect(partial.status).toBe("PARTIAL");
+    expect(partial.items[0]?.delegationId).toBe(first!.id);
+    expect(partial.items[1]?.error).toContain("token=[REDACTED]");
+    db.close();
+
+    const reopened = new SquadDatabase(dbPath);
+    const resumed = reopened.beginTeamPlanDispatch(plan.id);
+    expect(resumed.status).toBe("DISPATCHING");
+    reopened.markTeamPlanItemDispatched(plan.id, second!.id, second!.id);
+    const finished = reopened.finishTeamPlanDispatch(plan.id);
+    expect(finished.status).toBe("DISPATCHED");
+    expect(finished.items.every((item) => item.status === "DISPATCHED")).toBe(
+      true,
+    );
+    reopened.close();
   });
 });

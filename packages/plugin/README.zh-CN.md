@@ -12,10 +12,11 @@ DSH Squad 把运行在不同电脑、网络和地点上的个人 Agent，组成�
 - 团队成员的电脑暂时离线时，由持久邮箱保存待投递任务。
 - 使用 Ed25519 节点身份、Peer 公钥固定和策略化委派。
 - 每个 Peer 可分别配置 `NEVER`、`SAFE` 和 `TRUSTED` 自动执行模式。
+- 本地 Team Coordinator 草案、负责人明确审阅和幂等批量分派。
 - 原生复用接收方的 DSH Agent、Session、Skill、工具、Permission/Approval 和 WebUI。
 - 私有 Session ID、HumanTodo 详情、人工回复、凭据和工作区路径始终保留在本地。
 
-这个包包含一个 Cordis Host 插件、两个原生 Agent 工具、一个 DSH Web Client Module、Relay Client 和可选的 Relay Server。它不会创建第二套 Runtime 或独立 SPA，也不强制使用 Docker。
+这个包包含一个 Cordis Host 插件、四个原生 Agent 工具、一个 DSH Web Client Module、Relay Client 和可选的 Relay Server。它不会创建第二套 Runtime 或独立 SPA，也不强制使用 Docker。
 
 ## 安装
 
@@ -35,7 +36,7 @@ dsh web
       invitation: replace-with-one-time-invitation
 ```
 
-原生 WebUI 提供`智能体收件箱` / `Agent Inbox`，用于管理 Peer 策略、收发箱状态、HumanTodo 输入和原生 DSH Session 链接。Agent 会获得 `delegate_to_agent` 和 `get_delegation_status` 两个工具。
+原生 WebUI 提供`智能体收件箱` / `Agent Inbox`，用于审阅分派计划、管理 Peer 策略、收发箱状态、HumanTodo 输入和原生 DSH Session 链接。Agent 会获得 `delegate_to_agent`、`get_delegation_status`、`list_squad_peers` 和 `propose_team_plan` 四个工具。计划草案会一直保留在本地，直到负责人在`分派计划` / `Plans`中确认；接收方自己的策略和审批仍然独立生效。
 
 ## 语言
 

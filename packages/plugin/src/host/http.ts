@@ -2,6 +2,7 @@ import type { IncomingMessage, ServerResponse } from "node:http";
 import {
   peerPolicySchema,
   type CreateDelegationInput,
+  type CreateTeamPlanInput,
 } from "../shared/contracts.ts";
 import type { SquadService } from "./service.ts";
 
@@ -80,6 +81,12 @@ export function createHttpHandler(squad: SquadService) {
         reply(res, 201, delegation);
         return;
       }
+      if (req.method === "POST" && url.pathname === "/squad/v1/local/plans") {
+        const body = await readJson(req);
+        const plan = await squad.createTeamPlan(body as CreateTeamPlanInput);
+        reply(res, 201, plan);
+        return;
+      }
       if (req.method === "POST" && url.pathname === "/squad/v1/local/peers") {
         const body = (await readJson(req, 32 * 1024)) as Record<
           string,
@@ -133,6 +140,22 @@ export function createHttpHandler(squad: SquadService) {
           );
         }
         reply(res, 200, { ok: true });
+        return;
+      }
+      const planAction =
+        /^\/squad\/v1\/local\/plans\/([0-9a-f-]{36})\/(approve|retry|cancel)$/u.exec(
+          url.pathname,
+        );
+      if (
+        req.method === "POST" &&
+        planAction?.[1] !== undefined &&
+        planAction[2] !== undefined
+      ) {
+        const plan =
+          planAction[2] === "cancel"
+            ? await squad.cancelTeamPlan(planAction[1])
+            : await squad.approveTeamPlan(planAction[1]);
+        reply(res, 200, plan);
         return;
       }
       if (

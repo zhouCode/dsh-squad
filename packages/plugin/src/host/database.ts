@@ -1,14 +1,17 @@
+import { randomUUID } from "node:crypto";
 import { mkdirSync } from "node:fs";
 import { dirname } from "node:path";
 import { DatabaseSync } from "node:sqlite";
 import {
   attachmentRefSchema,
+  createTeamPlanInputSchema,
   delegationRequestSchema,
   envelopeSchema,
   humanTodoSchema,
   peerPolicySchema,
   resultOutputSchema,
   type AttachmentRef,
+  type CreateTeamPlanInput,
   type DelegationRequest,
   type DelegationResult,
   type DelegationUpdate,
@@ -17,6 +20,10 @@ import {
   type HumanInput,
   type PeerPolicy,
   type ResultOutput,
+  type TeamPlan,
+  type TeamPlanItem,
+  type TeamPlanItemStatus,
+  type TeamPlanStatus,
 } from "../shared/contracts.ts";
 import {
   assertTransition,
@@ -218,11 +225,48 @@ export class SquadDatabase {
         detail TEXT NOT NULL,
         created_at TEXT NOT NULL
       );
+
+      CREATE TABLE IF NOT EXISTS team_plans (
+        id TEXT PRIMARY KEY,
+        title TEXT NOT NULL,
+        source_summary TEXT,
+        status TEXT NOT NULL CHECK (status IN ('DRAFT', 'DISPATCHING', 'DISPATCHED', 'PARTIAL', 'CANCELED')),
+        revision INTEGER NOT NULL,
+        approved_at TEXT,
+        canceled_at TEXT,
+        created_at TEXT NOT NULL,
+        updated_at TEXT NOT NULL
+      );
+      CREATE INDEX IF NOT EXISTS team_plans_status_idx
+        ON team_plans(status, updated_at DESC);
+
+      CREATE TABLE IF NOT EXISTS team_plan_items (
+        id TEXT PRIMARY KEY,
+        plan_id TEXT NOT NULL,
+        position INTEGER NOT NULL CHECK (position >= 0),
+        peer_node_id TEXT NOT NULL,
+        peer_display_name TEXT NOT NULL,
+        objective TEXT NOT NULL,
+        context TEXT,
+        acceptance_criteria_json TEXT NOT NULL,
+        attachment_refs_json TEXT NOT NULL,
+        status TEXT NOT NULL CHECK (status IN ('DRAFT', 'DISPATCHED', 'FAILED', 'CANCELED')),
+        delegation_id TEXT UNIQUE,
+        error TEXT,
+        created_at TEXT NOT NULL,
+        updated_at TEXT NOT NULL,
+        UNIQUE(plan_id, position),
+        FOREIGN KEY(plan_id) REFERENCES team_plans(id) ON DELETE CASCADE,
+        FOREIGN KEY(peer_node_id) REFERENCES peer_policies(node_id)
+      );
+      CREATE INDEX IF NOT EXISTS team_plan_items_plan_idx
+        ON team_plan_items(plan_id, position);
     `);
     const version = this.#db
       .prepare("SELECT version FROM schema_meta WHERE singleton = 1")
       .get() as SqlRow | undefined;
-    if (version?.version === 1) {
+    let currentVersion = Number(version?.version);
+    if (currentVersion === 1) {
       const todoColumns = this.#db
         .prepare("PRAGMA table_info(human_todos)")
         .all() as SqlRow[];
@@ -245,7 +289,13 @@ export class SquadDatabase {
         );
       }
       this.#db.exec("UPDATE schema_meta SET version = 2 WHERE singleton = 1");
-    } else if (version?.version !== 2) {
+      currentVersion = 2;
+    }
+    if (currentVersion === 2) {
+      this.#db.exec("UPDATE schema_meta SET version = 3 WHERE singleton = 1");
+      currentVersion = 3;
+    }
+    if (currentVersion !== 3) {
       throw new Error(
         `unsupported Squad database version ${String(version?.version)}`,
       );
@@ -393,6 +443,287 @@ export class SquadDatabase {
       throw new Error(`peer name ${selector} is ambiguous; use a nodeId`);
     }
     return rows[0] === undefined ? undefined : this.peerFromRow(rows[0]);
+  }
+
+  private teamPlanFromRow(row: SqlRow): TeamPlan {
+    const items = (
+      this.#db
+        .prepare(
+          "SELECT * FROM team_plan_items WHERE plan_id = ? ORDER BY position, id",
+        )
+        .all(String(row.id)) as SqlRow[]
+    ).map((item): TeamPlanItem => {
+      const context = optionalString(item.context);
+      const delegationId = optionalString(item.delegation_id);
+      const error = optionalString(item.error);
+      return {
+        id: String(item.id),
+        planId: String(item.plan_id),
+        position: Number(item.position),
+        peerNodeId: String(item.peer_node_id),
+        peerDisplayName: String(item.peer_display_name),
+        objective: String(item.objective),
+        ...(context === undefined ? {} : { context }),
+        acceptanceCriteria: parseJson(item.acceptance_criteria_json, (input) =>
+          delegationRequestSchema.shape.acceptanceCriteria.parse(input),
+        ),
+        attachmentRefs: parseJson(item.attachment_refs_json, (input) =>
+          attachmentRefSchema.array().parse(input),
+        ),
+        status: item.status as TeamPlanItemStatus,
+        ...(delegationId === undefined ? {} : { delegationId }),
+        ...(error === undefined ? {} : { error }),
+        createdAt: String(item.created_at),
+        updatedAt: String(item.updated_at),
+      };
+    });
+    const sourceSummary = optionalString(row.source_summary);
+    const approvedAt = optionalString(row.approved_at);
+    const canceledAt = optionalString(row.canceled_at);
+    return {
+      id: String(row.id),
+      title: String(row.title),
+      ...(sourceSummary === undefined ? {} : { sourceSummary }),
+      status: row.status as TeamPlanStatus,
+      revision: Number(row.revision),
+      ...(approvedAt === undefined ? {} : { approvedAt }),
+      ...(canceledAt === undefined ? {} : { canceledAt }),
+      createdAt: String(row.created_at),
+      updatedAt: String(row.updated_at),
+      items,
+    };
+  }
+
+  createTeamPlan(
+    candidate: CreateTeamPlanInput,
+    resolvedPeers: PeerRecord[],
+  ): TeamPlan {
+    const input = createTeamPlanInputSchema.parse(candidate);
+    if (resolvedPeers.length !== input.items.length) {
+      throw new Error("every team plan item must have one resolved peer");
+    }
+    const planId = randomUUID();
+    const itemIds = input.items.map(() => randomUUID());
+    const now = new Date().toISOString();
+    return this.transaction(() => {
+      this.#db
+        .prepare(
+          `
+          INSERT INTO team_plans(
+            id, title, source_summary, status, revision, created_at, updated_at
+          ) VALUES (?, ?, ?, 'DRAFT', 1, ?, ?)
+        `,
+        )
+        .run(planId, input.title, input.sourceSummary ?? null, now, now);
+      const insertItem = this.#db.prepare(`
+        INSERT INTO team_plan_items(
+          id, plan_id, position, peer_node_id, peer_display_name, objective,
+          context, acceptance_criteria_json, attachment_refs_json, status,
+          created_at, updated_at
+        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, 'DRAFT', ?, ?)
+      `);
+      for (const [position, item] of input.items.entries()) {
+        const peer = resolvedPeers[position];
+        const itemId = itemIds[position];
+        if (peer === undefined) {
+          throw new Error(`team plan item ${position} has no resolved peer`);
+        }
+        if (itemId === undefined) {
+          throw new Error(`team plan item ${position} has no stable ID`);
+        }
+        insertItem.run(
+          itemId,
+          planId,
+          position,
+          peer.nodeId,
+          peer.displayName,
+          item.objective,
+          item.context ?? null,
+          JSON.stringify(item.acceptanceCriteria ?? []),
+          JSON.stringify(item.attachmentRefs ?? []),
+          now,
+          now,
+        );
+      }
+      const plan = this.getTeamPlan(planId);
+      if (plan === undefined) throw new Error("team plan was not persisted");
+      return plan;
+    });
+  }
+
+  getTeamPlan(id: string): TeamPlan | undefined {
+    const row = this.#db
+      .prepare("SELECT * FROM team_plans WHERE id = ?")
+      .get(id) as SqlRow | undefined;
+    return row === undefined ? undefined : this.teamPlanFromRow(row);
+  }
+
+  listTeamPlans(): TeamPlan[] {
+    return (
+      this.#db
+        .prepare("SELECT * FROM team_plans ORDER BY updated_at DESC, id")
+        .all() as SqlRow[]
+    ).map((row) => this.teamPlanFromRow(row));
+  }
+
+  beginTeamPlanDispatch(id: string): TeamPlan {
+    return this.transaction(() => {
+      const current = this.getTeamPlan(id);
+      if (current === undefined) throw new Error(`unknown team plan ${id}`);
+      if (current.status === "DISPATCHING") return current;
+      if (
+        !(["DRAFT", "PARTIAL"] as TeamPlanStatus[]).includes(current.status)
+      ) {
+        throw new Error(
+          `team plan ${id} cannot be dispatched from ${current.status}`,
+        );
+      }
+      const now = new Date().toISOString();
+      this.#db
+        .prepare(
+          `
+          UPDATE team_plans
+          SET status = 'DISPATCHING', revision = revision + 1,
+              approved_at = coalesce(approved_at, ?), updated_at = ?
+          WHERE id = ?
+        `,
+        )
+        .run(now, now, id);
+      const updated = this.getTeamPlan(id);
+      if (updated === undefined) throw new Error(`team plan ${id} disappeared`);
+      return updated;
+    });
+  }
+
+  markTeamPlanItemDispatched(
+    planId: string,
+    itemId: string,
+    delegationId: string,
+  ): TeamPlan {
+    if (itemId !== delegationId) {
+      throw new Error("team plan item and delegation IDs must match");
+    }
+    return this.transaction(() => {
+      const plan = this.getTeamPlan(planId);
+      if (plan === undefined) throw new Error(`unknown team plan ${planId}`);
+      if (plan.status !== "DISPATCHING") {
+        throw new Error(`team plan ${planId} is not dispatching`);
+      }
+      const item = plan.items.find((candidate) => candidate.id === itemId);
+      if (item === undefined)
+        throw new Error(`unknown team plan item ${itemId}`);
+      if (item.status === "DISPATCHED") {
+        if (item.delegationId !== delegationId) {
+          throw new Error(
+            `team plan item ${itemId} has a conflicting delegation`,
+          );
+        }
+        return plan;
+      }
+      if (item.status === "CANCELED") {
+        throw new Error(`team plan item ${itemId} is canceled`);
+      }
+      const now = new Date().toISOString();
+      this.#db
+        .prepare(
+          "UPDATE team_plan_items SET status = 'DISPATCHED', delegation_id = ?, error = NULL, updated_at = ? WHERE id = ? AND plan_id = ?",
+        )
+        .run(delegationId, now, itemId, planId);
+      this.#db
+        .prepare(
+          "UPDATE team_plans SET revision = revision + 1, updated_at = ? WHERE id = ?",
+        )
+        .run(now, planId);
+      const updated = this.getTeamPlan(planId);
+      if (updated === undefined)
+        throw new Error(`team plan ${planId} disappeared`);
+      return updated;
+    });
+  }
+
+  markTeamPlanItemFailed(
+    planId: string,
+    itemId: string,
+    error: unknown,
+  ): TeamPlan {
+    return this.transaction(() => {
+      const plan = this.getTeamPlan(planId);
+      if (plan === undefined) throw new Error(`unknown team plan ${planId}`);
+      if (plan.status !== "DISPATCHING") {
+        throw new Error(`team plan ${planId} is not dispatching`);
+      }
+      const item = plan.items.find((candidate) => candidate.id === itemId);
+      if (item === undefined)
+        throw new Error(`unknown team plan item ${itemId}`);
+      if (item.status === "DISPATCHED") return plan;
+      if (item.status === "CANCELED") {
+        throw new Error(`team plan item ${itemId} is canceled`);
+      }
+      const now = new Date().toISOString();
+      this.#db
+        .prepare(
+          "UPDATE team_plan_items SET status = 'FAILED', delegation_id = NULL, error = ?, updated_at = ? WHERE id = ? AND plan_id = ?",
+        )
+        .run(redactError(error), now, itemId, planId);
+      this.#db
+        .prepare(
+          "UPDATE team_plans SET revision = revision + 1, updated_at = ? WHERE id = ?",
+        )
+        .run(now, planId);
+      const updated = this.getTeamPlan(planId);
+      if (updated === undefined)
+        throw new Error(`team plan ${planId} disappeared`);
+      return updated;
+    });
+  }
+
+  finishTeamPlanDispatch(id: string): TeamPlan {
+    return this.transaction(() => {
+      const plan = this.getTeamPlan(id);
+      if (plan === undefined) throw new Error(`unknown team plan ${id}`);
+      if (plan.status !== "DISPATCHING") {
+        throw new Error(`team plan ${id} is not dispatching`);
+      }
+      const status: TeamPlanStatus = plan.items.every(
+        (item) => item.status === "DISPATCHED",
+      )
+        ? "DISPATCHED"
+        : "PARTIAL";
+      const now = new Date().toISOString();
+      this.#db
+        .prepare(
+          "UPDATE team_plans SET status = ?, revision = revision + 1, updated_at = ? WHERE id = ?",
+        )
+        .run(status, now, id);
+      const updated = this.getTeamPlan(id);
+      if (updated === undefined) throw new Error(`team plan ${id} disappeared`);
+      return updated;
+    });
+  }
+
+  cancelTeamPlan(id: string): TeamPlan {
+    return this.transaction(() => {
+      const plan = this.getTeamPlan(id);
+      if (plan === undefined) throw new Error(`unknown team plan ${id}`);
+      if (plan.status === "CANCELED") return plan;
+      if (plan.status === "DISPATCHED") {
+        throw new Error(`team plan ${id} is already fully dispatched`);
+      }
+      const now = new Date().toISOString();
+      this.#db
+        .prepare(
+          "UPDATE team_plan_items SET status = 'CANCELED', error = NULL, updated_at = ? WHERE plan_id = ? AND status IN ('DRAFT', 'FAILED')",
+        )
+        .run(now, id);
+      this.#db
+        .prepare(
+          "UPDATE team_plans SET status = 'CANCELED', revision = revision + 1, canceled_at = ?, updated_at = ? WHERE id = ?",
+        )
+        .run(now, now, id);
+      const updated = this.getTeamPlan(id);
+      if (updated === undefined) throw new Error(`team plan ${id} disappeared`);
+      return updated;
+    });
   }
 
   createOutgoing(

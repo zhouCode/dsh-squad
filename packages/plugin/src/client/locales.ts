@@ -1,4 +1,8 @@
 import type { TranslateNS } from "@deepseek-ai/dsh-client-ui-slots";
+import type {
+  TeamPlanItemStatus,
+  TeamPlanStatus,
+} from "../shared/contracts.ts";
 import type { DelegationStatus } from "../shared/state.ts";
 
 export const SQUAD_LOCALE_NS = "dsh-squad";
@@ -7,6 +11,7 @@ export const zh = {
   "html.lang": "zh-CN",
   "inbox.title": "智能体收件箱",
   "inbox.close": "关闭智能体收件箱",
+  "tab.plans": "分派计划",
   "tab.waiting": "待我处理",
   "tab.running": "运行中",
   "tab.sent": "已发送",
@@ -23,6 +28,9 @@ export const zh = {
   "field.response": "给接收方智能体的回复",
   "field.attachmentRefs": "附件引用（可选 JSON 数组）",
   "field.outputs": "输出",
+  "field.sourceSummary": "来源摘要",
+  "field.planItems": "计划项",
+  "field.delegationId": "委派 ID",
   "action.completeSelected": "完成所选项",
   "action.reject": "拒绝",
   "action.acceptAndRun": "接受并运行",
@@ -30,6 +38,13 @@ export const zh = {
   "action.requestCancel": "请求取消",
   "action.openSession": "打开原生 DSH 会话",
   "action.savePeer": "保存对等方",
+  "action.approvePlan": "确认并分派",
+  "action.retryPlan": "重试未发送项",
+  "action.cancelPlan": "取消剩余计划项",
+  "plan.approvalHint":
+    "确认后，每个计划项会通过现有签名委派发送；接收方仍按自己的 Peer 策略决定是否执行。",
+  "plan.itemCount": "共 {count} 个计划项",
+  "plan.dispatchedCount": "已创建 {sent}/{total} 个委派",
   "settings.nodeIdentity": "节点身份",
   "settings.relay": "中继",
   "settings.relayServing": "中继服务运行中",
@@ -46,6 +61,9 @@ export const zh = {
     "界面语言由 DSH 全局设置统一控制；首次使用时跟随系统语言。",
   "empty.list": "这里暂时没有内容。",
   "empty.selection": "请选择一个委派。",
+  "empty.plans":
+    "还没有分派计划。可以让 Agent 使用 propose_team_plan 创建草案。",
+  "empty.planSelection": "请选择一个分派计划。",
   "status.QUEUED": "已排队",
   "status.RECEIVED": "已接收",
   "status.TRIAGING": "评估中",
@@ -55,6 +73,15 @@ export const zh = {
   "status.REJECTED": "已拒绝",
   "status.FAILED": "失败",
   "status.CANCELED": "已取消",
+  "planStatus.DRAFT": "待确认",
+  "planStatus.DISPATCHING": "正在分派",
+  "planStatus.DISPATCHED": "已全部分派",
+  "planStatus.PARTIAL": "部分失败",
+  "planStatus.CANCELED": "已取消",
+  "planItemStatus.DRAFT": "待发送",
+  "planItemStatus.DISPATCHED": "已创建委派",
+  "planItemStatus.FAILED": "发送失败",
+  "planItemStatus.CANCELED": "已取消",
   "delivery.QUEUED_LOCAL": "本地待投递",
   "delivery.DELIVERED_TO_RELAY": "已投递至中继",
   "delivery.RECEIVED_LOCAL": "已接收到本地",
@@ -67,6 +94,7 @@ export const zh = {
   "error.attachmentInvalid": "附件 JSON 无效。",
   "error.pairingFailed": "配对失败",
   "error.loadFailed": "无法加载 Squad 状态",
+  "error.planActionFailed": "分派计划操作失败",
   "error.withCode": "{message}（{code}）",
   "error.withDetail": "{message}：{detail}",
   "errorCode.EXECUTION_INTERRUPTED": "执行被中断",
@@ -99,6 +127,7 @@ export const en = {
   "html.lang": "en",
   "inbox.title": "Agent Inbox",
   "inbox.close": "Close Agent Inbox",
+  "tab.plans": "Plans",
   "tab.waiting": "Waiting for me",
   "tab.running": "Running",
   "tab.sent": "Sent",
@@ -115,6 +144,9 @@ export const en = {
   "field.response": "Response for the receiving Agent",
   "field.attachmentRefs": "Attachment references (optional JSON array)",
   "field.outputs": "Outputs",
+  "field.sourceSummary": "Source summary",
+  "field.planItems": "Plan items",
+  "field.delegationId": "Delegation ID",
   "action.completeSelected": "Complete selected",
   "action.reject": "Reject",
   "action.acceptAndRun": "Accept and run",
@@ -122,6 +154,13 @@ export const en = {
   "action.requestCancel": "Request cancel",
   "action.openSession": "Open native DSH session",
   "action.savePeer": "Save peer",
+  "action.approvePlan": "Approve and dispatch",
+  "action.retryPlan": "Retry unsent items",
+  "action.cancelPlan": "Cancel remaining items",
+  "plan.approvalHint":
+    "Approval creates one existing signed delegation per item; each recipient still decides execution through their own Peer policy.",
+  "plan.itemCount": "{count} plan items",
+  "plan.dispatchedCount": "Created {sent}/{total} delegations",
   "settings.nodeIdentity": "Node identity",
   "settings.relay": "Relay",
   "settings.relayServing": "relay service is running",
@@ -138,6 +177,9 @@ export const en = {
     "The DSH global language setting controls this interface; first use follows the system language.",
   "empty.list": "Nothing here.",
   "empty.selection": "Select a delegation.",
+  "empty.plans":
+    "No delegation plans yet. Ask the Agent to create a draft with propose_team_plan.",
+  "empty.planSelection": "Select a delegation plan.",
   "status.QUEUED": "Queued",
   "status.RECEIVED": "Received",
   "status.TRIAGING": "Triaging",
@@ -147,6 +189,15 @@ export const en = {
   "status.REJECTED": "Rejected",
   "status.FAILED": "Failed",
   "status.CANCELED": "Canceled",
+  "planStatus.DRAFT": "Awaiting approval",
+  "planStatus.DISPATCHING": "Dispatching",
+  "planStatus.DISPATCHED": "Fully dispatched",
+  "planStatus.PARTIAL": "Partially failed",
+  "planStatus.CANCELED": "Canceled",
+  "planItemStatus.DRAFT": "Not sent",
+  "planItemStatus.DISPATCHED": "Delegation created",
+  "planItemStatus.FAILED": "Dispatch failed",
+  "planItemStatus.CANCELED": "Canceled",
   "delivery.QUEUED_LOCAL": "Queued locally",
   "delivery.DELIVERED_TO_RELAY": "Delivered to Relay",
   "delivery.RECEIVED_LOCAL": "Received locally",
@@ -159,6 +210,7 @@ export const en = {
   "error.attachmentInvalid": "Attachment JSON is invalid.",
   "error.pairingFailed": "Pairing failed",
   "error.loadFailed": "Could not load Squad state",
+  "error.planActionFailed": "Delegation plan action failed",
   "error.withCode": "{message} ({code})",
   "error.withDetail": "{message}: {detail}",
   "errorCode.EXECUTION_INTERRUPTED": "Execution interrupted",
@@ -219,6 +271,21 @@ const policyKeys = {
   TRUSTED: "policy.TRUSTED",
 } as const satisfies Record<string, SquadLocaleKey>;
 
+const planStatusKeys = {
+  DRAFT: "planStatus.DRAFT",
+  DISPATCHING: "planStatus.DISPATCHING",
+  DISPATCHED: "planStatus.DISPATCHED",
+  PARTIAL: "planStatus.PARTIAL",
+  CANCELED: "planStatus.CANCELED",
+} as const satisfies Record<TeamPlanStatus, SquadLocaleKey>;
+
+const planItemStatusKeys = {
+  DRAFT: "planItemStatus.DRAFT",
+  DISPATCHED: "planItemStatus.DISPATCHED",
+  FAILED: "planItemStatus.FAILED",
+  CANCELED: "planItemStatus.CANCELED",
+} as const satisfies Record<TeamPlanItemStatus, SquadLocaleKey>;
+
 const errorCodeKeys = {
   EXECUTION_INTERRUPTED: "errorCode.EXECUTION_INTERRUPTED",
   REJECTED_BY_OWNER: "errorCode.REJECTED_BY_OWNER",
@@ -263,6 +330,20 @@ export function formatDelivery(t: SquadTranslate, status: string): string {
 export function formatPolicy(t: SquadTranslate, policy: string): string {
   const key = policyKeys[policy as keyof typeof policyKeys];
   return key === undefined ? policy : t(key);
+}
+
+export function formatPlanStatus(
+  t: SquadTranslate,
+  status: TeamPlanStatus,
+): string {
+  return t(planStatusKeys[status]);
+}
+
+export function formatPlanItemStatus(
+  t: SquadTranslate,
+  status: TeamPlanItemStatus,
+): string {
+  return t(planItemStatusKeys[status]);
 }
 
 export function formatErrorCode(t: SquadTranslate, code: string): string {

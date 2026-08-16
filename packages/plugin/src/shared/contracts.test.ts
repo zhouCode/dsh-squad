@@ -4,6 +4,7 @@ import {
   attachmentRefSchema,
   assertEnvelopeSemantics,
   createDelegationInputSchema,
+  createTeamPlanInputSchema,
   delegationRequestSchema,
   envelopeSchema,
   humanInputSchema,
@@ -32,6 +33,43 @@ describe("Squad contracts", () => {
         to: "Bob",
         objective: "Summarize the supplied notes",
         shellCommand: "rm -rf /",
+      }).success,
+    ).toBe(false);
+  });
+
+  it("keeps team plans bounded, strict, and capability-free", () => {
+    expect(
+      createTeamPlanInputSchema.safeParse({
+        title: "Launch follow-up",
+        sourceSummary: "The team agreed on two independent workstreams.",
+        items: [
+          {
+            to: "Bob",
+            objective: "Draft the release notes",
+            acceptanceCriteria: ["Return a reviewable Markdown draft"],
+          },
+        ],
+      }).success,
+    ).toBe(true);
+    expect(
+      createTeamPlanInputSchema.safeParse({
+        title: "Unsafe plan",
+        items: [
+          {
+            to: "Bob",
+            objective: "Run a private tool",
+            skillName: "remote-skill",
+          },
+        ],
+      }).success,
+    ).toBe(false);
+    expect(
+      createTeamPlanInputSchema.safeParse({
+        title: "Too many items",
+        items: Array.from({ length: 33 }, (_, index) => ({
+          to: "Bob",
+          objective: `Task ${index}`,
+        })),
       }).success,
     ).toBe(false);
   });

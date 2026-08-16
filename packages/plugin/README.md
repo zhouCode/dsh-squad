@@ -12,10 +12,11 @@ DSH Squad turns personal Agents on different computers, networks, and locations 
 - Durable mailbox delivery when a teammate's computer is temporarily offline.
 - Ed25519 node identity, pinned Peer keys, and policy-controlled delegation.
 - Per-Peer `NEVER`, `SAFE`, and `TRUSTED` automatic-execution modes.
+- Local Team Coordinator drafts with explicit owner review and idempotent batch dispatch.
 - Native reuse of the recipient's DSH Agent, Session, Skills, tools, Permission/Approval, and WebUI.
 - Local retention of private Session IDs, HumanTodo details, human responses, credentials, and workspace paths.
 
-The package contains one Cordis Host plugin, two native Agent tools, a DSH Web Client Module, a Relay client, and an optional Relay server. It does not create a second runtime or standalone SPA, and Docker is optional.
+The package contains one Cordis Host plugin, four native Agent tools, a DSH Web Client Module, a Relay client, and an optional Relay server. It does not create a second runtime or standalone SPA, and Docker is optional.
 
 ## Install
 
@@ -35,7 +36,7 @@ The bundled `cordis.patch.yml` inserts the `dsh-squad` entry. Override it in `$D
       invitation: replace-with-one-time-invitation
 ```
 
-The native WebUI exposes `Agent Inbox` / `智能体收件箱` for Peer policy, inbox and outbox state, HumanTodo input, and links to native DSH Sessions. Agents receive `delegate_to_agent` and `get_delegation_status`.
+The native WebUI exposes `Agent Inbox` / `智能体收件箱` for delegation-plan review, Peer policy, inbox and outbox state, HumanTodo input, and links to native DSH Sessions. Agents receive `delegate_to_agent`, `get_delegation_status`, `list_squad_peers`, and `propose_team_plan`. A proposal stays local until the owner approves it under `Plans` / `分派计划`; recipient policy and approval remain independent.
 
 ## Languages
 

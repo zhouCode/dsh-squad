@@ -12,12 +12,15 @@ import type {
 import type { LocaleId } from "@deepseek-ai/dsh-client-locale/client";
 import type { PropsLocale } from "@deepseek-ai/dsh-client-ui-slots";
 import type { SidebarFooterActionOwnerProps } from "@deepseek-ai/dsh-client-ui-sidebar/client";
+import type { TeamPlan, TeamPlanStatus } from "../shared/contracts.ts";
 import type { DelegationStatus } from "../shared/state.ts";
 import {
   SQUAD_LOCALE_NS,
   en,
   formatDelivery,
   formatErrorCode,
+  formatPlanItemStatus,
+  formatPlanStatus,
   formatPolicy,
   formatStatus,
   formatSummary,
@@ -87,6 +90,7 @@ interface LocalState {
   identity: { nodeId: string; displayName: string; publicKey: string };
   relay: { configured: boolean; serving: boolean };
   peers: PeerView[];
+  plans: TeamPlan[];
   delegations: DelegationView[];
 }
 
@@ -178,9 +182,10 @@ function SquadTrigger({
   );
 }
 
-type Tab = "waiting" | "running" | "sent" | "completed" | "settings";
+type Tab = "plans" | "waiting" | "running" | "sent" | "completed" | "settings";
 
 const tabKeys = {
+  plans: "tab.plans",
   waiting: "tab.waiting",
   running: "tab.running",
   sent: "tab.sent",
@@ -216,6 +221,20 @@ function StatusPill({ status, t }: { status: Status; t: SquadTranslate }) {
   return (
     <span className={`squad-status squad-status-${status.toLowerCase()}`}>
       {formatStatus(t, status)}
+    </span>
+  );
+}
+
+function PlanStatusPill({
+  status,
+  t,
+}: {
+  status: TeamPlanStatus;
+  t: SquadTranslate;
+}) {
+  return (
+    <span className={`squad-status squad-plan-status-${status.toLowerCase()}`}>
+      {formatPlanStatus(t, status)}
     </span>
   );
 }
@@ -456,6 +475,156 @@ function DelegationDetail({
   );
 }
 
+function TeamPlanDetail({
+  plan,
+  refresh,
+  t,
+}: {
+  plan: TeamPlan;
+  refresh: () => Promise<void>;
+  t: SquadTranslate;
+}) {
+  const [busy, setBusy] = useState(false);
+  const [error, setError] = useState<string>();
+  const act = async (action: "approve" | "retry" | "cancel") => {
+    setBusy(true);
+    setError(undefined);
+    try {
+      await api<TeamPlan>(`/plans/${plan.id}/${action}`, { method: "POST" });
+      await refresh();
+    } catch (cause) {
+      setError(describeError(cause, t, "error.planActionFailed"));
+    } finally {
+      setBusy(false);
+    }
+  };
+  const dispatched = plan.items.filter(
+    (item) => item.status === "DISPATCHED",
+  ).length;
+  const canDispatch = ["DRAFT", "DISPATCHING", "PARTIAL"].includes(plan.status);
+  const canCancel = !["DISPATCHED", "CANCELED"].includes(plan.status);
+  return (
+    <article className="squad-detail squad-plan-detail">
+      <header>
+        <PlanStatusPill status={plan.status} t={t} />
+        <h2>{plan.title}</h2>
+      </header>
+      <p className="squad-muted">
+        {t("plan.dispatchedCount", {
+          sent: dispatched,
+          total: plan.items.length,
+        })}
+      </p>
+      {plan.sourceSummary ? (
+        <section>
+          <h3>{t("field.sourceSummary")}</h3>
+          <p className="squad-prewrap">{plan.sourceSummary}</p>
+        </section>
+      ) : null}
+      {canDispatch ? <p>{t("plan.approvalHint")}</p> : null}
+      {canDispatch || canCancel ? (
+        <div className="squad-actions">
+          {canDispatch ? (
+            <button
+              disabled={busy}
+              onClick={() =>
+                void act(plan.status === "DRAFT" ? "approve" : "retry")
+              }
+            >
+              {plan.status === "DRAFT"
+                ? t("action.approvePlan")
+                : t("action.retryPlan")}
+            </button>
+          ) : null}
+          {canCancel ? (
+            <button
+              className="squad-danger"
+              disabled={busy}
+              onClick={() => void act("cancel")}
+            >
+              {t("action.cancelPlan")}
+            </button>
+          ) : null}
+        </div>
+      ) : null}
+      <section>
+        <h3>{t("field.planItems")}</h3>
+        <div className="squad-plan-items">
+          {plan.items.map((item) => (
+            <article className="squad-plan-item" key={item.id}>
+              <header>
+                <strong>{item.objective}</strong>
+                <span
+                  className={`squad-plan-item-status squad-plan-item-status-${item.status.toLowerCase()}`}
+                >
+                  {formatPlanItemStatus(t, item.status)}
+                </span>
+              </header>
+              <dl>
+                <div>
+                  <dt>{t("field.peer")}</dt>
+                  <dd>
+                    {item.peerDisplayName}
+                    <code>{item.peerNodeId}</code>
+                  </dd>
+                </div>
+                {item.context ? (
+                  <div>
+                    <dt>{t("field.context")}</dt>
+                    <dd className="squad-prewrap">{item.context}</dd>
+                  </div>
+                ) : null}
+                {item.acceptanceCriteria.length > 0 ? (
+                  <div>
+                    <dt>{t("field.acceptanceCriteria")}</dt>
+                    <dd>
+                      <ul>
+                        {item.acceptanceCriteria.map((criterion, index) => (
+                          <li key={index}>{criterion}</li>
+                        ))}
+                      </ul>
+                    </dd>
+                  </div>
+                ) : null}
+                {item.attachmentRefs.length > 0 ? (
+                  <div>
+                    <dt>{t("field.attachmentRefs")}</dt>
+                    <dd>
+                      <ul>
+                        {item.attachmentRefs.map((attachment) => (
+                          <li key={`${attachment.sha256}:${attachment.name}`}>
+                            <a
+                              href={attachment.url}
+                              rel="noreferrer"
+                              target="_blank"
+                            >
+                              {attachment.name}
+                            </a>
+                          </li>
+                        ))}
+                      </ul>
+                    </dd>
+                  </div>
+                ) : null}
+                {item.delegationId ? (
+                  <div>
+                    <dt>{t("field.delegationId")}</dt>
+                    <dd>
+                      <code>{item.delegationId}</code>
+                    </dd>
+                  </div>
+                ) : null}
+              </dl>
+              {item.error ? <p className="squad-error">{item.error}</p> : null}
+            </article>
+          ))}
+        </div>
+      </section>
+      {error ? <p className="squad-error">{error}</p> : null}
+    </article>
+  );
+}
+
 function Settings({
   state,
   refresh,
@@ -585,6 +754,8 @@ function SquadPanel({
   );
   const selected =
     state?.delegations.find((item) => item.id === selectedId) ?? items[0];
+  const plans = state?.plans ?? [];
+  const selectedPlan = plans.find((plan) => plan.id === selectedId) ?? plans[0];
   const locale = getLocale() === "zh" ? "zh-CN" : "en";
   if (!open) return null;
   return (
@@ -615,7 +786,14 @@ function SquadPanel({
         </header>
         <nav className="squad-tabs">
           {(
-            ["waiting", "running", "sent", "completed", "settings"] as const
+            [
+              "plans",
+              "waiting",
+              "running",
+              "sent",
+              "completed",
+              "settings",
+            ] as const
           ).map((value) => (
             <button
               key={value}
@@ -632,6 +810,37 @@ function SquadPanel({
         {error ? <p className="squad-error squad-load-error">{error}</p> : null}
         {tab === "settings" && state ? (
           <Settings state={state} refresh={refresh} t={t} />
+        ) : tab === "plans" ? (
+          <div className="squad-content">
+            <aside className="squad-list">
+              {plans.length === 0 ? (
+                <p className="squad-empty">{t("empty.plans")}</p>
+              ) : null}
+              {plans.map((plan) => (
+                <button
+                  key={plan.id}
+                  className={selectedPlan?.id === plan.id ? "active" : ""}
+                  onClick={() => setSelectedId(plan.id)}
+                >
+                  <strong>{plan.title}</strong>
+                  <span>
+                    {formatPlanStatus(t, plan.status)} ·{" "}
+                    {new Date(plan.updatedAt).toLocaleString(locale)}
+                  </span>
+                  <span>
+                    {t("plan.itemCount", { count: plan.items.length })}
+                  </span>
+                </button>
+              ))}
+            </aside>
+            <main>
+              {selectedPlan ? (
+                <TeamPlanDetail plan={selectedPlan} refresh={refresh} t={t} />
+              ) : (
+                <p className="squad-empty">{t("empty.planSelection")}</p>
+              )}
+            </main>
+          </div>
         ) : (
           <div className="squad-content">
             <aside className="squad-list">
@@ -672,7 +881,7 @@ function SquadPanel({
 }
 
 const css = `
-.squad-trigger{appearance:none;border:0;background:transparent;color:var(--dsw-alias-label-primary);cursor:pointer;border-radius:10px;display:flex;align-items:center;justify-content:center;gap:8px;height:36px;padding:0 9px;font:inherit;white-space:nowrap}.squad-trigger:hover{background:var(--dsw-alias-interactive-bg-hover)}.squad-trigger-wide{width:100%;justify-content:flex-start}.squad-trigger-icon{font-size:20px;line-height:1}.squad-overlay{position:fixed;inset:0;z-index:1000;pointer-events:none}.squad-backdrop{position:absolute;inset:0;border:0;background:rgba(10,14,22,.34);pointer-events:auto}.squad-panel{position:absolute;pointer-events:auto;top:12px;bottom:12px;right:12px;width:min(920px,calc(100vw - 24px));border:1px solid var(--dsw-alias-border-l2,#ddd);border-radius:18px;background:var(--dsw-specific-dialog-fill,#fff);color:var(--dsw-alias-label-primary,#151515);box-shadow:0 18px 60px rgba(0,0,0,.24);display:flex;flex-direction:column;overflow:hidden}.squad-panel-head{display:flex;justify-content:space-between;align-items:center;padding:22px 24px 12px}.squad-panel-head h1{font-size:24px;margin:2px 0}.squad-eyebrow{font-size:11px;letter-spacing:.14em;text-transform:uppercase;color:var(--dsw-alias-label-secondary,#666)}.squad-close{border:0;background:transparent;color:inherit;font-size:30px;cursor:pointer}.squad-tabs{display:flex;gap:4px;padding:0 18px 14px;overflow:auto;border-bottom:1px solid var(--dsw-alias-border-l2,#ddd)}.squad-tabs button{border:0;border-radius:999px;background:transparent;color:var(--dsw-alias-label-secondary,#666);padding:7px 12px;cursor:pointer;white-space:nowrap}.squad-tabs button.active{background:var(--dsw-alias-interactive-bg-hover,#eee);color:var(--dsw-alias-label-primary,#111)}.squad-content{display:grid;grid-template-columns:290px minmax(0,1fr);min-height:0;flex:1}.squad-list{border-right:1px solid var(--dsw-alias-border-l2,#ddd);padding:10px;overflow:auto}.squad-list button{display:block;width:100%;text-align:left;border:0;background:transparent;color:inherit;border-radius:12px;padding:12px;cursor:pointer}.squad-list button:hover,.squad-list button.active{background:var(--dsw-alias-interactive-bg-hover,#eee)}.squad-list strong,.squad-list span{display:block}.squad-list strong{overflow:hidden;text-overflow:ellipsis;white-space:nowrap}.squad-list span{font-size:12px;margin-top:5px;color:var(--dsw-alias-label-secondary,#666)}.squad-content main,.squad-settings{overflow:auto;padding:22px 26px}.squad-detail>header{display:flex;align-items:center;gap:10px}.squad-detail h2{font-size:22px;line-height:1.35}.squad-detail h3,.squad-settings h3{font-size:14px;margin:24px 0 8px}.squad-detail dl{display:grid;gap:5px}.squad-detail dl div{display:grid;grid-template-columns:78px 1fr;gap:10px}.squad-detail dt{color:var(--dsw-alias-label-secondary,#666)}.squad-detail dd{margin:0;overflow-wrap:anywhere}.squad-status{font-size:11px;font-weight:700;border-radius:999px;padding:4px 8px;background:#e8edf6}.squad-status-completed{background:#dff5e6;color:#176c35}.squad-status-failed,.squad-status-rejected{background:#fde4e1;color:#a52a24}.squad-status-waiting_human{background:#fff0c7;color:#755400}.squad-direction,.squad-muted{color:var(--dsw-alias-label-secondary,#666);font-size:12px}.squad-prewrap{white-space:pre-wrap;overflow-wrap:anywhere}.squad-todo{border-left:3px solid #d59b1b;padding:2px 12px;margin:10px 0}.squad-todo p{margin:5px 0}.squad-todo-select{display:flex!important;align-items:center;grid-template-columns:auto 1fr!important}.squad-todo-select input{width:auto!important}.squad-detail label,.squad-settings label{display:grid;gap:6px;margin:12px 0;font-size:13px}.squad-detail textarea,.squad-settings textarea,.squad-settings input,.squad-settings select{box-sizing:border-box;width:100%;border:1px solid var(--dsw-alias-border-l2,#ccc);border-radius:9px;background:transparent;color:inherit;padding:9px;font:inherit}.squad-actions{display:flex;gap:8px;margin:12px 0}.squad-detail button,.squad-settings button{border:0;border-radius:9px;padding:8px 12px;background:#315ee8;color:#fff;cursor:pointer}.squad-detail button:disabled{opacity:.5}.squad-detail .squad-danger{background:#b13c35}.squad-detail .squad-link-button{display:block;margin:9px 0;background:transparent;color:#315ee8;padding-left:0}.squad-error{color:#b13c35}.squad-load-error{padding:0 24px}.squad-empty{color:var(--dsw-alias-label-secondary,#666);padding:12px}.squad-settings{max-width:680px}.squad-settings code,.squad-peer code{display:block;overflow-wrap:anywhere;font-size:11px}.squad-peer{display:grid;grid-template-columns:150px 1fr auto;gap:10px;padding:10px 0;border-bottom:1px solid var(--dsw-alias-border-l2,#ddd)}
+.squad-trigger{appearance:none;border:0;background:transparent;color:var(--dsw-alias-label-primary);cursor:pointer;border-radius:10px;display:flex;align-items:center;justify-content:center;gap:8px;height:36px;padding:0 9px;font:inherit;white-space:nowrap}.squad-trigger:hover{background:var(--dsw-alias-interactive-bg-hover)}.squad-trigger-wide{width:100%;justify-content:flex-start}.squad-trigger-icon{font-size:20px;line-height:1}.squad-overlay{position:fixed;inset:0;z-index:1000;pointer-events:none}.squad-backdrop{position:absolute;inset:0;border:0;background:rgba(10,14,22,.34);pointer-events:auto}.squad-panel{position:absolute;pointer-events:auto;top:12px;bottom:12px;right:12px;width:min(920px,calc(100vw - 24px));border:1px solid var(--dsw-alias-border-l2,#ddd);border-radius:18px;background:var(--dsw-specific-dialog-fill,#fff);color:var(--dsw-alias-label-primary,#151515);box-shadow:0 18px 60px rgba(0,0,0,.24);display:flex;flex-direction:column;overflow:hidden}.squad-panel-head{display:flex;justify-content:space-between;align-items:center;padding:22px 24px 12px}.squad-panel-head h1{font-size:24px;margin:2px 0}.squad-eyebrow{font-size:11px;letter-spacing:.14em;text-transform:uppercase;color:var(--dsw-alias-label-secondary,#666)}.squad-close{border:0;background:transparent;color:inherit;font-size:30px;cursor:pointer}.squad-tabs{display:flex;gap:4px;padding:0 18px 14px;overflow:auto;border-bottom:1px solid var(--dsw-alias-border-l2,#ddd)}.squad-tabs button{border:0;border-radius:999px;background:transparent;color:var(--dsw-alias-label-secondary,#666);padding:7px 12px;cursor:pointer;white-space:nowrap}.squad-tabs button.active{background:var(--dsw-alias-interactive-bg-hover,#eee);color:var(--dsw-alias-label-primary,#111)}.squad-content{display:grid;grid-template-columns:290px minmax(0,1fr);min-height:0;flex:1}.squad-list{border-right:1px solid var(--dsw-alias-border-l2,#ddd);padding:10px;overflow:auto}.squad-list button{display:block;width:100%;text-align:left;border:0;background:transparent;color:inherit;border-radius:12px;padding:12px;cursor:pointer}.squad-list button:hover,.squad-list button.active{background:var(--dsw-alias-interactive-bg-hover,#eee)}.squad-list strong,.squad-list span{display:block}.squad-list strong{overflow:hidden;text-overflow:ellipsis;white-space:nowrap}.squad-list span{font-size:12px;margin-top:5px;color:var(--dsw-alias-label-secondary,#666)}.squad-content main,.squad-settings{overflow:auto;padding:22px 26px}.squad-detail>header{display:flex;align-items:center;gap:10px}.squad-detail h2{font-size:22px;line-height:1.35}.squad-detail h3,.squad-settings h3{font-size:14px;margin:24px 0 8px}.squad-detail dl{display:grid;gap:5px}.squad-detail dl div{display:grid;grid-template-columns:78px 1fr;gap:10px}.squad-detail dt{color:var(--dsw-alias-label-secondary,#666)}.squad-detail dd{margin:0;overflow-wrap:anywhere}.squad-status{font-size:11px;font-weight:700;border-radius:999px;padding:4px 8px;background:#e8edf6}.squad-status-completed,.squad-plan-status-dispatched{background:#dff5e6;color:#176c35}.squad-status-failed,.squad-status-rejected,.squad-plan-status-partial{background:#fde4e1;color:#a52a24}.squad-status-waiting_human,.squad-plan-status-draft,.squad-plan-status-dispatching{background:#fff0c7;color:#755400}.squad-direction,.squad-muted{color:var(--dsw-alias-label-secondary,#666);font-size:12px}.squad-prewrap{white-space:pre-wrap;overflow-wrap:anywhere}.squad-todo{border-left:3px solid #d59b1b;padding:2px 12px;margin:10px 0}.squad-todo p{margin:5px 0}.squad-todo-select{display:flex!important;align-items:center;grid-template-columns:auto 1fr!important}.squad-todo-select input{width:auto!important}.squad-detail label,.squad-settings label{display:grid;gap:6px;margin:12px 0;font-size:13px}.squad-detail textarea,.squad-settings textarea,.squad-settings input,.squad-settings select{box-sizing:border-box;width:100%;border:1px solid var(--dsw-alias-border-l2,#ccc);border-radius:9px;background:transparent;color:inherit;padding:9px;font:inherit}.squad-actions{display:flex;gap:8px;margin:12px 0;flex-wrap:wrap}.squad-detail button,.squad-settings button{border:0;border-radius:9px;padding:8px 12px;background:#315ee8;color:#fff;cursor:pointer}.squad-detail button:disabled{opacity:.5}.squad-detail .squad-danger{background:#b13c35}.squad-detail .squad-link-button{display:block;margin:9px 0;background:transparent;color:#315ee8;padding-left:0}.squad-error{color:#b13c35}.squad-load-error{padding:0 24px}.squad-empty{color:var(--dsw-alias-label-secondary,#666);padding:12px}.squad-settings{max-width:680px}.squad-settings code,.squad-peer code,.squad-plan-item code{display:block;overflow-wrap:anywhere;font-size:11px}.squad-peer{display:grid;grid-template-columns:150px 1fr auto;gap:10px;padding:10px 0;border-bottom:1px solid var(--dsw-alias-border-l2,#ddd)}.squad-plan-items{display:grid;gap:12px}.squad-plan-item{border:1px solid var(--dsw-alias-border-l2,#ddd);border-radius:12px;padding:14px}.squad-plan-item>header{display:flex;align-items:flex-start;justify-content:space-between;gap:12px}.squad-plan-item>header strong{line-height:1.4}.squad-plan-item-status{font-size:11px;white-space:nowrap;color:var(--dsw-alias-label-secondary,#666)}.squad-plan-item-status-failed{color:#b13c35}.squad-plan-item-status-dispatched{color:#176c35}.squad-plan-item dl{margin-bottom:0}.squad-plan-item ul{margin:4px 0;padding-left:20px}.squad-plan-item a{color:#315ee8}
 @media(max-width:700px){.squad-panel{inset:0;width:auto;border-radius:0}.squad-content{grid-template-columns:1fr}.squad-list{max-height:180px;border-right:0;border-bottom:1px solid var(--dsw-alias-border-l2,#ddd)}.squad-peer{grid-template-columns:1fr}.squad-panel-head{padding:16px}.squad-content main,.squad-settings{padding:16px}}
 `;
 

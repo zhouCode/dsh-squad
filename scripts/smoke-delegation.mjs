@@ -418,7 +418,14 @@ async function assertChineseLocalization(browser, port) {
       await dialog.locator(".squad-panel").getAttribute("lang"),
       "zh-CN",
     );
-    for (const tab of ["待我处理", "运行中", "已发送", "已完成", "设置"]) {
+    for (const tab of [
+      "分派计划",
+      "待我处理",
+      "运行中",
+      "已发送",
+      "已完成",
+      "设置",
+    ]) {
       await dialog.getByRole("button", { name: tab, exact: true }).waitFor();
     }
     await dialog.getByRole("button", { name: "设置", exact: true }).click();
@@ -666,6 +673,79 @@ async function main() {
       );
     });
 
+    log("creating a local Team Coordinator draft and approving it in WebUI");
+    const planFixtureMarker = "TEAM_PLAN_FIXTURE";
+    const plan = await fetchJson(
+      `http://127.0.0.1:${alicePort}/squad/v1/local/plans`,
+      {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({
+          title: "Coordinator smoke plan",
+          sourceSummary: "One reviewed item must become one signed delegation.",
+          items: [
+            {
+              to: bobIdentity.nodeId,
+              objective: `${planFixtureMarker}: verify the reviewed plan path`,
+              acceptanceCriteria: ["Return one explicit outcome"],
+            },
+          ],
+        }),
+      },
+    );
+    assert.equal(plan.status, "DRAFT");
+    assert.equal(plan.items.length, 1);
+    assert.equal(
+      matching(await localState(alicePort), planFixtureMarker, "OUTGOING")
+        .length,
+      0,
+      "a Coordinator draft must not dispatch before local approval",
+    );
+    let dialog = await openInbox(alicePage);
+    await dialog.getByRole("button", { name: "Plans", exact: true }).click();
+    await dialog
+      .getByText("Coordinator smoke plan", { exact: true })
+      .first()
+      .waitFor();
+    await dialog
+      .getByRole("button", { name: "Approve and dispatch", exact: true })
+      .click();
+    const dispatchedPlan = await waitFor(
+      "reviewed Coordinator plan dispatch",
+      async () => {
+        const state = await localState(alicePort);
+        const candidate = state.plans.find((item) => item.id === plan.id);
+        return candidate?.status === "DISPATCHED" ? candidate : undefined;
+      },
+    );
+    const plannedOutgoing = matching(
+      await localState(alicePort),
+      planFixtureMarker,
+      "OUTGOING",
+    );
+    assert.equal(plannedOutgoing.length, 1);
+    assert.equal(plannedOutgoing[0].id, plan.items[0].id);
+    assert.equal(dispatchedPlan.items[0].delegationId, plan.items[0].id);
+    await closeInbox(dialog);
+    const replayedApproval = await fetchJson(
+      `http://127.0.0.1:${alicePort}/squad/v1/local/plans/${plan.id}/approve`,
+      { method: "POST" },
+    );
+    assert.equal(replayedApproval.status, "DISPATCHED");
+    assert.equal(
+      matching(await localState(alicePort), planFixtureMarker, "OUTGOING")
+        .length,
+      1,
+      "replayed approval must not create a duplicate delegation",
+    );
+    const completedPlanDelegation = await waitForDelegation(
+      alicePort,
+      planFixtureMarker,
+      "OUTGOING",
+      "COMPLETED",
+    );
+    assert.equal(completedPlanDelegation.id, plan.items[0].id);
+
     const nativeSelfTest = await fetchJson(
       `http://127.0.0.1:${alicePort}/squad/v1/local/self-test/session`,
       { method: "POST" },
@@ -696,7 +776,7 @@ async function main() {
         return items[0];
       },
     );
-    let dialog = await assertInboxItem(alicePage, "Sent", "AUTO_SKILL_FIXTURE");
+    dialog = await assertInboxItem(alicePage, "Sent", "AUTO_SKILL_FIXTURE");
     await dialog.getByRole("button", { name: "Settings", exact: true }).click();
     await dialog
       .getByText("Bob Personal Agent", { exact: true })
@@ -1022,7 +1102,7 @@ async function main() {
     await disabledPage.close();
 
     log(
-      "PASS: tarball, bilingual native DSH UI, offline Relay, Skill, Todo, resume, privacy, and Chromium",
+      "PASS: tarball, Coordinator approval, bilingual DSH UI, offline Relay, Skill, Todo, resume, privacy, and Chromium",
     );
   } catch (error) {
     for (const host of [alice, bob, relay]) {

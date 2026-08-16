@@ -3,6 +3,8 @@ import {
   en,
   formatDelivery,
   formatErrorCode,
+  formatPlanItemStatus,
+  formatPlanStatus,
   formatPolicy,
   formatStatus,
   formatSummary,
@@ -32,6 +34,8 @@ describe("Squad locale dictionaries", () => {
     expect(formatStatus(t, "WAITING_HUMAN")).toBe("等待人工处理");
     expect(formatDelivery(t, "DELIVERED_TO_RELAY")).toBe("已投递至中继");
     expect(formatPolicy(t, "SAFE")).toBe("仅安全目标");
+    expect(formatPlanStatus(t, "PARTIAL")).toBe("部分失败");
+    expect(formatPlanItemStatus(t, "DISPATCHED")).toBe("已创建委派");
     expect(formatDelivery(t, "FUTURE_DELIVERY_STATE")).toBe(
       "FUTURE_DELIVERY_STATE",
     );

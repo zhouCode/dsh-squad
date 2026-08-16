@@ -4,6 +4,19 @@ All notable changes to this project are documented in this file. The format is b
 
 ## [Unreleased]
 
+### Added
+
+- A local Team Coordinator workflow that turns meeting notes or a team objective into a persistent delegation-plan draft for owner review.
+- `propose_team_plan` and `list_squad_peers` Agent tools. Proposals never dispatch work by themselves.
+- A bilingual `Plans` / `分派计划` WebUI for reviewing every recipient, objective, context, acceptance criterion, and attachment before approval.
+- Idempotent batch dispatch with stable per-item Delegation IDs, partial-failure reporting, retry, cancellation of remaining items, and restart recovery.
+- Local plan creation, approval, retry, and cancellation endpoints for future connector integrations.
+
+### Security
+
+- Team-plan approval re-checks the current pinned Peer and delegation policy before creating each signed Delegation.
+- Remote execution remains subject to the recipient's independent PeerPolicy and DSH Permission/Approval boundary after local plan approval.
+
 ## [0.2.0] - 2026-08-16
 
 ### Added

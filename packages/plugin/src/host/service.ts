@@ -16,20 +16,24 @@ import {
   MAX_ENVELOPE_BYTES,
   assertEnvelopeSemantics,
   createDelegationInputSchema,
+  createTeamPlanInputSchema,
   delegationResultSchema,
   delegationUpdateSchema,
   envelopePayloadBytes,
   envelopeSchema,
   humanInputSchema,
+  idSchema,
   nodeIdSchema,
   peerPolicySchema,
   type CreateDelegationInput,
+  type CreateTeamPlanInput,
   type DelegationResult,
   type Envelope,
   type HumanInput as HumanInputValue,
   type PeerPolicy,
   type ResultOutput,
   type StructuredOutcome,
+  type TeamPlan,
   type UnsignedEnvelope,
 } from "../shared/contracts.ts";
 import { isTerminalStatus } from "../shared/state.ts";
@@ -99,6 +103,7 @@ export class SquadService extends Service {
   readonly executor: NativeDelegationExecutor;
   readonly attachments: AttachmentVerifier;
   readonly #starting = new Set<string>();
+  readonly #dispatchingPlans = new Map<string, Promise<TeamPlan>>();
   #timer?: ReturnType<typeof setInterval>;
   #pumping = false;
   #closed = false;
@@ -231,13 +236,19 @@ export class SquadService extends Service {
     candidate: CreateDelegationInput,
     initiatingSessionId?: string,
   ): Promise<DelegationView> {
+    return this.delegateWithId(candidate, randomUUID(), initiatingSessionId);
+  }
+
+  private async delegateWithId(
+    candidate: CreateDelegationInput,
+    delegationIdCandidate: string,
+    initiatingSessionId?: string,
+  ): Promise<DelegationView> {
     const input = createDelegationInputSchema.parse(candidate);
+    const delegationId = idSchema.parse(delegationIdCandidate);
     const peer = this.database.findPeer(input.to);
-    if (peer === undefined || !peer.enabled) {
+    if (peer === undefined) {
       throw new Error(`peer ${input.to} is not paired or is disabled`);
-    }
-    if (!peer.policy.canDelegate) {
-      throw new Error(`peer ${peer.displayName} does not allow delegation`);
     }
     const parentFromSession =
       initiatingSessionId === undefined
@@ -261,12 +272,37 @@ export class SquadService extends Service {
       throw new Error("parentDelegationId is not local to this Node");
     }
     const depth = (parent?.delegationDepth ?? -1) + 1;
+    const existing = this.database.getDelegation(delegationId);
+    if (existing !== undefined) {
+      const sameRequest =
+        existing.direction === "OUTGOING" &&
+        existing.peerNodeId === peer.nodeId &&
+        existing.parentDelegationId === parentId &&
+        existing.objective === input.objective &&
+        existing.context === input.context &&
+        JSON.stringify(existing.acceptanceCriteria) ===
+          JSON.stringify(input.acceptanceCriteria ?? []) &&
+        JSON.stringify(existing.attachmentRefs) ===
+          JSON.stringify(input.attachmentRefs ?? []) &&
+        existing.delegationDepth === depth;
+      if (!sameRequest) {
+        throw new Error(
+          `delegation ${delegationId} conflicts with an existing record`,
+        );
+      }
+      return existing;
+    }
+    if (!peer.enabled) {
+      throw new Error(`peer ${input.to} is not paired or is disabled`);
+    }
+    if (!peer.policy.canDelegate) {
+      throw new Error(`peer ${peer.displayName} does not allow delegation`);
+    }
     if (depth > peer.policy.maxDelegationDepth) {
       throw new Error(
         `delegation depth ${depth} exceeds peer policy limit ${peer.policy.maxDelegationDepth}`,
       );
     }
-    const delegationId = randomUUID();
     const request = {
       delegationId,
       ...(parentId === undefined ? {} : { parentDelegationId: parentId }),
@@ -287,6 +323,74 @@ export class SquadService extends Service {
     const record = this.database.getDelegation(delegationId);
     if (record === undefined) throw new Error("delegation was not persisted");
     return record;
+  }
+
+  createTeamPlan(candidate: CreateTeamPlanInput): Promise<TeamPlan> {
+    const input = createTeamPlanInputSchema.parse(candidate);
+    const peers = input.items.map((item) => {
+      const peer = this.database.findPeer(item.to);
+      if (peer === undefined || !peer.enabled) {
+        throw new Error(`peer ${item.to} is not paired or is disabled`);
+      }
+      if (!peer.policy.canDelegate) {
+        throw new Error(`peer ${peer.displayName} does not allow delegation`);
+      }
+      return peer;
+    });
+    return Promise.resolve(this.database.createTeamPlan(input, peers));
+  }
+
+  getTeamPlan(id: string): Promise<TeamPlan | undefined> {
+    return Promise.resolve(this.database.getTeamPlan(idSchema.parse(id)));
+  }
+
+  approveTeamPlan(idCandidate: string): Promise<TeamPlan> {
+    const id = idSchema.parse(idCandidate);
+    const active = this.#dispatchingPlans.get(id);
+    if (active !== undefined) return active;
+    const dispatch = this.dispatchTeamPlan(id).finally(() => {
+      this.#dispatchingPlans.delete(id);
+    });
+    this.#dispatchingPlans.set(id, dispatch);
+    return dispatch;
+  }
+
+  private async dispatchTeamPlan(id: string): Promise<TeamPlan> {
+    const existing = this.database.getTeamPlan(id);
+    if (existing?.status === "DISPATCHED") return existing;
+    const plan = this.database.beginTeamPlanDispatch(id);
+    for (const item of plan.items) {
+      if (item.status === "DISPATCHED" || item.status === "CANCELED") continue;
+      try {
+        await this.delegateWithId(
+          {
+            to: item.peerNodeId,
+            objective: item.objective,
+            ...(item.context === undefined ? {} : { context: item.context }),
+            acceptanceCriteria: item.acceptanceCriteria,
+            attachmentRefs: item.attachmentRefs,
+          },
+          item.id,
+        );
+        this.database.markTeamPlanItemDispatched(id, item.id, item.id);
+      } catch (error) {
+        this.database.markTeamPlanItemFailed(id, item.id, error);
+        this.database.diagnostic(
+          "TEAM_PLAN_ITEM_FAILED",
+          item.id,
+          error instanceof Error ? error.message : String(error),
+        );
+      }
+    }
+    return this.database.finishTeamPlanDispatch(id);
+  }
+
+  cancelTeamPlan(idCandidate: string): Promise<TeamPlan> {
+    const id = idSchema.parse(idCandidate);
+    if (this.#dispatchingPlans.has(id)) {
+      throw new Error(`team plan ${id} is currently dispatching`);
+    }
+    return Promise.resolve(this.database.cancelTeamPlan(id));
   }
 
   getDelegation(id: string): Promise<DelegationView | undefined> {
@@ -809,6 +913,7 @@ export class SquadService extends Service {
     identity: { nodeId: string; displayName: string; publicKey: string };
     relay: { configured: boolean; serving: boolean };
     peers: PeerRecord[];
+    plans: TeamPlan[];
     delegations: DelegationRecord[];
   } {
     return {
@@ -822,6 +927,7 @@ export class SquadService extends Service {
         serving: this.relayServer !== undefined,
       },
       peers: this.database.listPeers(),
+      plans: this.database.listTeamPlans(),
       delegations: this.database.listDelegations(),
     };
   }
@@ -888,7 +994,9 @@ export class SquadService extends Service {
           sameSessionResumed: resumed.agent.id === sessionId,
           toolsAvailable:
             this.ctx.tools.get("delegate_to_agent") !== undefined &&
-            this.ctx.tools.get("get_delegation_status") !== undefined,
+            this.ctx.tools.get("get_delegation_status") !== undefined &&
+            this.ctx.tools.get("list_squad_peers") !== undefined &&
+            this.ctx.tools.get("propose_team_plan") !== undefined,
           preset: preset.id,
         };
       } finally {

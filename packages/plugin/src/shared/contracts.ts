@@ -196,6 +196,69 @@ export const createDelegationInputSchema = z.strictObject({
 });
 export type CreateDelegationInput = z.infer<typeof createDelegationInputSchema>;
 
+export const teamPlanStatusSchema = z.enum([
+  "DRAFT",
+  "DISPATCHING",
+  "DISPATCHED",
+  "PARTIAL",
+  "CANCELED",
+]);
+export type TeamPlanStatus = z.infer<typeof teamPlanStatusSchema>;
+
+export const teamPlanItemStatusSchema = z.enum([
+  "DRAFT",
+  "DISPATCHED",
+  "FAILED",
+  "CANCELED",
+]);
+export type TeamPlanItemStatus = z.infer<typeof teamPlanItemStatusSchema>;
+
+export const teamPlanItemInputSchema = z.strictObject({
+  to: createDelegationInputSchema.shape.to,
+  objective: createDelegationInputSchema.shape.objective,
+  context: createDelegationInputSchema.shape.context,
+  acceptanceCriteria: createDelegationInputSchema.shape.acceptanceCriteria,
+  attachmentRefs: createDelegationInputSchema.shape.attachmentRefs,
+});
+export type TeamPlanItemInput = z.infer<typeof teamPlanItemInputSchema>;
+
+export const createTeamPlanInputSchema = z.strictObject({
+  title: z.string().trim().min(1).max(240),
+  sourceSummary: z.string().max(50_000).optional(),
+  items: z.array(teamPlanItemInputSchema).min(1).max(32),
+});
+export type CreateTeamPlanInput = z.infer<typeof createTeamPlanInputSchema>;
+
+export interface TeamPlanItem {
+  id: string;
+  planId: string;
+  position: number;
+  peerNodeId: string;
+  peerDisplayName: string;
+  objective: string;
+  context?: string;
+  acceptanceCriteria: string[];
+  attachmentRefs: AttachmentRef[];
+  status: TeamPlanItemStatus;
+  delegationId?: string;
+  error?: string;
+  createdAt: string;
+  updatedAt: string;
+}
+
+export interface TeamPlan {
+  id: string;
+  title: string;
+  sourceSummary?: string;
+  status: TeamPlanStatus;
+  revision: number;
+  approvedAt?: string;
+  canceledAt?: string;
+  createdAt: string;
+  updatedAt: string;
+  items: TeamPlanItem[];
+}
+
 export const structuredOutcomeSchema = z.discriminatedUnion("kind", [
   z.strictObject({
     kind: z.literal("COMPLETE"),
