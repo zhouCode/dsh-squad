@@ -36,12 +36,27 @@ import {
   type TeamPlan,
   type UnsignedEnvelope,
 } from "../shared/contracts.ts";
+import {
+  organizationIdFromInvitation,
+  organizationRoleSchema,
+  unsignedOrganizationDocumentSchema,
+  unsignedOrganizationJoinRequestSchema,
+  unsignedOrganizationMembershipCertificateSchema,
+  type OrganizationDocument,
+  type OrganizationJoinRequest,
+  type OrganizationMemberView,
+  type OrganizationMembershipCertificate,
+  type OrganizationRole,
+  type OrganizationView,
+} from "../shared/organizations.ts";
 import { isTerminalStatus } from "../shared/state.ts";
 import type { ResolvedSquadConfig } from "./config.ts";
 import {
   SquadDatabase,
   type DelegationRecord,
+  type OrganizationDirectoryRecord,
   type PeerRecord,
+  type ResolvedDelegationRecipient,
 } from "./database.ts";
 import {
   NodeIdentity,
@@ -56,6 +71,7 @@ import {
 } from "./native-executor.ts";
 import { RelayClient } from "./relay-client.ts";
 import { RelayServer } from "./relay.ts";
+import { OrganizationAuthority } from "./organization.ts";
 
 declare module "@deepseek-ai/cordis" {
   interface Context {
@@ -104,6 +120,8 @@ export class SquadService extends Service {
   readonly attachments: AttachmentVerifier;
   readonly #starting = new Set<string>();
   readonly #dispatchingPlans = new Map<string, Promise<TeamPlan>>();
+  readonly #stateListeners = new Set<(revision: number) => void>();
+  #stateRevision = 1;
   #timer?: ReturnType<typeof setInterval>;
   #pumping = false;
   #closed = false;
@@ -177,6 +195,7 @@ export class SquadService extends Service {
     if (this.#closed) return;
     this.#closed = true;
     if (this.#timer !== undefined) clearInterval(this.#timer);
+    this.#stateListeners.clear();
     await this.executor.dispose();
     this.relayServer?.close();
     this.database.close();
@@ -184,6 +203,19 @@ export class SquadService extends Service {
 
   listPeers(): Promise<PeerRecord[]> {
     return Promise.resolve(this.database.listPeers());
+  }
+
+  subscribeLocalState(listener: (revision: number) => void): () => void {
+    this.#stateListeners.add(listener);
+    listener(this.#stateRevision);
+    return () => this.#stateListeners.delete(listener);
+  }
+
+  private touchLocalState(): void {
+    this.#stateRevision += 1;
+    for (const listener of this.#stateListeners) {
+      listener(this.#stateRevision);
+    }
   }
 
   addPeer(input: {
@@ -206,7 +238,350 @@ export class SquadService extends Service {
     });
     const peer = this.database.findPeer(input.nodeId);
     if (peer === undefined) throw new Error("peer was not persisted");
+    this.touchLocalState();
     return Promise.resolve(peer);
+  }
+
+  updatePeerPolicy(
+    nodeId: string,
+    policy: Partial<PeerPolicy>,
+  ): Promise<PeerRecord> {
+    const peer = this.database.updatePeerPolicy(nodeId, policy);
+    this.touchLocalState();
+    return Promise.resolve(peer);
+  }
+
+  listOrganizations(): Promise<OrganizationView[]> {
+    return Promise.resolve(
+      this.database.listOrganizations(this.identity.nodeId),
+    );
+  }
+
+  sessionOrganization(sessionId?: string): OrganizationView | undefined {
+    if (sessionId === undefined) return undefined;
+    const organizationId = this.database.sessionOrganization(sessionId);
+    return organizationId === undefined
+      ? undefined
+      : this.database.findOrganization(organizationId, this.identity.nodeId);
+  }
+
+  listRecipients(sessionId?: string): Promise<{
+    organization?: OrganizationView;
+    members: ResolvedDelegationRecipient[];
+  }> {
+    const organization = this.sessionOrganization(sessionId);
+    if (organization === undefined) {
+      return Promise.resolve({ members: this.database.listPeers() });
+    }
+    if (organization.selfMembershipId === undefined) {
+      throw new Error("the Session organization is not active for this Node");
+    }
+    const senderMembershipId = organization.selfMembershipId;
+    return Promise.resolve({
+      organization,
+      members: organization.members
+        .filter((member) => !member.isSelf && member.status === "ACTIVE")
+        .map((member) => ({
+          nodeId: member.nodeId,
+          displayName: member.displayName,
+          publicKey: member.publicKey,
+          enabled: true,
+          policy: member.policy,
+          organizationId: organization.organizationId,
+          membershipId: member.membershipId,
+          senderMembershipId,
+        })),
+    });
+  }
+
+  private requireRelayClient(): RelayClient {
+    if (this.relayClient === undefined) {
+      throw new Error("a Relay connection is required for organizations");
+    }
+    return this.relayClient;
+  }
+
+  private selfOrganizationMember(
+    directory: OrganizationDirectoryRecord,
+  ): OrganizationMembershipCertificate {
+    const member = [...directory.members.values()].find(
+      (candidate) =>
+        candidate.nodeId === this.identity.nodeId &&
+        candidate.status === "ACTIVE",
+    );
+    if (member === undefined) {
+      throw new Error("this Node is not an active organization member");
+    }
+    return member;
+  }
+
+  private async syncOrganizations(): Promise<boolean> {
+    if (this.relayClient === undefined) return false;
+    const bundles = await this.relayClient.organizations();
+    let changed = false;
+    for (const bundle of bundles) {
+      changed =
+        this.database.applyOrganizationBundle(bundle, this.identity.nodeId) ||
+        changed;
+    }
+    if (changed) this.touchLocalState();
+    return changed;
+  }
+
+  async createOrganization(nameCandidate: string): Promise<OrganizationView> {
+    const name = nameCandidate.trim();
+    if (name.length < 1 || name.length > 120) {
+      throw new Error("organization name must contain 1 to 120 characters");
+    }
+    const relay = this.requireRelayClient();
+    const organizationId = randomUUID();
+    const ownerMembershipId = randomUUID();
+    const authority = OrganizationAuthority.create(
+      join(
+        this.config.dataDir,
+        "organizations",
+        organizationId,
+        "authority.json",
+      ),
+    );
+    const createdAt = new Date().toISOString();
+    const unsignedDocument = unsignedOrganizationDocumentSchema.parse({
+      version: 1,
+      organizationId,
+      name,
+      authorityId: authority.authorityId,
+      authorityPublicKey: authority.publicKey,
+      ownerMembershipId,
+      createdAt,
+    });
+    const document: OrganizationDocument = {
+      ...unsignedDocument,
+      signature: authority.sign(unsignedDocument),
+    };
+    const unsignedOwner = unsignedOrganizationMembershipCertificateSchema.parse(
+      {
+        version: 1,
+        organizationId,
+        organizationRevision: 1,
+        membershipId: ownerMembershipId,
+        memberRevision: 1,
+        nodeId: this.identity.nodeId,
+        publicKey: this.identity.publicKey,
+        displayName: this.config.displayName,
+        role: "OWNER",
+        status: "ACTIVE",
+        issuer: { kind: "AUTHORITY", authorityId: authority.authorityId },
+        issuedAt: createdAt,
+      },
+    );
+    const ownerCertificate: OrganizationMembershipCertificate = {
+      ...unsignedOwner,
+      signature: authority.sign(unsignedOwner),
+    };
+    await relay.createOrganization(document, ownerCertificate);
+    await this.syncOrganizations();
+    const organization = this.database.findOrganization(
+      organizationId,
+      this.identity.nodeId,
+    );
+    if (organization === undefined) {
+      throw new Error("created organization was not synchronized");
+    }
+    return organization;
+  }
+
+  async createOrganizationInvitation(
+    organizationSelector: string,
+    expiresInMinutes = 1_440,
+  ): Promise<{ invitation: string; expiresAt: string }> {
+    await this.syncOrganizations();
+    const organization = this.database.findOrganization(
+      organizationSelector,
+      this.identity.nodeId,
+    );
+    if (
+      organization === undefined ||
+      organization.membershipStatus !== "ACTIVE"
+    ) {
+      throw new Error("unknown active organization");
+    }
+    if (!organization.role || !["OWNER", "ADMIN"].includes(organization.role)) {
+      throw new Error("Owner or Admin role is required to create invitations");
+    }
+    return this.requireRelayClient().createOrganizationInvitation(
+      organization.organizationId,
+      expiresInMinutes,
+    );
+  }
+
+  async joinOrganization(invitationCandidate: string): Promise<void> {
+    const invitation = invitationCandidate.trim();
+    const organizationId = organizationIdFromInvitation(invitation);
+    const unsignedRequest = unsignedOrganizationJoinRequestSchema.parse({
+      version: 1,
+      requestId: randomUUID(),
+      organizationId,
+      membershipId: randomUUID(),
+      nodeId: this.identity.nodeId,
+      publicKey: this.identity.publicKey,
+      displayName: this.config.displayName,
+      requestedAt: new Date().toISOString(),
+    });
+    const request: OrganizationJoinRequest = {
+      ...unsignedRequest,
+      signature: this.identity.sign(unsignedRequest),
+    };
+    await this.requireRelayClient().joinOrganization(invitation, request);
+    await this.syncOrganizations();
+  }
+
+  private memberCertificate(
+    directory: OrganizationDirectoryRecord,
+    target: {
+      membershipId: string;
+      memberRevision: number;
+      nodeId: string;
+      publicKey: string;
+      displayName: string;
+      role: OrganizationRole;
+      status: "ACTIVE" | "DISABLED";
+    },
+  ): OrganizationMembershipCertificate {
+    const issuer = this.selfOrganizationMember(directory);
+    const unsigned = unsignedOrganizationMembershipCertificateSchema.parse({
+      version: 1,
+      organizationId: directory.document.organizationId,
+      organizationRevision: directory.revision + 1,
+      ...target,
+      issuer: {
+        kind: "MEMBER",
+        membershipId: issuer.membershipId,
+        nodeId: issuer.nodeId,
+      },
+      issuedAt: new Date().toISOString(),
+    });
+    return { ...unsigned, signature: this.identity.sign(unsigned) };
+  }
+
+  async approveOrganizationJoin(
+    organizationId: string,
+    requestId: string,
+  ): Promise<void> {
+    await this.syncOrganizations();
+    const directory = this.database.organizationDirectory(organizationId);
+    if (directory === undefined) throw new Error("unknown organization");
+    const request = directory.pendingJoinRequests.find(
+      (candidate) => candidate.requestId === requestId,
+    );
+    if (request === undefined) throw new Error("unknown pending join request");
+    const certificate = this.memberCertificate(directory, {
+      membershipId: request.membershipId,
+      memberRevision: 1,
+      nodeId: request.nodeId,
+      publicKey: request.publicKey,
+      displayName: request.displayName,
+      role: "MEMBER",
+      status: "ACTIVE",
+    });
+    await this.requireRelayClient().approveOrganizationJoin(
+      organizationId,
+      requestId,
+      certificate,
+    );
+    await this.syncOrganizations();
+  }
+
+  private async changeOrganizationMember(
+    organizationId: string,
+    membershipId: string,
+    change: { role?: OrganizationRole; status?: "ACTIVE" | "DISABLED" },
+  ): Promise<void> {
+    await this.syncOrganizations();
+    const directory = this.database.organizationDirectory(organizationId);
+    if (directory === undefined) throw new Error("unknown organization");
+    const current = directory.members.get(membershipId);
+    if (current === undefined) throw new Error("unknown organization member");
+    const certificate = this.memberCertificate(directory, {
+      membershipId: current.membershipId,
+      memberRevision: current.memberRevision + 1,
+      nodeId: current.nodeId,
+      publicKey: current.publicKey,
+      displayName: current.displayName,
+      role: change.role ?? current.role,
+      status: change.status ?? current.status,
+    });
+    await this.requireRelayClient().updateOrganizationMember(
+      organizationId,
+      membershipId,
+      certificate,
+    );
+    await this.syncOrganizations();
+  }
+
+  async setOrganizationMemberRole(
+    organizationId: string,
+    membershipId: string,
+    roleCandidate: string,
+  ): Promise<void> {
+    const role = organizationRoleSchema.parse(roleCandidate);
+    if (role === "OWNER") {
+      throw new Error("Owner transfer is not supported in directory v1");
+    }
+    const organization = this.database.findOrganization(
+      organizationId,
+      this.identity.nodeId,
+    );
+    if (organization?.role !== "OWNER") {
+      throw new Error("only the Owner can appoint or demote Admins");
+    }
+    await this.changeOrganizationMember(organizationId, membershipId, { role });
+  }
+
+  async setOrganizationMemberEnabled(
+    organizationId: string,
+    membershipId: string,
+    enabled: boolean,
+  ): Promise<void> {
+    await this.changeOrganizationMember(organizationId, membershipId, {
+      status: enabled ? "ACTIVE" : "DISABLED",
+    });
+  }
+
+  updateOrganizationMemberPolicy(
+    organizationId: string,
+    membershipId: string,
+    policy: Partial<PeerPolicy>,
+  ): Promise<OrganizationMemberView> {
+    const member = this.database.updateOrganizationMemberPolicy(
+      organizationId,
+      membershipId,
+      policy,
+    );
+    this.touchLocalState();
+    return Promise.resolve(member);
+  }
+
+  selectSessionOrganization(
+    sessionId: string,
+    organizationSelector?: string,
+  ): Promise<void> {
+    const organizationId =
+      organizationSelector === undefined
+        ? undefined
+        : this.database.findOrganization(
+            organizationSelector,
+            this.identity.nodeId,
+          )?.organizationId;
+    if (organizationSelector !== undefined && organizationId === undefined) {
+      throw new Error(`unknown organization ${organizationSelector}`);
+    }
+    this.database.setSessionOrganization(
+      sessionId,
+      organizationId,
+      this.identity.nodeId,
+    );
+    this.touchLocalState();
+    return Promise.resolve();
   }
 
   private createEnvelope(
@@ -214,10 +589,15 @@ export class SquadService extends Service {
     recipientNodeId: string,
     correlationId: string,
     payload: unknown,
+    routing?: {
+      organizationId: string;
+      senderMembershipId: string;
+      recipientMembershipId: string;
+    },
   ): Envelope {
     const createdAt = new Date();
     const unsigned = {
-      protocolVersion: 1,
+      protocolVersion: routing === undefined ? 1 : 2,
       envelopeId: randomUUID(),
       kind,
       senderNodeId: this.identity.nodeId,
@@ -227,9 +607,39 @@ export class SquadService extends Service {
       expiresAt: new Date(
         createdAt.getTime() + this.config.envelopeTtlMinutes * 60_000,
       ).toISOString(),
+      ...(routing === undefined ? {} : routing),
       payload,
     } as UnsignedEnvelope;
     return envelopeSchema.parse(this.identity.signEnvelope(unsigned));
+  }
+
+  private routingForDelegation(delegation: DelegationRecord):
+    | {
+        organizationId: string;
+        senderMembershipId: string;
+        recipientMembershipId: string;
+      }
+    | undefined {
+    if (delegation.organizationId === undefined) return undefined;
+    if (
+      delegation.senderMembershipId === undefined ||
+      delegation.recipientMembershipId === undefined
+    ) {
+      throw new Error(
+        "organization delegation has incomplete membership routing",
+      );
+    }
+    return delegation.direction === "OUTGOING"
+      ? {
+          organizationId: delegation.organizationId,
+          senderMembershipId: delegation.senderMembershipId,
+          recipientMembershipId: delegation.recipientMembershipId,
+        }
+      : {
+          organizationId: delegation.organizationId,
+          senderMembershipId: delegation.recipientMembershipId,
+          recipientMembershipId: delegation.senderMembershipId,
+        };
   }
 
   async delegate(
@@ -243,13 +653,10 @@ export class SquadService extends Service {
     candidate: CreateDelegationInput,
     delegationIdCandidate: string,
     initiatingSessionId?: string,
+    organizationIdOverride?: string,
   ): Promise<DelegationView> {
     const input = createDelegationInputSchema.parse(candidate);
     const delegationId = idSchema.parse(delegationIdCandidate);
-    const peer = this.database.findPeer(input.to);
-    if (peer === undefined) {
-      throw new Error(`peer ${input.to} is not paired or is disabled`);
-    }
     const parentFromSession =
       initiatingSessionId === undefined
         ? undefined
@@ -271,12 +678,22 @@ export class SquadService extends Service {
     if (parentId !== undefined && parent === undefined) {
       throw new Error("parentDelegationId is not local to this Node");
     }
+    const sessionOrganizationId =
+      initiatingSessionId === undefined
+        ? undefined
+        : this.database.sessionOrganization(initiatingSessionId);
+    const organizationId =
+      organizationIdOverride ?? sessionOrganizationId ?? parent?.organizationId;
+    const peer = this.resolveRecipient(input.to, organizationId);
     const depth = (parent?.delegationDepth ?? -1) + 1;
     const existing = this.database.getDelegation(delegationId);
     if (existing !== undefined) {
       const sameRequest =
         existing.direction === "OUTGOING" &&
         existing.peerNodeId === peer.nodeId &&
+        existing.organizationId === peer.organizationId &&
+        existing.senderMembershipId === peer.senderMembershipId &&
+        existing.recipientMembershipId === peer.membershipId &&
         existing.parentDelegationId === parentId &&
         existing.objective === input.objective &&
         existing.context === input.context &&
@@ -293,7 +710,7 @@ export class SquadService extends Service {
       return existing;
     }
     if (!peer.enabled) {
-      throw new Error(`peer ${input.to} is not paired or is disabled`);
+      throw new Error(`recipient ${input.to} is unavailable or disabled`);
     }
     if (!peer.policy.canDelegate) {
       throw new Error(`peer ${peer.displayName} does not allow delegation`);
@@ -317,27 +734,89 @@ export class SquadService extends Service {
       peer.nodeId,
       delegationId,
       request,
+      peer.organizationId === undefined ||
+        peer.senderMembershipId === undefined ||
+        peer.membershipId === undefined
+        ? undefined
+        : {
+            organizationId: peer.organizationId,
+            senderMembershipId: peer.senderMembershipId,
+            recipientMembershipId: peer.membershipId,
+          },
     );
     this.database.createOutgoing(request, envelope, envelopeDigest(envelope));
     await this.flushOutbox();
     const record = this.database.getDelegation(delegationId);
     if (record === undefined) throw new Error("delegation was not persisted");
+    this.touchLocalState();
     return record;
   }
 
-  createTeamPlan(candidate: CreateTeamPlanInput): Promise<TeamPlan> {
-    const input = createTeamPlanInputSchema.parse(candidate);
-    const peers = input.items.map((item) => {
-      const peer = this.database.findPeer(item.to);
-      if (peer === undefined || !peer.enabled) {
-        throw new Error(`peer ${item.to} is not paired or is disabled`);
+  private resolveRecipient(
+    selector: string,
+    organizationId?: string,
+  ): ResolvedDelegationRecipient {
+    if (organizationId === undefined) {
+      const peer = this.database.findPeer(selector);
+      if (peer === undefined) {
+        throw new Error(`peer ${selector} is not paired or is disabled`);
       }
+      return peer;
+    }
+    const organization = this.database.findOrganization(
+      organizationId,
+      this.identity.nodeId,
+    );
+    if (
+      organization === undefined ||
+      organization.membershipStatus !== "ACTIVE" ||
+      organization.selfMembershipId === undefined
+    ) {
+      throw new Error("the selected organization is not active on this Node");
+    }
+    const member = this.database.findOrganizationMember(
+      organization.organizationId,
+      selector,
+      this.identity.nodeId,
+    );
+    if (member === undefined || member.status !== "ACTIVE" || member.isSelf) {
+      throw new Error(
+        `member ${selector} is not active in organization ${organization.name}`,
+      );
+    }
+    return {
+      nodeId: member.nodeId,
+      displayName: member.displayName,
+      publicKey: member.publicKey,
+      enabled: true,
+      policy: member.policy,
+      organizationId: organization.organizationId,
+      membershipId: member.membershipId,
+      senderMembershipId: organization.selfMembershipId,
+    };
+  }
+
+  createTeamPlan(
+    candidate: CreateTeamPlanInput,
+    initiatingSessionId?: string,
+  ): Promise<TeamPlan> {
+    const input = createTeamPlanInputSchema.parse(candidate);
+    const organizationId =
+      initiatingSessionId === undefined
+        ? undefined
+        : this.database.sessionOrganization(initiatingSessionId);
+    const peers = input.items.map((item) => {
+      const peer = this.resolveRecipient(item.to, organizationId);
+      if (!peer.enabled)
+        throw new Error(`recipient ${item.to} is unavailable or disabled`);
       if (!peer.policy.canDelegate) {
         throw new Error(`peer ${peer.displayName} does not allow delegation`);
       }
       return peer;
     });
-    return Promise.resolve(this.database.createTeamPlan(input, peers));
+    const plan = this.database.createTeamPlan(input, peers, organizationId);
+    this.touchLocalState();
+    return Promise.resolve(plan);
   }
 
   getTeamPlan(id: string): Promise<TeamPlan | undefined> {
@@ -371,6 +850,8 @@ export class SquadService extends Service {
             attachmentRefs: item.attachmentRefs,
           },
           item.id,
+          undefined,
+          plan.organizationId,
         );
         this.database.markTeamPlanItemDispatched(id, item.id, item.id);
       } catch (error) {
@@ -519,6 +1000,7 @@ export class SquadService extends Service {
         ...(reason === undefined ? {} : { reason }),
         requestedAt: new Date().toISOString(),
       },
+      this.routingForDelegation(delegation),
     );
     this.database.enqueue(envelope, envelopeDigest(envelope));
     await this.flushOutbox();
@@ -542,6 +1024,27 @@ export class SquadService extends Service {
   }
 
   private policyFor(delegation: DelegationRecord): PeerPolicy {
+    if (
+      delegation.organizationId !== undefined &&
+      delegation.senderMembershipId !== undefined
+    ) {
+      const member = this.database.findOrganizationMember(
+        delegation.organizationId,
+        delegation.senderMembershipId,
+        this.identity.nodeId,
+      );
+      if (
+        member === undefined ||
+        member.status !== "ACTIVE" ||
+        member.nodeId !== delegation.peerNodeId
+      ) {
+        throw new ExecutionFailure(
+          "PEER_DISABLED",
+          "sender organization membership is no longer active",
+        );
+      }
+      return member.policy;
+    }
     const peer = this.database.findPeer(delegation.peerNodeId);
     if (peer === undefined || !peer.enabled) {
       throw new ExecutionFailure(
@@ -557,7 +1060,10 @@ export class SquadService extends Service {
     alreadyRunning = false,
   ): PeerPolicy {
     const policy = this.policyFor(delegation);
-    const running = this.database.countRunningFromPeer(delegation.peerNodeId);
+    const running = this.database.countRunningFromPeer(
+      delegation.peerNodeId,
+      delegation.organizationId,
+    );
     const competing = alreadyRunning ? Math.max(0, running - 1) : running;
     if (competing >= policy.maxConcurrent) {
       throw new ExecutionFailure(
@@ -593,10 +1099,18 @@ export class SquadService extends Service {
                 ? "Running on the receiving Personal Agent."
                 : "Resumed after local human input.",
           });
+      if (running.organizationId !== undefined) {
+        this.database.setSessionOrganization(
+          sessionId,
+          running.organizationId,
+          this.identity.nodeId,
+        );
+      }
       if (!alreadyRunning) {
         this.enqueueUpdate(running);
         await this.flushOutbox();
       }
+      this.touchLocalState();
       const outcome =
         humanResponse === undefined
           ? await this.executor.execute(running, policy, verifiedAttachments)
@@ -630,6 +1144,7 @@ export class SquadService extends Service {
       }
     } finally {
       this.#starting.delete(candidate.id);
+      this.touchLocalState();
     }
   }
 
@@ -694,6 +1209,7 @@ export class SquadService extends Service {
       delegation.peerNodeId,
       delegation.id,
       payload,
+      this.routingForDelegation(delegation),
     );
     this.database.enqueue(envelope, envelopeDigest(envelope));
   }
@@ -718,11 +1234,12 @@ export class SquadService extends Service {
       delegation.peerNodeId,
       delegation.id,
       payload,
+      this.routingForDelegation(delegation),
     );
     this.database.enqueue(envelope, envelopeDigest(envelope));
   }
 
-  private validateIncoming(envelope: Envelope): PeerRecord {
+  private validateIncoming(envelope: Envelope): ResolvedDelegationRecipient {
     if (envelopePayloadBytes(envelope) > MAX_ENVELOPE_BYTES) {
       throw new PermanentEnvelopeError(
         "incoming envelope exceeds the configured size boundary",
@@ -746,11 +1263,65 @@ export class SquadService extends Service {
     if (Date.parse(envelope.expiresAt) <= Date.now()) {
       throw new PermanentEnvelopeError("incoming envelope has expired");
     }
-    const peer = this.database.findPeer(envelope.senderNodeId);
-    if (peer === undefined || !peer.enabled) {
-      throw new PermanentEnvelopeError(
-        "incoming envelope sender is not an enabled local peer",
+    let peer: ResolvedDelegationRecipient;
+    if (envelope.protocolVersion === 2) {
+      const organizationId = envelope.organizationId;
+      const senderMembershipId = envelope.senderMembershipId;
+      const recipientMembershipId = envelope.recipientMembershipId;
+      if (
+        organizationId === undefined ||
+        senderMembershipId === undefined ||
+        recipientMembershipId === undefined
+      ) {
+        throw new PermanentEnvelopeError(
+          "incoming organization routing is incomplete",
+        );
+      }
+      const organization = this.database.findOrganization(
+        organizationId,
+        this.identity.nodeId,
       );
+      const sender = this.database.findOrganizationMember(
+        organizationId,
+        senderMembershipId,
+        this.identity.nodeId,
+      );
+      const recipient = this.database.findOrganizationMember(
+        organizationId,
+        recipientMembershipId,
+        this.identity.nodeId,
+      );
+      if (
+        organization?.membershipStatus !== "ACTIVE" ||
+        sender === undefined ||
+        sender.status !== "ACTIVE" ||
+        sender.nodeId !== envelope.senderNodeId ||
+        recipient === undefined ||
+        recipient.status !== "ACTIVE" ||
+        !recipient.isSelf
+      ) {
+        throw new PermanentEnvelopeError(
+          "incoming organization membership is not active",
+        );
+      }
+      peer = {
+        nodeId: sender.nodeId,
+        displayName: sender.displayName,
+        publicKey: sender.publicKey,
+        enabled: true,
+        policy: sender.policy,
+        organizationId,
+        membershipId: sender.membershipId,
+        senderMembershipId: recipient.membershipId,
+      };
+    } else {
+      const directPeer = this.database.findPeer(envelope.senderNodeId);
+      if (directPeer === undefined || !directPeer.enabled) {
+        throw new PermanentEnvelopeError(
+          "incoming envelope sender is not an enabled local peer",
+        );
+      }
+      peer = directPeer;
     }
     if (
       !verifySignature(
@@ -764,6 +1335,27 @@ export class SquadService extends Service {
       );
     }
     return peer;
+  }
+
+  private incomingEnvelopeMatchesDelegation(
+    envelope: Envelope,
+    delegation: DelegationRecord,
+  ): boolean {
+    if (delegation.organizationId === undefined) {
+      return envelope.organizationId === undefined;
+    }
+    if (
+      envelope.organizationId !== delegation.organizationId ||
+      delegation.senderMembershipId === undefined ||
+      delegation.recipientMembershipId === undefined
+    ) {
+      return false;
+    }
+    return delegation.direction === "OUTGOING"
+      ? envelope.senderMembershipId === delegation.recipientMembershipId &&
+          envelope.recipientMembershipId === delegation.senderMembershipId
+      : envelope.senderMembershipId === delegation.senderMembershipId &&
+          envelope.recipientMembershipId === delegation.recipientMembershipId;
   }
 
   private async processEnvelope(envelope: Envelope): Promise<void> {
@@ -826,21 +1418,31 @@ export class SquadService extends Service {
     if (receipt === "DUPLICATE") return;
     if (parsed.kind === "DELEGATION_UPDATE") {
       const local = this.database.getDelegation(parsed.payload.delegationId);
-      if (local?.peerNodeId === peer.nodeId) {
+      if (
+        local?.peerNodeId === peer.nodeId &&
+        this.incomingEnvelopeMatchesDelegation(parsed, local)
+      ) {
         this.database.applyRemoteUpdate(parsed.payload);
       }
       return;
     }
     if (parsed.kind === "DELEGATION_RESULT") {
       const local = this.database.getDelegation(parsed.payload.delegationId);
-      if (local?.peerNodeId === peer.nodeId) {
+      if (
+        local?.peerNodeId === peer.nodeId &&
+        this.incomingEnvelopeMatchesDelegation(parsed, local)
+      ) {
         this.database.applyRemoteResult(parsed.payload);
       }
       return;
     }
     if (parsed.kind === "DELEGATION_CANCEL_REQUEST") {
       const local = this.database.getDelegation(parsed.payload.delegationId);
-      if (local?.peerNodeId === peer.nodeId && local.direction === "INCOMING") {
+      if (
+        local?.peerNodeId === peer.nodeId &&
+        local.direction === "INCOMING" &&
+        this.incomingEnvelopeMatchesDelegation(parsed, local)
+      ) {
         await this.cancelIncoming(local.id, parsed.payload.reason);
       }
       return;
@@ -849,10 +1451,12 @@ export class SquadService extends Service {
 
   async flushOutbox(): Promise<void> {
     if (this.relayClient === undefined) return;
+    let changed = false;
     for (const pending of this.database.pendingEnvelopes()) {
       try {
         await this.relayClient.submit(pending.envelope);
         this.database.markEnvelopeDelivered(pending.envelope.envelopeId);
+        changed = true;
       } catch (error) {
         this.database.markEnvelopeAttemptFailed(
           pending.envelope.envelopeId,
@@ -861,6 +1465,7 @@ export class SquadService extends Service {
         break;
       }
     }
+    if (changed) this.touchLocalState();
   }
 
   private async pollMailbox(): Promise<void> {
@@ -889,12 +1494,14 @@ export class SquadService extends Service {
       await this.relayClient.acknowledge(item.envelope.envelopeId);
       this.database.advanceMailboxCursor(this.config.relay.url, item.cursor);
     }
+    if (mailbox.items.length > 0) this.touchLocalState();
   }
 
   async pump(): Promise<void> {
     if (this.#pumping || this.#closed) return;
     this.#pumping = true;
     try {
+      await this.syncOrganizations();
       await this.flushOutbox();
       await this.pollMailbox();
       await this.flushOutbox();
@@ -913,6 +1520,9 @@ export class SquadService extends Service {
     identity: { nodeId: string; displayName: string; publicKey: string };
     relay: { configured: boolean; serving: boolean };
     peers: PeerRecord[];
+    organizations: OrganizationView[];
+    sessionOrganizations: Record<string, string>;
+    revision: number;
     plans: TeamPlan[];
     delegations: DelegationRecord[];
   } {
@@ -927,6 +1537,9 @@ export class SquadService extends Service {
         serving: this.relayServer !== undefined,
       },
       peers: this.database.listPeers(),
+      organizations: this.database.listOrganizations(this.identity.nodeId),
+      sessionOrganizations: this.database.sessionOrganizations(),
+      revision: this.#stateRevision,
       plans: this.database.listTeamPlans(),
       delegations: this.database.listDelegations(),
     };
@@ -996,7 +1609,9 @@ export class SquadService extends Service {
             this.ctx.tools.get("delegate_to_agent") !== undefined &&
             this.ctx.tools.get("get_delegation_status") !== undefined &&
             this.ctx.tools.get("list_squad_peers") !== undefined &&
-            this.ctx.tools.get("propose_team_plan") !== undefined,
+            this.ctx.tools.get("propose_team_plan") !== undefined &&
+            this.ctx.tools.get("list_squad_organizations") !== undefined &&
+            this.ctx.tools.get("select_squad_organization") !== undefined,
           preset: preset.id,
         };
       } finally {

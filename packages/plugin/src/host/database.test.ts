@@ -5,8 +5,13 @@ import { randomUUID } from "node:crypto";
 import { DatabaseSync } from "node:sqlite";
 import { describe, expect, it } from "vitest";
 import { envelopeDigest } from "../shared/canonical.ts";
+import {
+  unsignedOrganizationDocumentSchema,
+  unsignedOrganizationMembershipCertificateSchema,
+} from "../shared/organizations.ts";
 import { NodeIdentity } from "./identity.ts";
 import { SquadDatabase } from "./database.ts";
+import { OrganizationAuthority } from "./organization.ts";
 
 describe("SquadDatabase", () => {
   it("migrates repeatedly and deduplicates request envelopes", () => {
@@ -74,7 +79,7 @@ describe("SquadDatabase", () => {
     const schema = migrated
       .prepare("SELECT version FROM schema_meta WHERE singleton = 1")
       .get();
-    expect(schema?.version).toBe(3);
+    expect(schema?.version).toBe(5);
     migrated.close();
   });
 
@@ -319,6 +324,177 @@ describe("SquadDatabase", () => {
     expect(finished.items.every((item) => item.status === "DISPATCHED")).toBe(
       true,
     );
+    reopened.close();
+  });
+
+  it("persists a verified organization, local member policy, and Session scope", () => {
+    const root = mkdtempSync(join(tmpdir(), "dsh-squad-org-db-"));
+    const dbPath = join(root, "node.sqlite");
+    const owner = NodeIdentity.load(join(root, "owner.json"));
+    const member = NodeIdentity.load(join(root, "member.json"));
+    const authority = OrganizationAuthority.create(
+      join(root, "authority.json"),
+    );
+    const organizationId = randomUUID();
+    const ownerMembershipId = randomUUID();
+    const memberMembershipId = randomUUID();
+    const now = new Date().toISOString();
+    const unsignedDocument = unsignedOrganizationDocumentSchema.parse({
+      version: 1,
+      organizationId,
+      name: "Persistence Team",
+      authorityId: authority.authorityId,
+      authorityPublicKey: authority.publicKey,
+      ownerMembershipId,
+      createdAt: now,
+    });
+    const document = {
+      ...unsignedDocument,
+      signature: authority.sign(unsignedDocument),
+    };
+    const unsignedOwner = unsignedOrganizationMembershipCertificateSchema.parse(
+      {
+        version: 1,
+        organizationId,
+        organizationRevision: 1,
+        membershipId: ownerMembershipId,
+        memberRevision: 1,
+        nodeId: owner.nodeId,
+        publicKey: owner.publicKey,
+        displayName: "Owner",
+        role: "OWNER",
+        status: "ACTIVE",
+        issuer: { kind: "AUTHORITY", authorityId: authority.authorityId },
+        issuedAt: now,
+      },
+    );
+    const ownerCertificate = {
+      ...unsignedOwner,
+      signature: authority.sign(unsignedOwner),
+    };
+    const unsignedMember =
+      unsignedOrganizationMembershipCertificateSchema.parse({
+        version: 1,
+        organizationId,
+        organizationRevision: 2,
+        membershipId: memberMembershipId,
+        memberRevision: 1,
+        nodeId: member.nodeId,
+        publicKey: member.publicKey,
+        displayName: "Member",
+        role: "MEMBER",
+        status: "ACTIVE",
+        issuer: {
+          kind: "MEMBER",
+          membershipId: ownerMembershipId,
+          nodeId: owner.nodeId,
+        },
+        issuedAt: now,
+      });
+    const memberCertificate = {
+      ...unsignedMember,
+      signature: owner.sign(unsignedMember),
+    };
+    const bundle = {
+      document,
+      revision: 2,
+      events: [ownerCertificate, memberCertificate],
+      selfStatus: "ACTIVE" as const,
+      pendingJoinRequests: [],
+    };
+
+    const db = new SquadDatabase(dbPath);
+    db.bindIdentity(owner.nodeId, owner.publicKey, owner.createdAt);
+    expect(db.applyOrganizationBundle(bundle, owner.nodeId)).toBe(true);
+    expect(db.applyOrganizationBundle(bundle, owner.nodeId)).toBe(false);
+    expect(db.listPeers()).toEqual([]);
+    expect(db.findPeer(member.nodeId)).toBeUndefined();
+    db.updateOrganizationMemberPolicy(organizationId, memberMembershipId, {
+      autoExecute: "SAFE",
+    });
+    const organizationMember = db.findOrganizationMember(
+      organizationId,
+      memberMembershipId,
+      owner.nodeId,
+    );
+    if (organizationMember === undefined) {
+      throw new Error("organization member was not projected");
+    }
+    const plan = db.createTeamPlan(
+      {
+        title: "Organization-only plan",
+        items: [{ to: memberMembershipId, objective: "Review the draft" }],
+      },
+      [
+        {
+          nodeId: organizationMember.nodeId,
+          displayName: organizationMember.displayName,
+          publicKey: organizationMember.publicKey,
+          enabled: true,
+          policy: organizationMember.policy,
+          organizationId,
+          membershipId: memberMembershipId,
+          senderMembershipId: ownerMembershipId,
+        },
+      ],
+      organizationId,
+    );
+    const delegationId = randomUUID();
+    const request = {
+      delegationId,
+      objective: "Organization-only delegation",
+      acceptanceCriteria: [],
+      attachmentRefs: [],
+      delegationDepth: 0,
+    };
+    const envelope = owner.signEnvelope({
+      protocolVersion: 2,
+      envelopeId: randomUUID(),
+      kind: "DELEGATION_REQUEST",
+      senderNodeId: owner.nodeId,
+      recipientNodeId: member.nodeId,
+      correlationId: delegationId,
+      createdAt: now,
+      expiresAt: new Date(Date.now() + 60_000).toISOString(),
+      organizationId,
+      senderMembershipId: ownerMembershipId,
+      recipientMembershipId: memberMembershipId,
+      payload: request,
+    });
+    db.createOutgoing(request, envelope, envelopeDigest(envelope));
+    db.setSessionOrganization(
+      "session-persistence",
+      organizationId,
+      owner.nodeId,
+    );
+    db.close();
+
+    const reopened = new SquadDatabase(dbPath);
+    const organization = reopened.findOrganization(
+      organizationId,
+      owner.nodeId,
+    );
+    expect(organization).toMatchObject({
+      name: "Persistence Team",
+      role: "OWNER",
+      membershipStatus: "ACTIVE",
+      revision: 2,
+    });
+    expect(
+      organization?.members.find(
+        (candidate) => candidate.membershipId === memberMembershipId,
+      )?.policy.autoExecute,
+    ).toBe("SAFE");
+    expect(reopened.sessionOrganization("session-persistence")).toBe(
+      organizationId,
+    );
+    expect(reopened.getTeamPlan(plan.id)?.organizationId).toBe(organizationId);
+    expect(reopened.getDelegation(delegationId)).toMatchObject({
+      organizationId,
+      senderMembershipId: ownerMembershipId,
+      recipientMembershipId: memberMembershipId,
+    });
+    expect(reopened.listPeers()).toEqual([]);
     reopened.close();
   });
 });

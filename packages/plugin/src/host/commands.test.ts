@@ -19,7 +19,12 @@ function commandHarness(peers: Awaited<ReturnType<SquadService["listPeers"]>>) {
   });
   const ctx = { commands: { register } } as unknown as Context;
   const squad = {
-    listPeers: vi.fn().mockResolvedValue(peers),
+    listRecipients: vi.fn().mockResolvedValue({ members: peers }),
+    listOrganizations: vi.fn().mockResolvedValue([]),
+    sessionOrganization: vi.fn().mockReturnValue(undefined),
+    selectSessionOrganization: vi.fn().mockResolvedValue(undefined),
+    createOrganizationInvitation: vi.fn(),
+    setOrganizationMemberRole: vi.fn(),
   } as unknown as SquadService;
   const returnedDisposers = registerSquadCommands(ctx, squad);
   return { definitions, disposers, register, returnedDisposers, squad };
@@ -32,7 +37,11 @@ function invocation(
 ): CommandInvocation {
   return {
     commandId: "test-command" as CommandInvocation["commandId"],
-    agent: { followup, session: { append } } as unknown as Agent,
+    agent: {
+      id: "session_test",
+      followup,
+      session: { append },
+    } as unknown as Agent,
     rawInput,
     signal: new AbortController().signal,
   };
@@ -47,7 +56,9 @@ describe("Squad slash commands", () => {
     expect(harness.returnedDisposers).toEqual(harness.disposers);
     expect(
       harness.definitions
-        .filter(({ name }) => name !== "squad-peers")
+        .filter(({ name }) =>
+          ["squad-plan", "squad-task", "squad-status"].includes(name),
+        )
         .every(({ recordInput }) => recordInput === false),
     ).toBe(true);
   });
@@ -153,7 +164,7 @@ describe("Squad slash commands", () => {
     expect(result).toMatchObject({
       text: expect.stringContaining("安全目标自动执行"),
     });
-    expect(harness.squad.listPeers).toHaveBeenCalledOnce();
+    expect(harness.squad.listRecipients).toHaveBeenCalledOnce();
     expect(append).toHaveBeenCalledWith(
       "user/message",
       expect.objectContaining({
@@ -172,6 +183,35 @@ describe("Squad slash commands", () => {
         }),
       }),
       { surfaceOp: "append" },
+    );
+  });
+
+  it("selects one organization for the current Session", async () => {
+    const harness = commandHarness([]);
+    vi.mocked(harness.squad.sessionOrganization).mockReturnValue({
+      organizationId: "52d596aa-306a-4475-ad73-d95040813310",
+      name: "Product",
+      role: "OWNER",
+      selfMembershipId: "c321ad37-df34-4f96-bffa-5ad21b20d040",
+      membershipStatus: "ACTIVE",
+      revision: 1,
+      createdAt: "2026-08-17T00:00:00.000Z",
+      members: [],
+      pendingJoinRequests: [],
+    });
+    const command = harness.definitions.find(
+      ({ name }) => name === "squad-org",
+    );
+    if (command === undefined) throw new Error("missing squad-org command");
+
+    const result = await command.handler(invocation("Product"));
+    expect(result).toMatchObject({
+      kind: "success",
+      text: expect.stringContaining("Product"),
+    });
+    expect(harness.squad.selectSessionOrganization).toHaveBeenCalledWith(
+      "session_test",
+      "Product",
     );
   });
 });

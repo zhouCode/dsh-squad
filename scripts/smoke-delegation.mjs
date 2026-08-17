@@ -28,7 +28,7 @@ const skillFixture = join(
   "squad-count-items",
 );
 const artifactsDir = join(root, "artifacts");
-const pluginTarball = join(artifactsDir, "dsh-squad-plugin-0.2.0.tgz");
+const pluginTarball = join(artifactsDir, "dsh-squad-plugin-0.4.0.tgz");
 const fixtureTarball = join(
   artifactsDir,
   "dsh-squad-deterministic-agent-fixture-0.0.0.tgz",
@@ -385,14 +385,11 @@ async function pairPeer(page, peer, displayName, autoExecute) {
   await dialog.getByLabel("Ed25519 public key").fill(peer.publicKey);
   await dialog.getByLabel("Automatic execution").selectOption(autoExecute);
   await dialog.getByRole("button", { name: "Save peer", exact: true }).click();
-  await dialog.getByText(displayName, { exact: true }).first().waitFor();
-  const policyLabel = {
-    NEVER: "Never",
-    SAFE: "Safe objectives only",
-    TRUSTED: "Trusted objectives",
-  }[autoExecute];
-  assert(policyLabel !== undefined);
-  await dialog.getByText(policyLabel, { exact: true }).first().waitFor();
+  const peerRow = dialog.locator(".squad-peer").filter({
+    hasText: displayName,
+  });
+  await peerRow.waitFor({ state: "visible" });
+  assert.equal(await peerRow.locator("select").inputValue(), autoExecute);
   await closeInbox(dialog);
 }
 
@@ -643,7 +640,7 @@ async function main() {
     log("starting one Relay plus two real, isolated DSH Web Hosts");
     await relay.start();
     const health = await fetchJson(`${relayUrl}/squad/v1/health`);
-    assert.deepEqual(health, { ok: true, protocolVersion: 1 });
+    assert.deepEqual(health, { ok: true, protocolVersions: [1, 2] });
     await alice.start();
     await bob.start();
 
@@ -673,7 +670,7 @@ async function main() {
       );
     });
 
-    log("creating a local Team Coordinator draft and approving it in WebUI");
+    log("creating a local Team Planner draft and approving it in WebUI");
     const planFixtureMarker = "TEAM_PLAN_FIXTURE";
     const plan = await fetchJson(
       `http://127.0.0.1:${alicePort}/squad/v1/local/plans`,
@@ -681,7 +678,7 @@ async function main() {
         method: "POST",
         headers: { "content-type": "application/json" },
         body: JSON.stringify({
-          title: "Coordinator smoke plan",
+          title: "Team Planner smoke plan",
           sourceSummary: "One reviewed item must become one signed delegation.",
           items: [
             {
@@ -699,19 +696,19 @@ async function main() {
       matching(await localState(alicePort), planFixtureMarker, "OUTGOING")
         .length,
       0,
-      "a Coordinator draft must not dispatch before local approval",
+      "a Team Planner draft must not dispatch before local approval",
     );
     let dialog = await openInbox(alicePage);
     await dialog.getByRole("button", { name: "Plans", exact: true }).click();
     await dialog
-      .getByText("Coordinator smoke plan", { exact: true })
+      .getByText("Team Planner smoke plan", { exact: true })
       .first()
       .waitFor();
     await dialog
       .getByRole("button", { name: "Approve and dispatch", exact: true })
       .click();
     const dispatchedPlan = await waitFor(
-      "reviewed Coordinator plan dispatch",
+      "reviewed Team Planner dispatch",
       async () => {
         const state = await localState(alicePort);
         const candidate = state.plans.find((item) => item.id === plan.id);
@@ -884,14 +881,11 @@ async function main() {
     bobPage = await openDshPage(context, bobPort, false);
     dialog = await openInbox(bobPage);
     await dialog.getByRole("button", { name: "Settings", exact: true }).click();
-    await dialog
-      .getByText("Alice Personal Agent", { exact: true })
-      .first()
-      .waitFor();
-    await dialog
-      .getByText("Trusted objectives", { exact: true })
-      .first()
-      .waitFor();
+    const alicePeerRow = dialog.locator(".squad-peer").filter({
+      hasText: "Alice Personal Agent",
+    });
+    await alicePeerRow.waitFor({ state: "visible" });
+    assert.equal(await alicePeerRow.locator("select").inputValue(), "TRUSTED");
     await dialog
       .getByRole("button", { name: "Waiting for me", exact: true })
       .click();
@@ -1102,7 +1096,7 @@ async function main() {
     await disabledPage.close();
 
     log(
-      "PASS: tarball, Coordinator approval, bilingual DSH UI, offline Relay, Skill, Todo, resume, privacy, and Chromium",
+      "PASS: tarball, Team Planner approval, bilingual DSH UI, offline Relay, Skill, Todo, resume, privacy, and Chromium",
     );
   } catch (error) {
     for (const host of [alice, bob, relay]) {

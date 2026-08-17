@@ -3,6 +3,10 @@ import type {
   TeamPlanItemStatus,
   TeamPlanStatus,
 } from "../shared/contracts.ts";
+import type {
+  OrganizationMemberStatus,
+  OrganizationRole,
+} from "../shared/organizations.ts";
 import type { DelegationStatus } from "../shared/state.ts";
 
 export const SQUAD_LOCALE_NS = "dsh-squad";
@@ -16,6 +20,7 @@ export const zh = {
   "tab.running": "运行中",
   "tab.sent": "已发送",
   "tab.completed": "已完成",
+  "tab.organizations": "组织",
   "tab.settings": "设置",
   "direction.received": "收到",
   "direction.sent": "已发送",
@@ -41,6 +46,12 @@ export const zh = {
   "action.approvePlan": "确认并分派",
   "action.retryPlan": "重试未发送项",
   "action.cancelPlan": "取消剩余计划项",
+  "action.createOrganization": "创建组织",
+  "action.joinOrganization": "申请加入",
+  "action.createInvitation": "创建一次性邀请",
+  "action.approveJoin": "批准加入",
+  "action.enableMember": "启用成员",
+  "action.disableMember": "禁用成员",
   "plan.approvalHint":
     "确认后，每个计划项会通过现有签名委派发送；接收方仍按自己的 Peer 策略决定是否执行。",
   "plan.itemCount": "共 {count} 个计划项",
@@ -57,8 +68,41 @@ export const zh = {
   "settings.nodeId": "节点 ID",
   "settings.publicKey": "Ed25519 公钥",
   "settings.autoExecute": "自动执行",
+  "settings.trustedWarning":
+    "“受信目标”会跳过人工确认并在本机运行；仅对你充分信任的成员启用。",
   "settings.languageHint":
     "界面语言由 DSH 全局设置统一控制；首次使用时跟随系统语言。",
+  "context.node": "当前节点",
+  "context.session": "当前会话",
+  "context.organization": "组织上下文",
+  "context.directPeers": "直接对等方",
+  "context.noSession": "尚未选择 DSH 会话",
+  "context.selectHint":
+    "每个会话可独立选择一个组织；任务只在该组织成员目录内解析。",
+  "organizations.title": "组织",
+  "organizations.create": "创建新组织",
+  "organizations.join": "使用一次性邀请申请加入",
+  "organizations.name": "组织名称",
+  "organizations.invitation": "组织邀请",
+  "organizations.invitationExpiry": "邀请有效期（分钟）",
+  "organizations.invitationResult": "一次性邀请（请通过安全渠道发送）",
+  "organizations.invitationExpires": "有效期至 {time}",
+  "organizations.members": "成员",
+  "organizations.pendingRequests": "待审批加入申请",
+  "organizations.noPendingRequests": "没有待审批申请。",
+  "organizations.noOrganizations": "当前节点尚未加入任何组织。",
+  "organizations.self": "本节点",
+  "organizations.localPolicy": "本机接收策略",
+  "organizations.directoryRevision": "签名目录修订 {revision}",
+  "organizations.pendingHint": "加入申请已发送，等待 Owner 或 Admin 批准。",
+  "organizations.securityHint":
+    "组织目录由成员签名并在本机验证；Relay 只中继目录和加密身份边界，不获得本机 Agent 能力。",
+  "organizationRole.OWNER": "所有者",
+  "organizationRole.ADMIN": "管理员",
+  "organizationRole.MEMBER": "成员",
+  "organizationStatus.ACTIVE": "活动",
+  "organizationStatus.PENDING": "待批准",
+  "organizationStatus.DISABLED": "已禁用",
   "empty.list": "这里暂时没有内容。",
   "empty.selection": "请选择一个委派。",
   "empty.plans":
@@ -95,6 +139,9 @@ export const zh = {
   "error.pairingFailed": "配对失败",
   "error.loadFailed": "无法加载 Squad 状态",
   "error.planActionFailed": "分派计划操作失败",
+  "error.organizationActionFailed": "组织操作失败",
+  "error.policyUpdateFailed": "无法更新自动执行策略",
+  "error.sessionOrganizationFailed": "无法切换会话组织",
   "error.withCode": "{message}（{code}）",
   "error.withDetail": "{message}：{detail}",
   "errorCode.EXECUTION_INTERRUPTED": "执行被中断",
@@ -132,6 +179,7 @@ export const en = {
   "tab.running": "Running",
   "tab.sent": "Sent",
   "tab.completed": "Completed",
+  "tab.organizations": "Organizations",
   "tab.settings": "Settings",
   "direction.received": "Received",
   "direction.sent": "Sent",
@@ -157,6 +205,12 @@ export const en = {
   "action.approvePlan": "Approve and dispatch",
   "action.retryPlan": "Retry unsent items",
   "action.cancelPlan": "Cancel remaining items",
+  "action.createOrganization": "Create organization",
+  "action.joinOrganization": "Request to join",
+  "action.createInvitation": "Create one-time invitation",
+  "action.approveJoin": "Approve join",
+  "action.enableMember": "Enable member",
+  "action.disableMember": "Disable member",
   "plan.approvalHint":
     "Approval creates one existing signed delegation per item; each recipient still decides execution through their own Peer policy.",
   "plan.itemCount": "{count} plan items",
@@ -173,8 +227,44 @@ export const en = {
   "settings.nodeId": "Node ID",
   "settings.publicKey": "Ed25519 public key",
   "settings.autoExecute": "Automatic execution",
+  "settings.trustedWarning":
+    "Trusted objectives skip human approval and run on this computer. Enable this only for members you fully trust.",
   "settings.languageHint":
     "The DSH global language setting controls this interface; first use follows the system language.",
+  "context.node": "Current Node",
+  "context.session": "Current session",
+  "context.organization": "Organization context",
+  "context.directPeers": "Direct Peers",
+  "context.noSession": "No DSH session is selected",
+  "context.selectHint":
+    "Each session can select one organization independently; recipients resolve only inside that signed member directory.",
+  "organizations.title": "Organizations",
+  "organizations.create": "Create an organization",
+  "organizations.join": "Request access with a one-time invitation",
+  "organizations.name": "Organization name",
+  "organizations.invitation": "Organization invitation",
+  "organizations.invitationExpiry": "Invitation lifetime (minutes)",
+  "organizations.invitationResult":
+    "One-time invitation (send through a secure channel)",
+  "organizations.invitationExpires": "Expires at {time}",
+  "organizations.members": "Members",
+  "organizations.pendingRequests": "Pending join requests",
+  "organizations.noPendingRequests": "No pending join requests.",
+  "organizations.noOrganizations":
+    "This Node has not joined an organization yet.",
+  "organizations.self": "This Node",
+  "organizations.localPolicy": "Local receiving policy",
+  "organizations.directoryRevision": "Signed directory revision {revision}",
+  "organizations.pendingHint":
+    "The join request was sent and is waiting for an Owner or Admin.",
+  "organizations.securityHint":
+    "Members sign the organization directory and every Node verifies it locally. Relay only brokers the directory and identity boundary; it gains no local Agent capability.",
+  "organizationRole.OWNER": "Owner",
+  "organizationRole.ADMIN": "Admin",
+  "organizationRole.MEMBER": "Member",
+  "organizationStatus.ACTIVE": "Active",
+  "organizationStatus.PENDING": "Pending approval",
+  "organizationStatus.DISABLED": "Disabled",
   "empty.list": "Nothing here.",
   "empty.selection": "Select a delegation.",
   "empty.plans":
@@ -211,6 +301,9 @@ export const en = {
   "error.pairingFailed": "Pairing failed",
   "error.loadFailed": "Could not load Squad state",
   "error.planActionFailed": "Delegation plan action failed",
+  "error.organizationActionFailed": "Organization action failed",
+  "error.policyUpdateFailed": "Could not update automatic execution policy",
+  "error.sessionOrganizationFailed": "Could not change session organization",
   "error.withCode": "{message} ({code})",
   "error.withDetail": "{message}: {detail}",
   "errorCode.EXECUTION_INTERRUPTED": "Execution interrupted",
@@ -271,6 +364,21 @@ const policyKeys = {
   TRUSTED: "policy.TRUSTED",
 } as const satisfies Record<string, SquadLocaleKey>;
 
+const organizationRoleKeys = {
+  OWNER: "organizationRole.OWNER",
+  ADMIN: "organizationRole.ADMIN",
+  MEMBER: "organizationRole.MEMBER",
+} as const satisfies Record<OrganizationRole, SquadLocaleKey>;
+
+const organizationStatusKeys = {
+  ACTIVE: "organizationStatus.ACTIVE",
+  PENDING: "organizationStatus.PENDING",
+  DISABLED: "organizationStatus.DISABLED",
+} as const satisfies Record<
+  OrganizationMemberStatus | "PENDING",
+  SquadLocaleKey
+>;
+
 const planStatusKeys = {
   DRAFT: "planStatus.DRAFT",
   DISPATCHING: "planStatus.DISPATCHING",
@@ -330,6 +438,20 @@ export function formatDelivery(t: SquadTranslate, status: string): string {
 export function formatPolicy(t: SquadTranslate, policy: string): string {
   const key = policyKeys[policy as keyof typeof policyKeys];
   return key === undefined ? policy : t(key);
+}
+
+export function formatOrganizationRole(
+  t: SquadTranslate,
+  role: OrganizationRole,
+): string {
+  return t(organizationRoleKeys[role]);
+}
+
+export function formatOrganizationStatus(
+  t: SquadTranslate,
+  status: OrganizationMemberStatus | "PENDING",
+): string {
+  return t(organizationStatusKeys[status]);
 }
 
 export function formatPlanStatus(

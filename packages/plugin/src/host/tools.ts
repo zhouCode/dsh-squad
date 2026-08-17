@@ -20,7 +20,8 @@ const teamPlanItem = {
     to: {
       type: "string" as const,
       required: true as const,
-      description: "Paired peer display name or stable nodeId.",
+      description:
+        "Current organization member or direct Peer display name, stable nodeId, or membershipId.",
     },
     objective: {
       type: "string" as const,
@@ -57,7 +58,8 @@ export function registerSquadTools(
         to: {
           type: "string",
           required: true,
-          description: "Paired peer display name or stable nodeId.",
+          description:
+            "Current organization member or direct Peer display name, stable nodeId, or membershipId.",
         },
         objective: {
           type: "string",
@@ -185,7 +187,7 @@ export function registerSquadTools(
     defineTool({
       name: "list_squad_peers",
       description:
-        "用户询问团队成员、谁在团队里或任务可以交给谁时列出本节点已配对成员；规划或委派时若成员名称不明确，也应先调用。List locally paired Squad members and delegation availability when the user asks who is on the team, who can receive work, or when planning/delegation needs recipient resolution.",
+        "用户询问团队成员、谁在团队里或任务可以交给谁时，列出当前 Session 组织的活动成员；Session 未选择组织时列出直接 Peer。规划或委派时若成员名称不明确，也应先调用。List active members in the current Session organization, or direct Peers when no organization is selected. Use it for team discovery and recipient resolution.",
       parameters: {},
       output: {
         schema: { type: "json" },
@@ -193,11 +195,23 @@ export function registerSquadTools(
           { type: "text", text: JSON.stringify(value) },
         ],
       },
-      async execute() {
-        const records = await squad.listPeers();
+      async execute(_args, exec) {
+        const { organization, members } = await squad.listRecipients(
+          exec.agent?.id,
+        );
         return {
-          peers: records.map((peer) => ({
+          ...(organization === undefined
+            ? { scope: "DIRECT_PEERS" }
+            : {
+                scope: "ORGANIZATION",
+                organizationId: organization.organizationId,
+                organizationName: organization.name,
+              }),
+          peers: members.map((peer) => ({
             nodeId: peer.nodeId,
+            ...(peer.membershipId === undefined
+              ? {}
+              : { membershipId: peer.membershipId }),
             displayName: peer.displayName,
             enabled: peer.enabled,
             canDelegate: peer.policy.canDelegate,
@@ -212,7 +226,7 @@ export function registerSquadTools(
     defineTool({
       name: "propose_team_plan",
       description:
-        "用户要求根据会议纪要、团队目标或一批工作进行总结分工、拆解任务、安排多人协作时，创建本地团队分派草案；通常先调用 list_squad_peers。Create a local delegation draft when the user asks to turn meeting notes, a team objective, or a work batch into a team plan. Usually call list_squad_peers first. The owner must review the draft; this tool never dispatches tasks.",
+        "用户要求根据会议纪要、团队目标或一批工作进行总结分工、拆解任务、安排多人协作时，使用 Team Planner 创建本地团队分派草案；通常先调用 list_squad_peers。Create a local Team Planner draft from meeting notes or a team objective. The local user must review it; this tool never dispatches tasks.",
       parameters: {
         title: {
           type: "string",
@@ -249,24 +263,27 @@ export function registerSquadTools(
           },
         ],
       },
-      async execute(args) {
-        const plan = await squad.createTeamPlan({
-          title: args.title,
-          ...(args.sourceSummary === undefined
-            ? {}
-            : { sourceSummary: args.sourceSummary }),
-          items: args.items.map((item) => ({
-            to: item.to,
-            objective: item.objective,
-            ...(item.context === undefined ? {} : { context: item.context }),
-            ...(item.acceptanceCriteria === undefined
+      async execute(args, exec) {
+        const plan = await squad.createTeamPlan(
+          {
+            title: args.title,
+            ...(args.sourceSummary === undefined
               ? {}
-              : { acceptanceCriteria: item.acceptanceCriteria }),
-            ...(item.attachmentRefs === undefined
-              ? {}
-              : { attachmentRefs: item.attachmentRefs }),
-          })),
-        });
+              : { sourceSummary: args.sourceSummary }),
+            items: args.items.map((item) => ({
+              to: item.to,
+              objective: item.objective,
+              ...(item.context === undefined ? {} : { context: item.context }),
+              ...(item.acceptanceCriteria === undefined
+                ? {}
+                : { acceptanceCriteria: item.acceptanceCriteria }),
+              ...(item.attachmentRefs === undefined
+                ? {}
+                : { attachmentRefs: item.attachmentRefs }),
+            })),
+          },
+          exec.agent?.id,
+        );
         return {
           planId: plan.id,
           status: plan.status,
@@ -277,5 +294,106 @@ export function registerSquadTools(
     }),
   );
 
-  return [delegate, status, peers, proposePlan];
+  const organizations = ctx.tools.register(
+    defineTool({
+      name: "list_squad_organizations",
+      description:
+        "用户询问当前节点加入了哪些组织、所在团队、组织角色或组织状态时调用。List every Squad organization this Node belongs to, including local role and membership status.",
+      parameters: {},
+      output: {
+        schema: { type: "json" },
+        render: (_args, value) => [
+          { type: "text", text: JSON.stringify(value) },
+        ],
+      },
+      async execute(_args, exec) {
+        const records = await squad.listOrganizations();
+        const current = squad.sessionOrganization(exec.agent?.id);
+        return {
+          ...(current === undefined
+            ? {}
+            : { currentOrganizationId: current.organizationId }),
+          organizations: records.map((organization) => ({
+            organizationId: organization.organizationId,
+            name: organization.name,
+            ...(organization.role === undefined
+              ? {}
+              : { role: organization.role }),
+            membershipStatus: organization.membershipStatus,
+            memberCount: organization.members.filter(
+              (member) => member.status === "ACTIVE",
+            ).length,
+          })),
+        };
+      },
+    }),
+  );
+
+  const selectOrganization = ctx.tools.register(
+    defineTool({
+      name: "select_squad_organization",
+      description:
+        "用户明确要求把当前会话切换到某个 Squad 组织或直接 Peer 时调用；组织不明确时先调用 list_squad_organizations。Select an organization or direct-Peer context for the current Session only. Never guess an ambiguous organization.",
+      parameters: {
+        organization: {
+          type: "string",
+          required: true,
+          description:
+            'Exact organization name, stable organizationId, or "direct" to clear organization scope.',
+        },
+      },
+      output: {
+        schema: {
+          type: "object",
+          additionalProperties: false,
+          properties: {
+            scope: { type: "string", required: true },
+            organizationId: { type: "string" },
+            name: { type: "string" },
+          },
+        },
+        render: (_args, value) => [
+          {
+            type: "text",
+            text:
+              value.scope === "DIRECT_PEERS"
+                ? "Session scope: direct Peers"
+                : `Session organization: ${value.name} (${value.organizationId})`,
+          },
+        ],
+      },
+      async execute(args, exec) {
+        if (exec.agent?.id === undefined) {
+          throw new Error("organization selection requires a DSH Session");
+        }
+        const direct = ["direct", "none", "clear"].includes(
+          args.organization.trim().toLowerCase(),
+        );
+        await squad.selectSessionOrganization(
+          exec.agent.id,
+          direct ? undefined : args.organization,
+        );
+        const selected = squad.sessionOrganization(exec.agent.id);
+        if (selected === undefined) {
+          if (!direct)
+            throw new Error("selected organization was not persisted");
+          return { scope: "DIRECT_PEERS" };
+        }
+        return {
+          scope: "ORGANIZATION",
+          organizationId: selected.organizationId,
+          name: selected.name,
+        };
+      },
+    }),
+  );
+
+  return [
+    delegate,
+    status,
+    peers,
+    proposePlan,
+    organizations,
+    selectOrganization,
+  ];
 }

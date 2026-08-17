@@ -48,6 +48,33 @@ function reply(res: ServerResponse, status: number, value: unknown): void {
   res.end(bytes);
 }
 
+function streamLocalState(
+  req: IncomingMessage,
+  res: ServerResponse,
+  squad: SquadService,
+): void {
+  res.writeHead(200, {
+    "content-type": "text/event-stream; charset=utf-8",
+    "cache-control": "no-store",
+    connection: "keep-alive",
+    "x-accel-buffering": "no",
+  });
+  res.write("retry: 3000\n\n");
+  const dispose = squad.subscribeLocalState((revision) => {
+    if (!res.destroyed) {
+      res.write(`event: state\ndata: ${JSON.stringify({ revision })}\n\n`);
+    }
+  });
+  const heartbeat = setInterval(() => {
+    if (!res.destroyed) res.write(": keepalive\n\n");
+  }, 20_000);
+  heartbeat.unref?.();
+  req.once("close", () => {
+    clearInterval(heartbeat);
+    dispose();
+  });
+}
+
 function assertSameOrigin(req: IncomingMessage): void {
   const origin = req.headers.origin;
   if (origin === undefined) return;
@@ -59,6 +86,21 @@ function assertSameOrigin(req: IncomingMessage): void {
   }
 }
 
+function assertLoopbackClient(req: IncomingMessage): void {
+  const address = req.socket.remoteAddress;
+  const loopback =
+    address === "::1" ||
+    address?.startsWith("127.") === true ||
+    address?.startsWith("::ffff:127.") === true;
+  if (
+    !loopback ||
+    req.headers["x-forwarded-for"] !== undefined ||
+    req.headers["x-real-ip"] !== undefined
+  ) {
+    throw new LocalHttpError(403, "LOCAL_API_REQUIRES_LOOPBACK");
+  }
+}
+
 export function createHttpHandler(squad: SquadService) {
   return async (req: IncomingMessage, res: ServerResponse): Promise<void> => {
     if (await squad.relayServer?.handle(req, res)) return;
@@ -67,8 +109,15 @@ export function createHttpHandler(squad: SquadService) {
       `http://${req.headers.host ?? "localhost"}`,
     );
     try {
+      if (url.pathname.startsWith("/squad/v1/local/")) {
+        assertLoopbackClient(req);
+      }
       if (req.method === "GET" && url.pathname === "/squad/v1/local/state") {
         reply(res, 200, squad.localState());
+        return;
+      }
+      if (req.method === "GET" && url.pathname === "/squad/v1/local/events") {
+        streamLocalState(req, res, squad);
         return;
       }
       if (req.method === "POST") assertSameOrigin(req);
@@ -100,6 +149,136 @@ export function createHttpHandler(squad: SquadService) {
           policy: peerPolicySchema.parse(body.policy ?? {}),
         });
         reply(res, 201, peer);
+        return;
+      }
+      const directPeerPolicy =
+        /^\/squad\/v1\/local\/peers\/(node_[A-Za-z0-9_-]{43})\/policy$/u.exec(
+          url.pathname,
+        );
+      if (req.method === "POST" && directPeerPolicy?.[1] !== undefined) {
+        const body = (await readJson(req, 8 * 1024)) as Record<string, unknown>;
+        const peer = await squad.updatePeerPolicy(directPeerPolicy[1], {
+          autoExecute: peerPolicySchema.shape.autoExecute.parse(
+            body.autoExecute,
+          ),
+        });
+        reply(res, 200, peer);
+        return;
+      }
+      if (
+        req.method === "POST" &&
+        url.pathname === "/squad/v1/local/organizations"
+      ) {
+        const body = (await readJson(req, 8 * 1024)) as Record<string, unknown>;
+        reply(
+          res,
+          201,
+          await squad.createOrganization(String(body.name ?? "")),
+        );
+        return;
+      }
+      if (
+        req.method === "POST" &&
+        url.pathname === "/squad/v1/local/organizations/join"
+      ) {
+        const body = (await readJson(req, 8 * 1024)) as Record<string, unknown>;
+        await squad.joinOrganization(String(body.invitation ?? ""));
+        reply(res, 202, { ok: true });
+        return;
+      }
+      const organizationInvitation =
+        /^\/squad\/v1\/local\/organizations\/([0-9a-f-]{36})\/invitations$/u.exec(
+          url.pathname,
+        );
+      if (req.method === "POST" && organizationInvitation?.[1] !== undefined) {
+        const body = (await readJson(req, 8 * 1024)) as Record<string, unknown>;
+        const rawMinutes = Number(body.expiresInMinutes ?? 1_440);
+        if (!Number.isInteger(rawMinutes)) {
+          throw new LocalHttpError(400, "INVALID_INVITATION_EXPIRY");
+        }
+        reply(
+          res,
+          201,
+          await squad.createOrganizationInvitation(
+            organizationInvitation[1],
+            rawMinutes,
+          ),
+        );
+        return;
+      }
+      const approveOrganizationJoin =
+        /^\/squad\/v1\/local\/organizations\/([0-9a-f-]{36})\/join-requests\/([0-9a-f-]{36})\/approve$/u.exec(
+          url.pathname,
+        );
+      if (
+        req.method === "POST" &&
+        approveOrganizationJoin?.[1] !== undefined &&
+        approveOrganizationJoin[2] !== undefined
+      ) {
+        await readJson(req, 1_024);
+        await squad.approveOrganizationJoin(
+          approveOrganizationJoin[1],
+          approveOrganizationJoin[2],
+        );
+        reply(res, 200, { ok: true });
+        return;
+      }
+      const organizationMemberAction =
+        /^\/squad\/v1\/local\/organizations\/([0-9a-f-]{36})\/members\/([0-9a-f-]{36})\/(role|status|policy)$/u.exec(
+          url.pathname,
+        );
+      if (
+        req.method === "POST" &&
+        organizationMemberAction?.[1] !== undefined &&
+        organizationMemberAction[2] !== undefined &&
+        organizationMemberAction[3] !== undefined
+      ) {
+        const body = (await readJson(req, 8 * 1024)) as Record<string, unknown>;
+        if (organizationMemberAction[3] === "role") {
+          await squad.setOrganizationMemberRole(
+            organizationMemberAction[1],
+            organizationMemberAction[2],
+            String(body.role ?? ""),
+          );
+        }
+        if (organizationMemberAction[3] === "status") {
+          await squad.setOrganizationMemberEnabled(
+            organizationMemberAction[1],
+            organizationMemberAction[2],
+            body.enabled === true,
+          );
+        }
+        if (organizationMemberAction[3] === "policy") {
+          await squad.updateOrganizationMemberPolicy(
+            organizationMemberAction[1],
+            organizationMemberAction[2],
+            {
+              autoExecute: peerPolicySchema.shape.autoExecute.parse(
+                body.autoExecute,
+              ),
+            },
+          );
+        }
+        reply(res, 200, { ok: true });
+        return;
+      }
+      if (
+        req.method === "POST" &&
+        url.pathname === "/squad/v1/local/session-organization"
+      ) {
+        const body = (await readJson(req, 8 * 1024)) as Record<string, unknown>;
+        const sessionId = String(body.sessionId ?? "").trim();
+        if (sessionId.length === 0) {
+          throw new LocalHttpError(400, "SESSION_REQUIRED");
+        }
+        await squad.selectSessionOrganization(
+          sessionId,
+          typeof body.organizationId === "string" &&
+            body.organizationId.trim().length > 0
+            ? body.organizationId
+            : undefined,
+        );
+        reply(res, 200, { ok: true });
         return;
       }
       const action =
