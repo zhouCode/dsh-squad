@@ -11,6 +11,12 @@ All notable changes to this project are documented in this file. The format is b
 - A bilingual `Plans` / `分派计划` WebUI for reviewing every recipient, objective, context, acceptance criterion, and attachment before approval.
 - Idempotent batch dispatch with stable per-item Delegation IDs, partial-failure reporting, retry, cancellation of remaining items, and restart recovery.
 - Local plan creation, approval, retry, and cancellation endpoints for future connector integrations.
+- Namespaced `/squad-plan`, `/squad-task`, `/squad-peers`, and `/squad-status` commands through DSH's native on-demand Slash Command surface, with no additional buttons or persistent launcher.
+- Bilingual natural-language and `@member` trigger guidance for planning, delegation, Peer discovery, and status checks, including explicit clarification instead of guessing ambiguous recipients.
+
+### Fixed
+
+- `/squad-peers` now publishes its bilingual result as a durable Squad notice, so member names are visible even when the command is invoked from a blank new Session, without waking the model.
 
 ### Security
 

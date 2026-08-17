@@ -146,6 +146,11 @@ Relay API 注册在宿主 WebServer 的 `/squad/v1` 下；它验证 enrollment�
 - `list_squad_peers`：列出本地已配对成员及其当前委派可用状态；
 - `propose_team_plan`：创建等待负责人审阅的本地分派草案，绝不直接发送。
 
+不需要在聊天中输入这些工具的完整名称。Squad 支持两种按需触发方式，且不会为这些快捷触发另增按钮或常驻入口：
+
+- **自然语言或成员提及**：例如“把发布说明交给 Bob”“`@Bob` 整理本周变更”“根据这段会议纪要给团队分工”“查一下刚才那项委派的进度”。成员或目标有歧义时，Agent 会先要求澄清。
+- **统一前缀的英文 Slash 命令**：`/squad-task <@member and objective>`、`/squad-plan <team goal or meeting notes>`、`/squad-peers`、`/squad-status [delegation ID or question]`。输入 `/` 时由 DSH 原生命令菜单按需发现，所有名称都使用 `squad-` 前缀以避免和其他插件冲突。
+
 `智能体收件箱` 提供`分派计划`、`待我处理`、`运行中`、`已发送`、`已完成`和`设置`；英文界面对应 `Plans`、`Waiting for me`、`Running`、`Sent`、`Completed` 和 `Settings`。负责人可以审阅、确认、重试或取消计划的剩余项；接收方可以选择一个或多个 Todo，提交文本或经 SHA-256/大小验证的附件引用，重启后继续处理，并打开对应的原生 DSH Session。
 
 ## 语言

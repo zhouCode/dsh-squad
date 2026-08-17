@@ -147,6 +147,11 @@ The plugin registers four native tools with the Personal Agent:
 - `list_squad_peers`: list locally paired members and current delegation availability;
 - `propose_team_plan`: create a local draft for owner review without dispatching it.
 
+Users do not need to type those full tool names in chat. Squad provides two on-demand trigger styles without adding new buttons or a persistent launcher for these shortcuts:
+
+- **Natural language or member mentions**: for example, “Give the release notes to Bob,” “`@Bob` summarize this week's changes,” “Turn these meeting notes into a team plan,” or “Check that delegation's progress.” The Agent asks for clarification when the recipient or objective is ambiguous.
+- **English Slash commands under one prefix**: `/squad-task <@member and objective>`, `/squad-plan <team goal or meeting notes>`, `/squad-peers`, and `/squad-status [delegation ID or question]`. DSH's native command menu discovers them on demand after `/` is entered, and the shared `squad-` prefix prevents collisions with other plugins.
+
 `Agent Inbox` provides `Plans`, `Waiting for me`, `Running`, `Sent`, `Completed`, and `Settings` views. An owner can review, approve, retry, or cancel a plan's remaining items. A recipient can select one or more Todos, submit text or SHA-256/size-validated attachment references, continue after restart, and open the associated native DSH Session.
 
 ## Languages

@@ -52,7 +52,7 @@ export function registerSquadTools(
     defineTool({
       name: "delegate_to_agent",
       description:
-        "Delegate an objective to a paired person's existing Personal Agent. The receiving Agent chooses its own local skills, tools, MCP servers, credentials, and permissions. This call never grants remote capabilities.",
+        "将任务委派给已配对成员的 Personal Agent。用户说“交给 Bob”“让 Alice 处理”“委派给某人”或使用“@Bob + 任务”时应调用；@name 是简称时先调用 list_squad_peers，并传入匹配到的完整 displayName 或 nodeId。若成员或目标不明确，先澄清，绝不猜测。Delegate when the user says assign/send/hand this to a paired member or writes @name with an objective. Resolve shorthand through list_squad_peers and pass the exact displayName or nodeId. The receiving Agent chooses its own local capabilities; this call never grants remote capabilities.",
       parameters: {
         to: {
           type: "string",
@@ -132,7 +132,7 @@ export function registerSquadTools(
     defineTool({
       name: "get_delegation_status",
       description:
-        "Read this Node's public projection of one sent or received delegation. It never returns a remote session, private HumanTodo details, credentials, or hidden reasoning.",
+        "用户询问某项委派的进度、状态、结果或失败原因时，读取本 Node 可见的公开投影。Read the public projection when the user asks for a delegation's progress, status, result, or failure reason. It never returns a remote session, private HumanTodo details, credentials, or hidden reasoning.",
       parameters: {
         delegationId: { type: "string", required: true },
       },
@@ -185,7 +185,7 @@ export function registerSquadTools(
     defineTool({
       name: "list_squad_peers",
       description:
-        "列出本节点已配对的 Squad 成员及其委派可用状态。List locally paired Squad members and whether delegation is currently allowed.",
+        "用户询问团队成员、谁在团队里或任务可以交给谁时列出本节点已配对成员；规划或委派时若成员名称不明确，也应先调用。List locally paired Squad members and delegation availability when the user asks who is on the team, who can receive work, or when planning/delegation needs recipient resolution.",
       parameters: {},
       output: {
         schema: { type: "json" },
@@ -212,7 +212,7 @@ export function registerSquadTools(
     defineTool({
       name: "propose_team_plan",
       description:
-        "创建本地团队分派草案，供负责人在 Squad 界面审核；此工具绝不会直接发送任务。Create a local team delegation draft for owner review; this tool never dispatches tasks.",
+        "用户要求根据会议纪要、团队目标或一批工作进行总结分工、拆解任务、安排多人协作时，创建本地团队分派草案；通常先调用 list_squad_peers。Create a local delegation draft when the user asks to turn meeting notes, a team objective, or a work batch into a team plan. Usually call list_squad_peers first. The owner must review the draft; this tool never dispatches tasks.",
       parameters: {
         title: {
           type: "string",

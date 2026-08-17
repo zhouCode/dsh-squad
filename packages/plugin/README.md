@@ -38,6 +38,8 @@ The bundled `cordis.patch.yml` inserts the `dsh-squad` entry. Override it in `$D
 
 The native WebUI exposes `Agent Inbox` / `智能体收件箱` for delegation-plan review, Peer policy, inbox and outbox state, HumanTodo input, and links to native DSH Sessions. Agents receive `delegate_to_agent`, `get_delegation_status`, `list_squad_peers`, and `propose_team_plan`. A proposal stays local until the owner approves it under `Plans` / `分派计划`; recipient policy and approval remain independent.
 
+Chat triggering stays unobtrusive: use natural language or `@member`, or use the namespaced English commands `/squad-task`, `/squad-plan`, `/squad-peers`, and `/squad-status`. They are discovered through DSH's native `/` menu; this package adds no command buttons or persistent launcher.
+
 ## Languages
 
 Simplified Chinese and English are complete, type-checked dictionaries owned by the plugin. A fresh WebUI follows the system language reported by the browser (`zh-*` → Simplified Chinese, `en-*` → English, unsupported languages → Simplified Chinese). An explicit choice under `Settings → General → Language` is persisted by the Host and updates the UI immediately.

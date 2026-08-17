@@ -38,6 +38,8 @@ dsh web
 
 原生 WebUI 提供`智能体收件箱` / `Agent Inbox`，用于审阅分派计划、管理 Peer 策略、收发箱状态、HumanTodo 输入和原生 DSH Session 链接。Agent 会获得 `delegate_to_agent`、`get_delegation_status`、`list_squad_peers` 和 `propose_team_plan` 四个工具。计划草案会一直保留在本地，直到负责人在`分派计划` / `Plans`中确认；接收方自己的策略和审批仍然独立生效。
 
+聊天触发保持轻量：可以直接使用自然语言或 `@成员`，也可以使用统一命名空间下的英文命令 `/squad-task`、`/squad-plan`、`/squad-peers` 和 `/squad-status`。命令通过 DSH 原生的 `/` 菜单按需发现；插件不会增加命令按钮或常驻启动入口。
+
 ## 语言
 
 简体中文和英文都是由插件维护并经过类型检查的完整词典。全新的 WebUI 根据浏览器报告的系统语言自动选择（`zh-*` → 简体中文，`en-*` → 英文，不支持的语言 → 简体中文）。在`设置 → 通用 → 语言`中手动选择后，偏好会由 Host 持久化并立即更新界面。
