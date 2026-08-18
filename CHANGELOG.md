@@ -4,7 +4,7 @@ All notable changes to this project are documented in this file. The format is b
 
 ## [Unreleased]
 
-## [0.4.0] - 2026-08-17
+## [0.4.0] - 2026-08-19
 
 ### Added
 
@@ -17,11 +17,22 @@ All notable changes to this project are documented in this file. The format is b
 - Server-sent local state events, replacing the Agent Inbox's three-second polling loop.
 - `list_squad_organizations` and `select_squad_organization` Agent tools, plus `/squad-orgs`, `/squad-org`, `/squad-members`, `/squad-invite`, and `/squad-role` commands.
 - A version-5 local SQLite migration for signed organization roots/events, member projections, hidden organization-only Node identities, local member policies, pending requests, and Session organization bindings.
+- A local Team Planner workflow that turns meeting notes or a team objective into a persistent delegation-plan draft for owner review.
+- `propose_team_plan` and `list_squad_peers` Agent tools. Proposals never dispatch work by themselves.
+- A bilingual `Plans` / `分派计划` WebUI for reviewing every recipient, objective, context, acceptance criterion, and attachment before approval.
+- Idempotent batch dispatch with stable per-item Delegation IDs, partial-failure reporting, retry, cancellation of remaining items, and restart recovery.
+- Local plan creation, approval, retry, and cancellation endpoints for future connector integrations.
+- Namespaced `/squad-plan`, `/squad-task`, `/squad-peers`, and `/squad-status` commands through DSH's native on-demand Slash Command surface, with no additional buttons or persistent launcher.
+- Bilingual natural-language and `@member` trigger guidance for planning, delegation, Peer discovery, and status checks, including explicit clarification instead of guessing ambiguous recipients.
 
 ### Changed
 
 - The existing local planning feature is now consistently named **Team Planner**. It creates reviewable drafts and is distinct from a future optional Organization Coordinator Agent.
 - `list_squad_peers`, `delegate_to_agent`, and Team Planner now resolve recipients from the current Session organization, falling back to direct Peers when no organization is selected.
+
+### Fixed
+
+- `/squad-peers` now publishes its bilingual result as a durable Squad notice, so member names are visible even when the command is invoked from a blank new Session, without waking the model.
 
 ### Security
 
@@ -31,25 +42,6 @@ All notable changes to this project are documented in this file. The format is b
 - Organization roots are signed by a dedicated local authority key; the append-only member event chain is verified and pinned locally, including revision continuity, issuer role, public-key identity, and exactly one active Owner.
 - Admin authority is deliberately narrower than Owner authority: Admins may approve/invite and manage ordinary Members, but only the Owner may appoint or demote Admins. Owner transfer is not implemented in directory v1.
 - The future Organization Coordinator boundary is explicitly non-sovereign: no inherited member credentials, workspaces, Sessions, or blanket execution authority.
-
-## [0.3.0] - 2026-08-17
-
-### Added
-
-- A local Team Planner workflow that turns meeting notes or a team objective into a persistent delegation-plan draft for owner review.
-- `propose_team_plan` and `list_squad_peers` Agent tools. Proposals never dispatch work by themselves.
-- A bilingual `Plans` / `分派计划` WebUI for reviewing every recipient, objective, context, acceptance criterion, and attachment before approval.
-- Idempotent batch dispatch with stable per-item Delegation IDs, partial-failure reporting, retry, cancellation of remaining items, and restart recovery.
-- Local plan creation, approval, retry, and cancellation endpoints for future connector integrations.
-- Namespaced `/squad-plan`, `/squad-task`, `/squad-peers`, and `/squad-status` commands through DSH's native on-demand Slash Command surface, with no additional buttons or persistent launcher.
-- Bilingual natural-language and `@member` trigger guidance for planning, delegation, Peer discovery, and status checks, including explicit clarification instead of guessing ambiguous recipients.
-
-### Fixed
-
-- `/squad-peers` now publishes its bilingual result as a durable Squad notice, so member names are visible even when the command is invoked from a blank new Session, without waking the model.
-
-### Security
-
 - Team-plan approval re-checks the current pinned Peer and delegation policy before creating each signed Delegation.
 - Remote execution remains subject to the recipient's independent PeerPolicy and DSH Permission/Approval boundary after local plan approval.
 
@@ -78,6 +70,5 @@ All notable changes to this project are documented in this file. The format is b
 - The Relay is explicitly documented as a trusted content intermediary without end-to-end payload encryption.
 
 [Unreleased]: https://github.com/zhouCode/dsh-squad/compare/v0.4.0...HEAD
-[0.4.0]: https://github.com/zhouCode/dsh-squad/compare/v0.3.0...v0.4.0
-[0.3.0]: https://github.com/zhouCode/dsh-squad/compare/v0.2.0...v0.3.0
+[0.4.0]: https://github.com/zhouCode/dsh-squad/compare/v0.2.0...v0.4.0
 [0.2.0]: https://github.com/zhouCode/dsh-squad/releases/tag/v0.2.0
