@@ -4,6 +4,7 @@ import {
   type CreateDelegationInput,
   type CreateTeamPlanInput,
 } from "../shared/contracts.ts";
+import { updateModeSchema } from "../shared/updates.ts";
 import type { SquadService } from "./service.ts";
 
 class LocalHttpError extends Error {
@@ -103,11 +104,19 @@ function assertLoopbackClient(req: IncomingMessage): void {
 
 export function createHttpHandler(squad: SquadService) {
   return async (req: IncomingMessage, res: ServerResponse): Promise<void> => {
-    if (await squad.relayServer?.handle(req, res)) return;
     const url = new URL(
       req.url ?? "/",
       `http://${req.headers.host ?? "localhost"}`,
     );
+    if (req.method === "GET" && url.pathname === "/squad/v1/health") {
+      reply(res, 200, {
+        ok: true,
+        version: squad.version(),
+        protocolVersions: [1, 2],
+      });
+      return;
+    }
+    if (await squad.relayServer?.handle(req, res)) return;
     try {
       if (url.pathname.startsWith("/squad/v1/local/")) {
         assertLoopbackClient(req);
@@ -121,6 +130,34 @@ export function createHttpHandler(squad: SquadService) {
         return;
       }
       if (req.method === "POST") assertSameOrigin(req);
+      if (
+        req.method === "POST" &&
+        url.pathname === "/squad/v1/local/updates/check"
+      ) {
+        await readJson(req, 1_024);
+        reply(res, 200, await squad.checkForUpdates());
+        return;
+      }
+      if (
+        req.method === "POST" &&
+        url.pathname === "/squad/v1/local/updates/policy"
+      ) {
+        const body = (await readJson(req, 1_024)) as Record<string, unknown>;
+        reply(
+          res,
+          200,
+          await squad.setUpdateMode(updateModeSchema.parse(body.mode)),
+        );
+        return;
+      }
+      if (
+        req.method === "POST" &&
+        url.pathname === "/squad/v1/local/updates/install"
+      ) {
+        await readJson(req, 1_024);
+        reply(res, 202, await squad.requestUpdateInstall());
+        return;
+      }
       if (
         req.method === "POST" &&
         url.pathname === "/squad/v1/local/delegations"

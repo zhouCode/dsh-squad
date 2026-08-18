@@ -10,6 +10,7 @@ DSH Squad 把运行在不同电脑、网络和地点上的个人 Agent，组成�
 
 - 通过一个持续在线的 Relay 实现跨地域协作，无需节点直连。
 - 团队成员的电脑暂时离线时，由持久邮箱保存待投递任务。
+- 可选的外部更新器为持久在线 Relay 验证签名 Release、备份、重启、健康检查并在失败时回滚；默认只通知。
 - 带签名的多组织成员目录、Owner/Admin/Member 角色、一次性邀请、审批和禁用，不再要求成员两两配置 Peer。
 - 一个节点可以加入多个组织；每个 DSH Session 独立选择一个组织成员目录或兼容的直接 Peer。
 - 每个成员可分别配置本机 `NEVER`、`SAFE` 和 `TRUSTED` 自动执行模式，并在 WebUI 下拉修改。
@@ -22,7 +23,7 @@ DSH Squad 把运行在不同电脑、网络和地点上的个人 Agent，组成�
 ## 安装
 
 ```bash
-dsh plugin --profile web add ./dsh-squad-plugin-0.4.0.tgz --offline
+dsh plugin --profile web add ./dsh-squad-plugin-0.5.0.tgz --offline
 dsh web
 ```
 
@@ -41,6 +42,12 @@ dsh web
 
 聊天触发保持轻量：可以直接使用自然语言或 `@成员`，也可以使用统一命名空间下的 `/squad-*` 英文命令管理任务、计划、状态、组织、成员、邀请和角色。命令通过 DSH 原生的 `/` 菜单按需发现；插件不会增加命令按钮。
 
+## 更新
+
+v0.5.0 增加`智能体收件箱 → 更新`和独立的 `dsh-squad-update`。默认策略是`仅通知`；用户也可以选择关闭或在节点空闲时自动安装。插件进程不会替换自己，只有单独配置的 systemd updater 能停服、备份 profile 与显式数据路径、安装经过 Ed25519 签名清单和 SHA-256 双重校验的 GitHub Release、重启并执行版本健康检查。失败时恢复旧 profile 与数据。
+
+v0.5.0 需要手动安装，之后的版本才能使用这套自更新。服务器 Relay 的完整 systemd 配置、安全约束与命令见仓库的[简体中文 README](https://github.com/zhouCode/dsh-squad#持久在线-relay-的安全更新)。此功能只更新 Squad，不更新 DSH 或其他插件。
+
 ## 语言
 
 简体中文和英文都是由插件维护并经过类型检查的完整词典。全新的 WebUI 根据浏览器报告的系统语言自动选择（`zh-*` → 简体中文，`en-*` → 英文，不支持的语言 → 简体中文）。在`设置 → 通用 → 语言`中手动选择后，偏好会由 Host 持久化并立即更新界面。
@@ -48,6 +55,8 @@ dsh web
 ## 安全边界
 
 生产 Relay URL 必须使用 HTTPS。每个 Node 在本地保存独立的 Ed25519 身份；组织根和追加式成员事件经过签名并在本机固定，协议 v2 同时绑定双方 membership。个人 DSH WebUI 应只监听 `127.0.0.1`；对外只通过经过加固的 HTTPS 反向代理开放 Relay API。当前 Relay 是受信任内容中转方，不提供端到端加密。
+
+更新 API 同样只允许 loopback；Release 必须来自配置的 GitHub 仓库，并同时匹配包内固定发布公钥、签名清单、文件名、大小、SHA-256 和最低 DSH 版本。默认不会无人确认就安装。
 
 只有明确的任务数据、公开状态、摘要和结果会跨 Node 传输。接收方的 Session ID、HumanTodo 详情、人工回复、凭据和工作区路径始终留在本地。
 

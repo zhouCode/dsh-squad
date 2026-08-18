@@ -1,6 +1,6 @@
 {
   "name": "dsh-squad",
-  "version": "0.4.0",
+  "version": "0.5.0",
   "description": "DSH-native delegation for distributed teams of independently owned personal Agents",
   "private": true,
   "license": "MIT",
@@ -41,6 +41,8 @@
     "test:watch": "vitest",
     "format:check": "prettier --check .",
     "pack": "pnpm build && pnpm --filter @dsh-squad/plugin pack:check",
+    "release:manifest": "node scripts/create-release-manifest.mjs",
+    "release:prepare": "pnpm verify:pins && pnpm run pack && pnpm release:manifest",
     "smoke:dsh": "pnpm smoke:delegation",
     "smoke:delegation": "node scripts/smoke-delegation.mjs"
   },

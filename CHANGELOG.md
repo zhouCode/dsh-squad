@@ -4,6 +4,28 @@ All notable changes to this project are documented in this file. The format is b
 
 ## [Unreleased]
 
+## [0.5.0] - 2026-08-19
+
+### Added
+
+- A bilingual `Updates` / `更新` center showing the running version, latest verified release, check time, update phase, external-updater readiness, and actionable diagnostics.
+- Explicit per-Node `DISABLED`, `NOTIFY`, and `AUTOMATIC` update policies. `NOTIFY` is the default, and selecting unattended installation requires an explicit WebUI confirmation.
+- A standalone `dsh-squad-update` executable shipped in the plugin package. The plugin process only checks and records requests; it cannot replace its own running files.
+- A systemd installer that creates a separate one-shot updater service, persistent six-hour timer with randomized delay, and path trigger for user-approved install requests. v0.5 intentionally supports only unprivileged user services; linger keeps a dedicated Relay account running without an interactive login.
+- Transactional Relay updates: fail-closed active-work and Node-identity checks before and after verified package staging, service shutdown, full profile and explicit data-path backup, offline pnpm installation, restart, target-version/identity health check, and rollback.
+- Automatic suppression of a release that already failed and rolled back; retrying that exact release requires a new explicit install request.
+- `/squad/v1/health`, returning only readiness and the running Squad version for local service supervision.
+- Release tooling that creates a canonical signed manifest, detached Ed25519 signature, and SHA-256 asset for each plugin tarball.
+- Unit and integration coverage for semantic version ordering, signature tamper rejection, GitHub asset binding, private state files, systemd units, successful update, and health-check rollback.
+
+### Security
+
+- A dedicated Ed25519 release public key is pinned in the plugin. The corresponding private key stays outside the repository with owner-only permissions.
+- Update manifests bind the repository tag, package name, version, asset filename, byte size, SHA-256, signing-key ID, and minimum supported DSH version. GitHub metadata and download URLs are constrained to the configured repository and trusted GitHub release hosts.
+- Update state uses an owner-only directory and atomic owner-only files. Local policy and install APIs retain the existing loopback and same-origin boundary.
+- The updater rejects broad or overlapping backup targets, serializes execution with a private lock, defers while delegations or plans are active, keeps a recoverable copy of failed installation state, and retains a bounded number of backups.
+- System-scope updater installation is rejected so root never executes updater code from a user-writable DSH profile.
+
 ## [0.4.0] - 2026-08-19
 
 ### Added
@@ -69,6 +91,7 @@ All notable changes to this project are documented in this file. The format is b
 - Production Relay URLs require HTTPS; loopback HTTP is accepted only for local development.
 - The Relay is explicitly documented as a trusted content intermediary without end-to-end payload encryption.
 
-[Unreleased]: https://github.com/zhouCode/dsh-squad/compare/v0.4.0...HEAD
+[Unreleased]: https://github.com/zhouCode/dsh-squad/compare/v0.5.0...HEAD
+[0.5.0]: https://github.com/zhouCode/dsh-squad/compare/v0.4.0...v0.5.0
 [0.4.0]: https://github.com/zhouCode/dsh-squad/compare/v0.2.0...v0.4.0
 [0.2.0]: https://github.com/zhouCode/dsh-squad/releases/tag/v0.2.0

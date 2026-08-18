@@ -12,6 +12,7 @@ DSH Squad turns personal Agents running on different computers, networks, and lo
 - **Locally planned, individually controlled**: Team Planner can turn a meeting or team objective into a multi-person delegation draft, but it is not a shared super-Agent holding everyone's authority. The planner's owner must approve dispatch, and every recipient still decides execution through their own policy and approval boundary.
 - **Cross-location without direct node connectivity**: personal nodes only need an outbound connection to an always-on Relay, so they can sit behind NAT, home networks, corporate networks, or national borders without public IP addresses or inbound ports.
 - **Offline members do not lose work**: the Relay provides an authenticated, durable mailbox. A recipient resumes pulling after reconnecting, and duplicate delivery cannot create duplicate Sessions or executions.
+- **A Relay can maintain itself safely**: a separate updater verifies signed releases and, while the Node is idle, backs up, installs, restarts, and checks the reported version. Notify-only is the default and failures roll back.
 - **Trust is configured per person**: every direct Peer or organization member has an independent local `NEVER`, `SAFE`, or `TRUSTED` automatic-execution policy, editable from a dropdown in the WebUI.
 - **Native to DSH**: work runs in the recipient's existing Agent, Session, Skill catalog, tools, and Permission/Approval flow, without a second runtime or standalone management platform.
 
@@ -80,7 +81,7 @@ Build and install the tarball from this repository:
 ```bash
 pnpm install --frozen-lockfile
 pnpm run pack
-dsh plugin --profile web add ./artifacts/dsh-squad-plugin-0.4.0.tgz --offline
+dsh plugin --profile web add ./artifacts/dsh-squad-plugin-0.5.0.tgz --offline
 dsh web
 ```
 
@@ -149,6 +150,46 @@ The same package can enable a Relay Server in any always-on DSH Node. Invitation
 
 The Relay API is registered under `/squad/v1` on the Host WebServer. It validates enrollment, request signatures, nonces, freshness, organization membership routes, sender and recipient identities, mailbox capacity, and rate limits. It stores the signed organization directory and durable mailbox, but neither runs an Agent nor holds private Sessions, HumanTodo details, workspaces, or member credentials.
 
+## Safe updates for an always-on Relay
+
+Starting with v0.5.0, Squad includes an Update Center and a separate `dsh-squad-update` executable. It updates Squad only—not DSH core or other plugins. The plugin process never overwrites itself: the WebUI checks releases, shows policy, and records explicit install requests, while a systemd-launched external updater stops the service, backs up, installs, restarts, checks health, and rolls back.
+
+Each Node has three policies, editable under `Agent Inbox → Updates`:
+
+- `NOTIFY`: check periodically and notify; installation requires explicit approval. This is the default.
+- `AUTOMATIC`: back up and install while the Node is idle, then restart it.
+- `DISABLED`: disable periodic checks and unattended installation; explicit manual checks remain available.
+
+v0.5.0 itself must be installed manually; it provides self-update for later releases. First manage the Relay with an existing systemd service and configure one update-state directory shared by the plugin and updater:
+
+```yaml
+- id: dsh-squad
+  config:
+    updates:
+      repository: zhouCode/dsh-squad
+      stateDir: /srv/dsh-squad/relay-home/squad-updates
+      defaultMode: NOTIFY
+```
+
+Then run the executable installed in that Relay profile to create an updater service, timer, and install-request path unit. Repeat `--data-path` for every Node and Relay data location that must be transactionally backed up. Never pass `/`, a home directory, or the whole `DSH_HOME` as a backup target.
+
+```bash
+DSH_HOME=/srv/dsh-squad/relay-home
+"$DSH_HOME/profiles/web/node_modules/.bin/dsh-squad-update" install-systemd \
+  --dsh-home "$DSH_HOME" \
+  --profile web \
+  --state-dir "$DSH_HOME/squad-updates" \
+  --service-unit dsh-squad-relay.service \
+  --base-url http://127.0.0.1:37100 \
+  --data-path "$DSH_HOME/squad-node" \
+  --data-path "$DSH_HOME/relay" \
+  --scope user
+```
+
+The v0.5 safe updater accepts only `--scope user`, and the Relay service must run in the same dedicated account's user scope. An administrator should run `loginctl enable-linger <relay-user>` so the account starts with the server and stays active without an interactive login. System scope is intentionally unsupported because executing updater code from a user-writable DSH profile as root would cross a privilege boundary; containerized Relays should be updated through their image and orchestrator. The installer checks every six hours by default, with randomized delay to avoid synchronized GitHub requests. `Install verified update` in the WebUI creates a request handled immediately by the path unit.
+
+The updater accepts only the configured repository's GitHub `latest` Release and requires four assets: the plugin `.tgz`, its `.tgz.sha256`, a signed update manifest, and the manifest's Ed25519 signature. A built-in public key verifies the manifest, which binds tag, version, package, filename, size, SHA-256, and minimum DSH version. Before installation, the updater confirms that there are no `TRIAGING` / `RUNNING` delegations or dispatching plans. After shutdown, it fully backs up the profile and every explicit data path, then installs the already verified local package with `pnpm --offline`. The restarted service must pass `/squad/v1/health` and report the target version or the old profile and data are restored. A failed version is not retried indefinitely without approval. The latest three backups are retained by default.
+
 ## Agent and WebUI
 
 The plugin registers six native tools with the Personal Agent:
@@ -165,7 +206,7 @@ Users do not need to type those full tool names in chat. Squad provides two on-d
 - **Natural language or member mentions**: for example, “Give the release notes to Bob,” “`@Bob` summarize this week's changes,” “Turn these meeting notes into a team plan,” or “Check that delegation's progress.” The Agent asks for clarification when the recipient or objective is ambiguous.
 - **English Slash commands under one prefix**: task commands are `/squad-task`, `/squad-plan`, `/squad-peers`, and `/squad-status`; organization commands are `/squad-orgs`, `/squad-org <name|id|direct>`, `/squad-members`, `/squad-invite [minutes]`, and `/squad-role <member> <admin|member>`. DSH discovers them in its native `/` menu, and the shared `squad-` prefix avoids collisions.
 
-`Agent Inbox` provides `Plans`, `Waiting for me`, `Running`, `Sent`, `Completed`, `Organizations`, and `Settings`. Organization state refreshes through server-sent events. Owner/Admin can approve, invite, and manage members, while each user can change the local `autoExecute` policy for every sender. Owners can also review, approve, retry, or cancel plans; recipients can process Todos, resume after restart, and open the associated native Session.
+`Agent Inbox` provides `Plans`, `Waiting for me`, `Running`, `Sent`, `Completed`, `Organizations`, `Updates`, and `Settings`. Organization and update state refresh through server-sent events. Owner/Admin can approve, invite, and manage members, while each user can change the local `autoExecute` policy for every sender. Owners can also review, approve, retry, or cancel plans; recipients can process Todos, resume after restart, and open the associated native Session.
 
 ## Languages
 
@@ -184,6 +225,7 @@ Here, “system language” means the language reported by the browser displayin
 - A signed organization root and append-only member directory are pinned and verified locally by every Node. Protocol-v2 Envelopes bind organization, sender membership, and recipient membership together.
 - Relay mailbox requests use short-lived signatures, nonces for replay protection, and recipient isolation.
 - `/squad/v1/local/*` management routes accept loopback clients only and reject forwarded requests. A public reverse proxy should allowlist only the exact non-`local` Relay routes.
+- Update manifests are verified with the release public key pinned in the package. A downloaded package must match the signed filename, size, and SHA-256, and the plugin process has no authority to replace its own running code.
 - Attachments require HTTPS, reject private, loopback, and rebinding addresses, and verify their declared size and SHA-256 digest.
 - Remote objectives, context, and attachments always enter the recipient's native Agent as untrusted task data and cannot bypass DSH Permission/Approval.
 - If a process stops during execution, Squad records `EXECUTION_INTERRUPTED` instead of guessing and replaying unknown external side effects.
@@ -201,6 +243,14 @@ Disable the entry in the profile patch and restart DSH:
 
 The Squad Host route, Agent tools, and Client Slot are removed together. The native Harness Shell, Sessions, Settings, and workspace remain available.
 
+If the external Relay updater was configured, permanently disabling the plugin should also stop its user timer and path units:
+
+```bash
+systemctl --user disable --now \
+  dsh-squad-relay-updater.timer \
+  dsh-squad-relay-updater.path
+```
+
 ## Development and acceptance
 
 ```bash
@@ -211,6 +261,15 @@ pnpm build
 pnpm test
 pnpm smoke:delegation
 ```
+
+Release maintainers must keep an offline backup of the release private key and never place it in the repository. `.gitignore` rejects `release-signing-key*.pem`; packaging and signing verify that the key is a regular owner-only file and matches the public key shipped in the package:
+
+```bash
+DSH_SQUAD_RELEASE_SIGNING_KEY=/secure/path/release-signing-key.pem \
+  pnpm release:prepare
+```
+
+A `v0.5.0` GitHub Release must upload all four files from `artifacts/`: `dsh-squad-plugin-0.5.0.tgz`, its `.sha256`, `dsh-squad-update-manifest-0.5.0.json`, and its `.sig`. Clients reject an update when any asset is missing, the signature fails, or the Release tag does not match.
 
 `smoke:delegation` builds a real tarball, installs it into isolated Alice, Bob, and Relay DSH homes, and uses real Chromium to verify WebUI pairing, Team Planner approval and idempotent dispatch, delivery while Bob is offline, Relay and Node restarts, a recipient-only Skill, partial HumanTodo completion, same-Session resume, Outcome privacy boundaries, and reversible plugin disablement. Signed-directory, Relay-authorization, and local-persistence integration tests separately cover organizations.
 

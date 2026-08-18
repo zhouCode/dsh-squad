@@ -12,6 +12,7 @@ DSH Squad 把运行在不同电脑、网络和地点上的个人 Agent，组成�
 - **本地规划，权力仍属于个人**：Team Planner 可以把会议或团队目标整理成多人分派草案，但它不是持有全员权限的共享超级 Agent；负责人确认后才会发送，每位接收方仍由自己的策略和审批边界决定是否执行。
 - **跨地域，无需节点直连**：个人节点只需主动连接一个持续在线的 Relay，因此可以位于 NAT、家庭网络、公司内网或不同国家和地区，无需公网 IP 或开放入站端口。
 - **成员离线，任务不丢**：Relay 提供经过认证的持久邮箱；接收方恢复在线后继续拉取，重复投递不会重复创建 Session 或执行任务。
+- **Relay 可安全自维护**：独立更新器验证签名 Release，在节点空闲时备份、安装、重启并做版本健康检查；默认只通知，失败自动回滚。
 - **信任可以逐人配置**：每个直接 Peer 或组织成员都有独立的本机 `NEVER`、`SAFE`、`TRUSTED` 自动执行策略，可直接在界面下拉修改。
 - **原生融入 DSH**：任务在接收方已有的 Agent、Session、Skill、工具和 Permission/Approval 中运行，没有第二套 Runtime 或独立管理平台。
 
@@ -80,7 +81,7 @@ Agent 会调用 `propose_team_plan`。负责人确认后，Squad 才为每个计
 ```bash
 pnpm install --frozen-lockfile
 pnpm run pack
-dsh plugin --profile web add ./artifacts/dsh-squad-plugin-0.4.0.tgz --offline
+dsh plugin --profile web add ./artifacts/dsh-squad-plugin-0.5.0.tgz --offline
 dsh web
 ```
 
@@ -148,6 +149,46 @@ dsh web
 
 Relay API 注册在宿主 WebServer 的 `/squad/v1` 下；它验证 enrollment、请求签名、nonce、时效、组织成员路由、收发双方、邮箱容量和速率限制，并保存签名组织目录与持久邮箱，但不运行 Agent，也不持有私人 Session、HumanTodo、工作区或成员凭据。
 
+## 持久在线 Relay 的安全更新
+
+从 v0.5.0 起，Squad 包含更新中心和独立的 `dsh-squad-update` 更新器。它只更新 Squad 自身，不更新 DSH 核心或其他插件。插件进程不会覆盖自己：WebUI 负责检查、显示策略和提交明确的安装请求；systemd 启动的外部更新器负责停服、备份、安装、重启、健康检查和回滚。
+
+每个节点有三种策略，可在`智能体收件箱 → 更新`中修改：
+
+- `NOTIFY`：周期检查并提醒，安装需要本人确认；这是默认值；
+- `AUTOMATIC`：节点空闲时自动备份并安装，随后重启；
+- `DISABLED`：关闭周期检查和自动安装，仍允许本人手动检查。
+
+首次必须手动安装 v0.5.0；它只能为后续版本提供自更新。先让 Relay 由一个已有的 systemd service 管理，并让插件和更新器共享同一个状态目录：
+
+```yaml
+- id: dsh-squad
+  config:
+    updates:
+      repository: zhouCode/dsh-squad
+      stateDir: /srv/dsh-squad/relay-home/squad-updates
+      defaultMode: NOTIFY
+```
+
+然后用该 Relay profile 中随插件安装的命令创建 updater service、timer 和安装请求 path unit。`--data-path` 必须逐项列出需要事务性备份的 Node 数据和 Relay 数据；不要把 `/`、用户主目录或整个 `DSH_HOME` 当作备份目标。
+
+```bash
+DSH_HOME=/srv/dsh-squad/relay-home
+"$DSH_HOME/profiles/web/node_modules/.bin/dsh-squad-update" install-systemd \
+  --dsh-home "$DSH_HOME" \
+  --profile web \
+  --state-dir "$DSH_HOME/squad-updates" \
+  --service-unit dsh-squad-relay.service \
+  --base-url http://127.0.0.1:37100 \
+  --data-path "$DSH_HOME/squad-node" \
+  --data-path "$DSH_HOME/relay" \
+  --scope user
+```
+
+v0.5 的安全更新器只接受 `--scope user`，Relay service 也必须位于同一专用账号的 user scope。管理员需执行 `loginctl enable-linger <relay-user>`，这样账号无需交互登录也会随服务器启动并持续运行。暂不支持 system scope，因为从用户可写的 DSH profile 以 root 身份执行更新代码会造成提权边界；容器化 Relay 应通过镜像和编排器更新。安装器默认每 6 小时检查一次，并用随机延迟避免多个节点同时请求 GitHub；WebUI 的“安装已验证更新”会创建一个由 path unit 立即处理的请求。
+
+更新器只接受配置仓库的 GitHub `latest` Release，并要求以下四个资产同时存在：插件 `.tgz`、`.tgz.sha256`、签名更新清单和清单的 Ed25519 签名。内置公钥会验证清单；清单又固定 tag、版本、包名、文件名、大小、SHA-256 和最低 DSH 版本。安装前还会确认没有 `TRIAGING` / `RUNNING` 委派或正在分派的计划，停服后完整备份 profile 和显式数据路径，再用 `pnpm --offline` 安装本地已验证包。新服务必须通过 `/squad/v1/health` 并报告目标版本，否则恢复旧 profile 和数据；失败过的版本不会在无人确认时无限重试。默认保留最近三份备份。
+
 ## Agent 与 WebUI
 
 插件向 Personal Agent 注册六个原生工具：
@@ -164,7 +205,7 @@ Relay API 注册在宿主 WebServer 的 `/squad/v1` 下；它验证 enrollment�
 - **自然语言或成员提及**：例如“把发布说明交给 Bob”“`@Bob` 整理本周变更”“根据这段会议纪要给团队分工”“查一下刚才那项委派的进度”。成员或目标有歧义时，Agent 会先要求澄清。
 - **统一前缀的英文 Slash 命令**：任务入口为 `/squad-task`、`/squad-plan`、`/squad-peers`、`/squad-status`；组织入口为 `/squad-orgs`、`/squad-org <name|id|direct>`、`/squad-members`、`/squad-invite [minutes]`、`/squad-role <member> <admin|member>`。输入 `/` 时由 DSH 原生命令菜单按需发现，所有名称都使用 `squad-` 前缀以避免冲突。
 
-`智能体收件箱` 提供`分派计划`、`待我处理`、`运行中`、`已发送`、`已完成`、`组织`和`设置`。组织状态通过 SSE 实时刷新；Owner/Admin 可审批、邀请和管理成员，每位用户可用下拉菜单调整本机对每个成员的 `autoExecute`。负责人也可以审阅、确认、重试或取消计划；接收方可以处理 Todo、重启后恢复并打开对应原生 Session。
+`智能体收件箱` 提供`分派计划`、`待我处理`、`运行中`、`已发送`、`已完成`、`组织`、`更新`和`设置`。组织与更新状态通过 SSE 实时刷新；Owner/Admin 可审批、邀请和管理成员，每位用户可用下拉菜单调整本机对每个成员的 `autoExecute`。负责人也可以审阅、确认、重试或取消计划；接收方可以处理 Todo、重启后恢复并打开对应原生 Session。
 
 ## 语言
 
@@ -183,6 +224,7 @@ Relay API 注册在宿主 WebServer 的 `/squad/v1` 下；它验证 enrollment�
 - 组织根和追加式成员目录经过签名并在每个节点本地固定验证；协议 v2 将 Organization、发送者 membership 和接收者 membership 同时绑定进 Envelope。
 - Relay 邮箱请求使用短时签名、nonce 防重放和 recipient 隔离。
 - `/squad/v1/local/*` 管理接口只接受 loopback 客户端并拒绝转发请求；公网反向代理只应放行 Relay 所需的非 `local` 精确路由。
+- 更新清单使用仓库内固定的 Ed25519 发布公钥验证；下载包必须与签名清单中的文件名、大小和 SHA-256 全部一致，插件本身没有替换正在运行代码的权限。
 - 附件仅接受 HTTPS，拒绝私网/loopback/重绑定地址，并校验声明大小与 SHA-256。
 - 远程 objective/context 始终作为不受信任任务数据进入接收方原生 Agent，不绕过 DSH Permission/Approval。
 - 进程在执行期间中断时标记 `EXECUTION_INTERRUPTED`，不会猜测并自动重放未知外部副作用。
@@ -200,6 +242,14 @@ MVP 的 Relay 是受信任内容中转方，不提供端到端加密；生产部
 
 Squad Host route、Agent tools 和 Client Slot 会一起移除，原生 Harness Shell、Session、Settings 和工作区仍可使用。
 
+如果已经为 Relay 配置外部更新器，永久禁用插件时也应停止其 user timer 和 path unit：
+
+```bash
+systemctl --user disable --now \
+  dsh-squad-relay-updater.timer \
+  dsh-squad-relay-updater.path
+```
+
 ## 开发与验收
 
 ```bash
@@ -210,6 +260,15 @@ pnpm build
 pnpm test
 pnpm smoke:delegation
 ```
+
+发布维护者需要离线备份发布私钥，且绝不能把它放进仓库。`release-signing-key*.pem` 已被 `.gitignore` 拒绝；打包和签名命令会检查私钥是普通文件、仅所有者可访问，并与包内公钥匹配：
+
+```bash
+DSH_SQUAD_RELEASE_SIGNING_KEY=/secure/path/release-signing-key.pem \
+  pnpm release:prepare
+```
+
+发布 `v0.5.0` 时需要把 `artifacts/` 中的 `dsh-squad-plugin-0.5.0.tgz`、同名 `.sha256`、`dsh-squad-update-manifest-0.5.0.json` 和 `.sig` 四个文件全部作为 GitHub Release assets 上传。缺少任意一个、签名不符或 Release tag 不一致时，客户端都会拒绝更新。
 
 `smoke:delegation` 会构建真实 tarball，安装到 Alice、Bob、Relay 三套隔离 DSH Home，并用真实 Chromium 验证：WebUI 配对、Team Planner 草案审批与幂等分派、Bob 离线投递、Relay/Node 重启、接收端专属 Skill、HumanTodo 部分完成、相同 Session 恢复、Outcome 隐私边界和插件可逆禁用；组织协议另由签名目录、Relay 权限与本地持久化集成测试覆盖。
 

@@ -28,7 +28,13 @@ const skillFixture = join(
   "squad-count-items",
 );
 const artifactsDir = join(root, "artifacts");
-const pluginTarball = join(artifactsDir, "dsh-squad-plugin-0.4.0.tgz");
+const pluginManifest = JSON.parse(
+  await readFile(join(pluginDir, "package.json"), "utf8"),
+);
+const pluginTarball = join(
+  artifactsDir,
+  `dsh-squad-plugin-${String(pluginManifest.version)}.tgz`,
+);
 const fixtureTarball = join(
   artifactsDir,
   "dsh-squad-deterministic-agent-fixture-0.0.0.tgz",
@@ -421,10 +427,23 @@ async function assertChineseLocalization(browser, port) {
       "运行中",
       "已发送",
       "已完成",
+      "组织",
+      "更新",
       "设置",
     ]) {
       await dialog.getByRole("button", { name: tab, exact: true }).waitFor();
     }
+    await dialog.getByRole("button", { name: "更新", exact: true }).click();
+    await dialog.getByText("当前版本", { exact: true }).waitFor();
+    await dialog
+      .getByText(`v${String(pluginManifest.version)}`, {
+        exact: true,
+      })
+      .waitFor();
+    assert.equal(
+      await dialog.locator(".squad-update-policy select").inputValue(),
+      "NOTIFY",
+    );
     await dialog.getByRole("button", { name: "设置", exact: true }).click();
     await dialog.getByText("节点身份", { exact: true }).waitFor();
     await dialog.getByLabel("显示名称", { exact: true }).waitFor();
@@ -640,7 +659,11 @@ async function main() {
     log("starting one Relay plus two real, isolated DSH Web Hosts");
     await relay.start();
     const health = await fetchJson(`${relayUrl}/squad/v1/health`);
-    assert.deepEqual(health, { ok: true, protocolVersions: [1, 2] });
+    assert.deepEqual(health, {
+      ok: true,
+      version: String(pluginManifest.version),
+      protocolVersions: [1, 2],
+    });
     await alice.start();
     await bob.start();
 

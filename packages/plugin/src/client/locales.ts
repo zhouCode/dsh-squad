@@ -8,6 +8,7 @@ import type {
   OrganizationRole,
 } from "../shared/organizations.ts";
 import type { DelegationStatus } from "../shared/state.ts";
+import type { UpdateMode, UpdatePhase } from "../shared/updates.ts";
 
 export const SQUAD_LOCALE_NS = "dsh-squad";
 
@@ -21,6 +22,7 @@ export const zh = {
   "tab.sent": "已发送",
   "tab.completed": "已完成",
   "tab.organizations": "组织",
+  "tab.updates": "更新",
   "tab.settings": "设置",
   "direction.received": "收到",
   "direction.sent": "已发送",
@@ -72,6 +74,53 @@ export const zh = {
     "“受信目标”会跳过人工确认并在本机运行；仅对你充分信任的成员启用。",
   "settings.languageHint":
     "界面语言由 DSH 全局设置统一控制；首次使用时跟随系统语言。",
+  "updates.title": "更新中心",
+  "updates.securityHint":
+    "只接受由 Squad 发布密钥签名且哈希匹配的版本；安装由插件进程之外的更新器完成，并在停服后备份、健康检查失败时回滚。",
+  "updates.currentVersion": "当前版本",
+  "updates.latestVersion": "最新版本",
+  "updates.lastChecked": "上次检查",
+  "updates.notChecked": "尚未检查",
+  "updates.openRelease": "查看 GitHub Release",
+  "updates.policy": "更新策略",
+  "updates.policyLabel": "此节点的更新方式",
+  "updates.modeHint.DISABLED": "不进行周期检查，也不会自动安装。仍可手动检查。",
+  "updates.modeHint.NOTIFY":
+    "周期检查并提醒；安装必须由你明确确认。这是默认选项。",
+  "updates.modeHint.AUTOMATIC":
+    "节点空闲时自动备份、安装并重启；失败会尝试回滚。",
+  "updates.automaticWarning":
+    "自动更新会短暂重启本节点。正在运行的委派或分派计划会阻止更新。",
+  "updates.automaticConfirmation":
+    "确定启用自动更新吗？节点空闲时，外部更新器会备份数据并重启服务。",
+  "updates.installConfirmation":
+    "确定安装已验证的更新吗？外部更新器会等待节点空闲，然后备份并重启服务。",
+  "updates.updater": "外部更新器",
+  "updates.updaterConfigured": "已配置并由 {unit} 执行",
+  "updates.updaterNotConfigured": "尚未配置",
+  "updates.updaterSetupHint":
+    "服务器上的 Relay 需要先运行 dsh-squad-update install-systemd；配置完成前仍可检查，但不能从界面安装。",
+  "updates.requestPending": "安装请求已提交；更新器会在节点空闲后处理。",
+  "updates.checkNow": "立即检查",
+  "updates.checking": "正在检查…",
+  "updates.installNow": "安装已验证更新",
+  "updateMode.DISABLED": "关闭",
+  "updateMode.NOTIFY": "仅通知（推荐）",
+  "updateMode.AUTOMATIC": "自动安装",
+  "updatePhase.IDLE": "待检查",
+  "updatePhase.CHECKING": "检查中",
+  "updatePhase.UP_TO_DATE": "已是最新",
+  "updatePhase.AVAILABLE": "有可用更新",
+  "updatePhase.REQUESTED": "已请求安装",
+  "updatePhase.DOWNLOADING": "正在下载",
+  "updatePhase.VERIFYING": "正在验证",
+  "updatePhase.BLOCKED": "已暂缓",
+  "updatePhase.BACKING_UP": "正在备份",
+  "updatePhase.INSTALLING": "正在安装",
+  "updatePhase.RESTARTING": "正在重启",
+  "updatePhase.INSTALLED": "安装完成",
+  "updatePhase.ROLLED_BACK": "已回滚",
+  "updatePhase.FAILED": "更新失败",
   "context.node": "当前节点",
   "context.session": "当前会话",
   "context.organization": "组织上下文",
@@ -142,6 +191,7 @@ export const zh = {
   "error.organizationActionFailed": "组织操作失败",
   "error.policyUpdateFailed": "无法更新自动执行策略",
   "error.sessionOrganizationFailed": "无法切换会话组织",
+  "error.updateActionFailed": "更新操作失败",
   "error.withCode": "{message}（{code}）",
   "error.withDetail": "{message}：{detail}",
   "errorCode.EXECUTION_INTERRUPTED": "执行被中断",
@@ -155,6 +205,18 @@ export const zh = {
   "errorCode.CONCURRENCY_LIMIT": "并发数已达上限",
   "errorCode.UNSUPPORTED": "接收方不支持此任务",
   "errorCode.POLICY_REJECTED": "本地策略已拒绝",
+  "errorCode.UPDATE_CHECK_FAILED": "更新检查失败",
+  "errorCode.REQUEST_VERSION_CHANGED": "待安装版本已变化",
+  "errorCode.ROLLED_BACK_VERSION_SUPPRESSED": "已阻止自动重试回滚版本",
+  "errorCode.NODE_STATE_UNAVAILABLE": "无法验证本地节点状态",
+  "errorCode.NODE_VERSION_MISMATCH": "更新器与节点版本不一致",
+  "errorCode.NODE_ID_CHANGED": "更新目标节点身份已变化",
+  "errorCode.ACTIVE_WORK": "节点仍有进行中的工作",
+  "errorCode.UPDATE_ALREADY_RUNNING": "另一更新任务正在运行",
+  "errorCode.UPDATE_INSTALL_FAILED": "更新安装失败，已尝试回滚",
+  "errorCode.UPDATE_ROLLBACK_FAILED": "更新回滚失败",
+  "errorCode.UPDATE_FINALIZATION_WARNING": "更新已安装，但收尾操作有警告",
+  "errorCode.UPDATE_RUN_FAILED": "更新任务失败",
   "summary.executionInterrupted":
     "接收方 DSH 在执行期间停止。可能已经发生的外部副作用不会自动重放。",
   "summary.rejectedByOwner": "接收方已拒绝。",
@@ -180,6 +242,7 @@ export const en = {
   "tab.sent": "Sent",
   "tab.completed": "Completed",
   "tab.organizations": "Organizations",
+  "tab.updates": "Updates",
   "tab.settings": "Settings",
   "direction.received": "Received",
   "direction.sent": "Sent",
@@ -231,6 +294,55 @@ export const en = {
     "Trusted objectives skip human approval and run on this computer. Enable this only for members you fully trust.",
   "settings.languageHint":
     "The DSH global language setting controls this interface; first use follows the system language.",
+  "updates.title": "Update center",
+  "updates.securityHint":
+    "Only releases signed by the pinned Squad release key with a matching hash are accepted. A separate updater backs up after shutdown and rolls back when health checks fail.",
+  "updates.currentVersion": "Current version",
+  "updates.latestVersion": "Latest version",
+  "updates.lastChecked": "Last checked",
+  "updates.notChecked": "Not checked",
+  "updates.openRelease": "Open GitHub Release",
+  "updates.policy": "Update policy",
+  "updates.policyLabel": "Update behavior for this Node",
+  "updates.modeHint.DISABLED":
+    "Do not check periodically or install automatically. Manual checks remain available.",
+  "updates.modeHint.NOTIFY":
+    "Check periodically and notify; installation requires your explicit approval. This is the default.",
+  "updates.modeHint.AUTOMATIC":
+    "Back up, install, and restart automatically while the Node is idle; failures trigger rollback.",
+  "updates.automaticWarning":
+    "Automatic updates briefly restart this Node. Active delegations or dispatching plans defer the update.",
+  "updates.automaticConfirmation":
+    "Enable automatic updates? The external updater will back up data and restart the service while the Node is idle.",
+  "updates.installConfirmation":
+    "Install the verified update? The external updater will wait for an idle Node, then back up and restart the service.",
+  "updates.updater": "External updater",
+  "updates.updaterConfigured": "Configured and executed by {unit}",
+  "updates.updaterNotConfigured": "Not configured",
+  "updates.updaterSetupHint":
+    "A server Relay must first run dsh-squad-update install-systemd. Checks work before setup, but installation from this screen does not.",
+  "updates.requestPending":
+    "The installation request is queued; the updater will process it when this Node is idle.",
+  "updates.checkNow": "Check now",
+  "updates.checking": "Checking…",
+  "updates.installNow": "Install verified update",
+  "updateMode.DISABLED": "Disabled",
+  "updateMode.NOTIFY": "Notify only (recommended)",
+  "updateMode.AUTOMATIC": "Install automatically",
+  "updatePhase.IDLE": "Not checked",
+  "updatePhase.CHECKING": "Checking",
+  "updatePhase.UP_TO_DATE": "Up to date",
+  "updatePhase.AVAILABLE": "Update available",
+  "updatePhase.REQUESTED": "Install requested",
+  "updatePhase.DOWNLOADING": "Downloading",
+  "updatePhase.VERIFYING": "Verifying",
+  "updatePhase.BLOCKED": "Deferred",
+  "updatePhase.BACKING_UP": "Backing up",
+  "updatePhase.INSTALLING": "Installing",
+  "updatePhase.RESTARTING": "Restarting",
+  "updatePhase.INSTALLED": "Installed",
+  "updatePhase.ROLLED_BACK": "Rolled back",
+  "updatePhase.FAILED": "Update failed",
   "context.node": "Current Node",
   "context.session": "Current session",
   "context.organization": "Organization context",
@@ -304,6 +416,7 @@ export const en = {
   "error.organizationActionFailed": "Organization action failed",
   "error.policyUpdateFailed": "Could not update automatic execution policy",
   "error.sessionOrganizationFailed": "Could not change session organization",
+  "error.updateActionFailed": "Update action failed",
   "error.withCode": "{message} ({code})",
   "error.withDetail": "{message}: {detail}",
   "errorCode.EXECUTION_INTERRUPTED": "Execution interrupted",
@@ -317,6 +430,21 @@ export const en = {
   "errorCode.CONCURRENCY_LIMIT": "Concurrency limit reached",
   "errorCode.UNSUPPORTED": "Task unsupported by receiver",
   "errorCode.POLICY_REJECTED": "Rejected by local policy",
+  "errorCode.UPDATE_CHECK_FAILED": "Update check failed",
+  "errorCode.REQUEST_VERSION_CHANGED": "Approved update version changed",
+  "errorCode.ROLLED_BACK_VERSION_SUPPRESSED":
+    "Automatic retry of rolled-back version suppressed",
+  "errorCode.NODE_STATE_UNAVAILABLE": "Could not verify local Node state",
+  "errorCode.NODE_VERSION_MISMATCH": "Updater and Node versions differ",
+  "errorCode.NODE_ID_CHANGED": "Update target Node identity changed",
+  "errorCode.ACTIVE_WORK": "Node still has active work",
+  "errorCode.UPDATE_ALREADY_RUNNING": "Another update is running",
+  "errorCode.UPDATE_INSTALL_FAILED":
+    "Update installation failed; rollback attempted",
+  "errorCode.UPDATE_ROLLBACK_FAILED": "Update rollback failed",
+  "errorCode.UPDATE_FINALIZATION_WARNING":
+    "Update installed with finalization warnings",
+  "errorCode.UPDATE_RUN_FAILED": "Update run failed",
   "summary.executionInterrupted":
     "The receiving DSH process stopped while execution was active. Potential external side effects were not replayed.",
   "summary.rejectedByOwner": "Rejected by the receiving owner.",
@@ -394,6 +522,29 @@ const planItemStatusKeys = {
   CANCELED: "planItemStatus.CANCELED",
 } as const satisfies Record<TeamPlanItemStatus, SquadLocaleKey>;
 
+const updateModeKeys = {
+  DISABLED: "updateMode.DISABLED",
+  NOTIFY: "updateMode.NOTIFY",
+  AUTOMATIC: "updateMode.AUTOMATIC",
+} as const satisfies Record<UpdateMode, SquadLocaleKey>;
+
+const updatePhaseKeys = {
+  IDLE: "updatePhase.IDLE",
+  CHECKING: "updatePhase.CHECKING",
+  UP_TO_DATE: "updatePhase.UP_TO_DATE",
+  AVAILABLE: "updatePhase.AVAILABLE",
+  REQUESTED: "updatePhase.REQUESTED",
+  DOWNLOADING: "updatePhase.DOWNLOADING",
+  VERIFYING: "updatePhase.VERIFYING",
+  BLOCKED: "updatePhase.BLOCKED",
+  BACKING_UP: "updatePhase.BACKING_UP",
+  INSTALLING: "updatePhase.INSTALLING",
+  RESTARTING: "updatePhase.RESTARTING",
+  INSTALLED: "updatePhase.INSTALLED",
+  ROLLED_BACK: "updatePhase.ROLLED_BACK",
+  FAILED: "updatePhase.FAILED",
+} as const satisfies Record<UpdatePhase, SquadLocaleKey>;
+
 const errorCodeKeys = {
   EXECUTION_INTERRUPTED: "errorCode.EXECUTION_INTERRUPTED",
   REJECTED_BY_OWNER: "errorCode.REJECTED_BY_OWNER",
@@ -406,6 +557,18 @@ const errorCodeKeys = {
   CONCURRENCY_LIMIT: "errorCode.CONCURRENCY_LIMIT",
   UNSUPPORTED: "errorCode.UNSUPPORTED",
   POLICY_REJECTED: "errorCode.POLICY_REJECTED",
+  UPDATE_CHECK_FAILED: "errorCode.UPDATE_CHECK_FAILED",
+  REQUEST_VERSION_CHANGED: "errorCode.REQUEST_VERSION_CHANGED",
+  ROLLED_BACK_VERSION_SUPPRESSED: "errorCode.ROLLED_BACK_VERSION_SUPPRESSED",
+  NODE_STATE_UNAVAILABLE: "errorCode.NODE_STATE_UNAVAILABLE",
+  NODE_VERSION_MISMATCH: "errorCode.NODE_VERSION_MISMATCH",
+  NODE_ID_CHANGED: "errorCode.NODE_ID_CHANGED",
+  ACTIVE_WORK: "errorCode.ACTIVE_WORK",
+  UPDATE_ALREADY_RUNNING: "errorCode.UPDATE_ALREADY_RUNNING",
+  UPDATE_INSTALL_FAILED: "errorCode.UPDATE_INSTALL_FAILED",
+  UPDATE_ROLLBACK_FAILED: "errorCode.UPDATE_ROLLBACK_FAILED",
+  UPDATE_FINALIZATION_WARNING: "errorCode.UPDATE_FINALIZATION_WARNING",
+  UPDATE_RUN_FAILED: "errorCode.UPDATE_RUN_FAILED",
 } as const satisfies Record<string, SquadLocaleKey>;
 
 const summaryKeys = {
@@ -466,6 +629,17 @@ export function formatPlanItemStatus(
   status: TeamPlanItemStatus,
 ): string {
   return t(planItemStatusKeys[status]);
+}
+
+export function formatUpdateMode(t: SquadTranslate, mode: UpdateMode): string {
+  return t(updateModeKeys[mode]);
+}
+
+export function formatUpdatePhase(
+  t: SquadTranslate,
+  phase: UpdatePhase,
+): string {
+  return t(updatePhaseKeys[phase]);
 }
 
 export function formatErrorCode(t: SquadTranslate, code: string): string {

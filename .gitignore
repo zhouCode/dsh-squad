@@ -20,8 +20,10 @@ dist/
 .env
 .env.*
 !.env.example
+release-signing-key*.pem
 
 # Generated package archives
+/artifacts/
 *.tar.gz
 *.tgz
 

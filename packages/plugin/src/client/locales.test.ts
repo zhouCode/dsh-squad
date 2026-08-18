@@ -8,6 +8,8 @@ import {
   formatPolicy,
   formatStatus,
   formatSummary,
+  formatUpdateMode,
+  formatUpdatePhase,
   zh,
   type SquadTranslate,
 } from "./locales.ts";
@@ -36,6 +38,8 @@ describe("Squad locale dictionaries", () => {
     expect(formatPolicy(t, "SAFE")).toBe("仅安全目标");
     expect(formatPlanStatus(t, "PARTIAL")).toBe("部分失败");
     expect(formatPlanItemStatus(t, "DISPATCHED")).toBe("已创建委派");
+    expect(formatUpdateMode(t, "NOTIFY")).toBe("仅通知（推荐）");
+    expect(formatUpdatePhase(t, "ROLLED_BACK")).toBe("已回滚");
     expect(formatDelivery(t, "FUTURE_DELIVERY_STATE")).toBe(
       "FUTURE_DELIVERY_STATE",
     );
@@ -45,6 +49,9 @@ describe("Squad locale dictionaries", () => {
     const t = translator(zh);
     expect(formatErrorCode(t, "EXECUTION_TIMEOUT")).toBe(
       "执行超时（EXECUTION_TIMEOUT）",
+    );
+    expect(formatErrorCode(t, "NODE_STATE_UNAVAILABLE")).toBe(
+      "无法验证本地节点状态（NODE_STATE_UNAVAILABLE）",
     );
     expect(formatErrorCode(t, "FUTURE_ERROR")).toBe("FUTURE_ERROR");
   });

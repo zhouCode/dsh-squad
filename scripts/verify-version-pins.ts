@@ -1,9 +1,14 @@
 import { readFile, readdir } from "node:fs/promises";
 import { join, relative } from "node:path";
+import {
+  DSH_VERSION,
+  SQUAD_VERSION,
+} from "../packages/plugin/src/shared/version.ts";
 
 const root = new URL("../", import.meta.url);
 const expectedDsh = "0.1.0-rc.6";
 const expectedCordis = "4.0.1";
+const expectedSquad = "0.5.0";
 const dependencyFields = [
   "dependencies",
   "devDependencies",
@@ -13,6 +18,7 @@ const dependencyFields = [
 
 interface PackageManifest {
   name?: string;
+  version?: string;
   packageManager?: string;
   engines?: { node?: string };
   dependencies?: Record<string, string>;
@@ -40,8 +46,26 @@ async function packageFiles(directory: string): Promise<string[]> {
 
 const projectRoot = root.pathname;
 const failures: string[] = [];
+if (SQUAD_VERSION !== expectedSquad) {
+  failures.push(
+    `packages/plugin/src/shared/version.ts SQUAD_VERSION must be ${expectedSquad}, found ${SQUAD_VERSION}`,
+  );
+}
+if (DSH_VERSION !== expectedDsh) {
+  failures.push(
+    `packages/plugin/src/shared/version.ts DSH_VERSION must be ${expectedDsh}, found ${DSH_VERSION}`,
+  );
+}
 for (const path of await packageFiles(projectRoot)) {
   const manifest = JSON.parse(await readFile(path, "utf8")) as PackageManifest;
+  if (
+    ["dsh-squad", "@dsh-squad/plugin"].includes(manifest.name ?? "") &&
+    manifest.version !== expectedSquad
+  ) {
+    failures.push(
+      `${relative(projectRoot, path)}: version must be ${expectedSquad}, found ${manifest.version ?? "missing"}`,
+    );
+  }
   for (const field of dependencyFields) {
     const dependencies = manifest[field] ?? {};
     for (const [name, version] of Object.entries(dependencies)) {
@@ -83,5 +107,5 @@ if (failures.length > 0) {
 }
 
 console.log(
-  `Verified Node 24.18.0, pnpm 10.28.2, DSH ${expectedDsh}, and Cordis ${expectedCordis} pins.`,
+  `Verified Squad ${expectedSquad}, Node 24.18.0, pnpm 10.28.2, DSH ${expectedDsh}, and Cordis ${expectedCordis} pins.`,
 );

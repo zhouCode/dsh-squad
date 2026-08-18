@@ -1,11 +1,11 @@
-import { mkdir } from "node:fs/promises";
+import { chmod, mkdir } from "node:fs/promises";
 import { dirname, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 import { build } from "esbuild";
 
 const root = resolve(dirname(fileURLToPath(import.meta.url)), "..");
 
-async function bundle(entry, output) {
+async function bundle(entry, output, options = {}) {
   await mkdir(dirname(output), { recursive: true });
   await build({
     entryPoints: [entry],
@@ -17,6 +17,7 @@ async function bundle(entry, output) {
     external: ["@deepseek-ai/*"],
     legalComments: "none",
     sourcemap: false,
+    ...options,
   });
 }
 
@@ -29,4 +30,11 @@ await Promise.all([
     resolve(root, "src/shared/index.ts"),
     resolve(root, "dist/shared/index.js"),
   ),
+  bundle(
+    resolve(root, "src/updater/cli.ts"),
+    resolve(root, "dist/updater/cli.js"),
+    { banner: { js: "#!/usr/bin/env node" } },
+  ),
 ]);
+
+await chmod(resolve(root, "dist/updater/cli.js"), 0o755);

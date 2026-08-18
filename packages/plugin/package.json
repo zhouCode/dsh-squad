@@ -1,6 +1,6 @@
 {
   "name": "@dsh-squad/plugin",
-  "version": "0.4.0",
+  "version": "0.5.0",
   "description": "DSH-native delegation for distributed teams of independently owned personal Agents",
   "license": "MIT",
   "repository": {
@@ -22,6 +22,9 @@
   "type": "module",
   "main": "dist/host/plugin.js",
   "types": "dist/host/plugin.d.ts",
+  "bin": {
+    "dsh-squad-update": "./dist/updater/cli.js"
+  },
   "exports": {
     ".": {
       "types": "./dist/host/plugin.d.ts",
@@ -43,9 +46,13 @@
     "dist/host/**/*.d.ts",
     "dist/shared/**/*.js",
     "dist/shared/**/*.d.ts",
+    "dist/update/**/*.d.ts",
+    "dist/updater/**/*.js",
+    "dist/updater/**/*.d.ts",
     "dist/client.js",
     "dist/client/index.d.ts",
     "cordis.patch.yml",
+    "release-signing-public.pem",
     "README.md",
     "README.zh-CN.md"
   ],

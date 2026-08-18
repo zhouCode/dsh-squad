@@ -50,6 +50,8 @@ import {
   type OrganizationView,
 } from "../shared/organizations.ts";
 import { isTerminalStatus } from "../shared/state.ts";
+import type { UpdateMode, UpdateSnapshot } from "../shared/updates.ts";
+import { SQUAD_VERSION } from "../shared/version.ts";
 import type { ResolvedSquadConfig } from "./config.ts";
 import {
   SquadDatabase,
@@ -72,6 +74,7 @@ import {
 import { RelayClient } from "./relay-client.ts";
 import { RelayServer } from "./relay.ts";
 import { OrganizationAuthority } from "./organization.ts";
+import { UpdateController } from "./update-controller.ts";
 
 declare module "@deepseek-ai/cordis" {
   interface Context {
@@ -118,6 +121,7 @@ export class SquadService extends Service {
   readonly relayClient?: RelayClient;
   readonly executor: NativeDelegationExecutor;
   readonly attachments: AttachmentVerifier;
+  readonly updates: UpdateController;
   readonly #starting = new Set<string>();
   readonly #dispatchingPlans = new Map<string, Promise<TeamPlan>>();
   readonly #stateListeners = new Set<(revision: number) => void>();
@@ -163,9 +167,11 @@ export class SquadService extends Service {
     this.attachments = new AttachmentVerifier(
       join(config.dataDir, "attachments"),
     );
+    this.updates = new UpdateController(config.updates);
   }
 
   async start(): Promise<void> {
+    await this.updates.start();
     if (
       this.relayClient !== undefined &&
       this.config.relay.invitation !== undefined
@@ -1505,6 +1511,7 @@ export class SquadService extends Service {
       await this.flushOutbox();
       await this.pollMailbox();
       await this.flushOutbox();
+      if (await this.updates.refresh()) this.touchLocalState();
     } catch (error) {
       this.database.diagnostic(
         "RELAY_PUMP_FAILED",
@@ -1525,6 +1532,7 @@ export class SquadService extends Service {
     revision: number;
     plans: TeamPlan[];
     delegations: DelegationRecord[];
+    updates: UpdateSnapshot;
   } {
     return {
       identity: {
@@ -1542,7 +1550,32 @@ export class SquadService extends Service {
       revision: this.#stateRevision,
       plans: this.database.listTeamPlans(),
       delegations: this.database.listDelegations(),
+      updates: this.updates.snapshot(),
     };
+  }
+
+  version(): string {
+    return SQUAD_VERSION;
+  }
+
+  async setUpdateMode(mode: UpdateMode): Promise<UpdateSnapshot> {
+    const snapshot = await this.updates.setMode(mode);
+    this.touchLocalState();
+    return snapshot;
+  }
+
+  async checkForUpdates(): Promise<UpdateSnapshot> {
+    const checking = this.updates.checkNow();
+    this.touchLocalState();
+    const snapshot = await checking;
+    this.touchLocalState();
+    return snapshot;
+  }
+
+  async requestUpdateInstall(): Promise<UpdateSnapshot> {
+    const snapshot = await this.updates.requestInstall();
+    this.touchLocalState();
+    return snapshot;
   }
 
   async nativeHostSelfTest(): Promise<{
