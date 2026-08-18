@@ -8,10 +8,11 @@ DSH Squad 把运行在不同电脑、网络和地点上的个人 Agent，组成�
 
 ## 核心亮点
 
-- **属于个人，协作于团队**：每个 Agent 仍由其所有者独立运行和授权，Squad 不创建共享超级 Agent，也不把远程任务转换成直接的 Shell、Skill、MCP 或凭据访问。
+- **组织一次加入，不再两两配对**：节点通过一次性邀请和人工审批加入带签名的组织成员目录，无论团队规模如何，都不需要每两个人分别交换 Peer 配置；一个节点可以同时属于多个组织。
+- **本地规划，权力仍属于个人**：Team Planner 可以把会议或团队目标整理成多人分派草案，但它不是持有全员权限的共享超级 Agent；负责人确认后才会发送，每位接收方仍由自己的策略和审批边界决定是否执行。
 - **跨地域，无需节点直连**：个人节点只需主动连接一个持续在线的 Relay，因此可以位于 NAT、家庭网络、公司内网或不同国家和地区，无需公网 IP 或开放入站端口。
 - **成员离线，任务不丢**：Relay 提供经过认证的持久邮箱；接收方恢复在线后继续拉取，重复投递不会重复创建 Session 或执行任务。
-- **信任可以逐人配置**：每个 Peer 都有独立的公钥固定、启停状态、委派权限、并发限制和 `NEVER`、`SAFE`、`TRUSTED` 自动执行策略。
+- **信任可以逐人配置**：每个直接 Peer 或组织成员都有独立的本机 `NEVER`、`SAFE`、`TRUSTED` 自动执行策略，可直接在界面下拉修改。
 - **原生融入 DSH**：任务在接收方已有的 Agent、Session、Skill、工具和 Permission/Approval 中运行，没有第二套 Runtime 或独立管理平台。
 
 ## 工作方式
@@ -33,6 +34,28 @@ Alice Agent --签名 Delegation--> Relay 持久邮箱 --> Bob 的 DSH
 - 发送方只能看到接收方明确发布的状态、摘要和 Outcome。
 
 同一真人、同一 DSH 内的并行拆解继续使用 DSH 原生 Sub-agent；跨到另一个真人拥有的 Personal Agent 时才使用 Squad。
+
+## Team Planner：先审阅，再分派
+
+本地 Agent 可以读取当前 Session 所选组织的活动成员；未选择组织时则使用兼容的直接 Peer。它依据会议纪要或团队目标生成一份持久化分派草案。生成草案不会产生任何网络请求或远程执行；负责人需要在`智能体收件箱 → 分派计划`中逐项检查接收人、目标、上下文、验收条件和附件，再点击`确认并分派`。
+
+一个典型提示词是：
+
+> 先使用 `list_squad_peers` 查看可用成员，再把下面的会议结论拆成一份团队分派计划。只创建草案，不要直接委派：……
+
+Agent 会调用 `propose_team_plan`。负责人确认后，Squad 才为每个计划项创建现有协议中的签名 Delegation。每个计划项预先固定唯一 Delegation ID，因此审批响应丢失、进程重启或部分失败后的重试都不会重复派单。发送方的本地确认不是接收方授权：接收方仍可拒绝、要求本人接受，或按自己的 `SAFE` / `TRUSTED` 策略执行。
+
+同一套本地 Plan API 可供后续飞书等 Connector 写入草案或读取状态投影；当前版本不包含飞书 Connector，也不会因外部看板编辑而自动执行任务。
+
+## 组织、角色与 Session 隔离
+
+创建组织的节点是唯一 `Owner`。Owner 可以指定零个或多个 `Admin`；其他参与者加入后都是 `Member`。Owner 和 Admin 可以创建一次性邀请并批准加入申请，Admin 只能管理普通 Member，只有 Owner 能任命或撤销 Admin。目录 v1 暂不支持 Owner 转让，避免在尚未定义恢复流程时产生双 Owner 或无 Owner 状态。
+
+组织根由独立 Authority 密钥签名，后续成员事件由当时有权限的 Owner/Admin 节点签名。Relay 和每个节点都会验证完整的追加式事件链、公钥身份、连续修订、签发者角色以及唯一活动 Owner；被禁用的成员不能继续发送组织委派。
+
+一个节点可以加入多个组织，但每个 DSH Session 同一时刻只选择一个组织上下文。`智能体收件箱`顶部实时显示当前节点、Session 和组织，切换只影响该 Session。成员查找、Team Planner 和委派都限定在该签名目录内；选择`直接对等方`即可继续使用旧版的一对一 Peer 模式。
+
+当前已经提供的是 **Team Planner**，它只是本地草案能力。未来若加入 **Organization Coordinator Agent**，它会是组织中的一个可选服务成员，而不是凌驾于成员之上的超级 Agent：只接收明确发布的会议材料和状态投影，只生成摘要、建议或待审草案，不继承成员工作区、凭据、私有 Session 或工具权限，也不默认代替任何人批准或执行任务。
 
 ## 典型部署：异地组成团队
 
@@ -57,11 +80,11 @@ Alice Agent --签名 Delegation--> Relay 持久邮箱 --> Bob 的 DSH
 ```bash
 pnpm install --frozen-lockfile
 pnpm run pack
-dsh plugin --profile web add ./artifacts/dsh-squad-plugin-0.2.0.tgz --offline
+dsh plugin --profile web add ./artifacts/dsh-squad-plugin-0.4.0.tgz --offline
 dsh web
 ```
 
-安装通过插件内的 `cordis.patch.yml` 同时挂载 Host Plugin 和 Web Client Module。启动后，原生 DSH 侧边栏出现 `智能体收件箱`（英文界面为 `Agent Inbox`）；其中的设置页可查看本 Node 的 Ed25519 身份并配置 Peer、公钥固定和本地策略。
+安装通过插件内的 `cordis.patch.yml` 同时挂载 Host Plugin 和 Web Client Module。启动后，原生 DSH 侧边栏出现 `智能体收件箱`（英文界面为 `Agent Inbox`）；面板顶部实时显示本 Node 身份和当前 Session 组织，`组织`页管理成员目录，`设置`页保留直接 Peer 兼容配置。
 
 ## 配置 Node
 
@@ -84,7 +107,7 @@ dsh web
       invitation: replace-with-one-time-invitation
 ```
 
-Peer 可以在 `智能体收件箱 → 设置`（`Agent Inbox → Settings`）中添加，也可以在配置中声明。`nodeId` 必须与 Ed25519 公钥指纹匹配。
+推荐在`智能体收件箱 → 组织`中通过一次性邀请加入组织；这样无需为每一对成员分别配置。直接 Peer 仍可在`智能体收件箱 → 设置`中添加，也可以在配置中声明；其 `nodeId` 必须与 Ed25519 公钥指纹匹配。
 
 ```yaml
 - id: dsh-squad
@@ -123,16 +146,25 @@ Peer 可以在 `智能体收件箱 → 设置`（`Agent Inbox → Settings`）�
           expiresAt: 2030-01-01T00:00:00.000Z
 ```
 
-Relay API 注册在宿主 WebServer 的 `/squad/v1` 下；它验证 enrollment、请求签名、nonce、时效、收发双方、邮箱容量和速率限制，但不运行 Agent，也不持有私人 Session 或 HumanTodo。
+Relay API 注册在宿主 WebServer 的 `/squad/v1` 下；它验证 enrollment、请求签名、nonce、时效、组织成员路由、收发双方、邮箱容量和速率限制，并保存签名组织目录与持久邮箱，但不运行 Agent，也不持有私人 Session、HumanTodo、工作区或成员凭据。
 
 ## Agent 与 WebUI
 
-插件向 Personal Agent 注册两个原生工具：
+插件向 Personal Agent 注册六个原生工具：
 
-- `delegate_to_agent`：按 Peer 名称或稳定 `nodeId` 创建委派；
-- `get_delegation_status`：读取本 Node 可见的公开状态投影。
+- `delegate_to_agent`：按当前组织成员或直接 Peer 的名称、`nodeId` / `membershipId` 创建委派；
+- `get_delegation_status`：读取本 Node 可见的公开状态投影；
+- `list_squad_peers`：列出当前 Session 组织成员；未选择组织时列出直接 Peer；
+- `propose_team_plan`：使用 Team Planner 创建等待负责人审阅的本地分派草案，绝不直接发送；
+- `list_squad_organizations`：列出本节点加入的组织、角色和状态；
+- `select_squad_organization`：在用户明确要求时切换当前 Session 的组织或直接 Peer 上下文。
 
-`智能体收件箱` 提供`待我处理`、`运行中`、`已发送`、`已完成`和`设置`；英文界面对应 `Agent Inbox`、`Waiting for me`、`Running`、`Sent`、`Completed` 和 `Settings`。接收方可选择一个或多个 Todo，提交文本或经 SHA-256/大小验证的附件引用，重启后继续处理，并打开对应的原生 DSH Session。
+不需要在聊天中输入这些工具的完整名称。Squad 支持两种按需触发方式，且不会为这些快捷触发另增按钮或常驻入口：
+
+- **自然语言或成员提及**：例如“把发布说明交给 Bob”“`@Bob` 整理本周变更”“根据这段会议纪要给团队分工”“查一下刚才那项委派的进度”。成员或目标有歧义时，Agent 会先要求澄清。
+- **统一前缀的英文 Slash 命令**：任务入口为 `/squad-task`、`/squad-plan`、`/squad-peers`、`/squad-status`；组织入口为 `/squad-orgs`、`/squad-org <name|id|direct>`、`/squad-members`、`/squad-invite [minutes]`、`/squad-role <member> <admin|member>`。输入 `/` 时由 DSH 原生命令菜单按需发现，所有名称都使用 `squad-` 前缀以避免冲突。
+
+`智能体收件箱` 提供`分派计划`、`待我处理`、`运行中`、`已发送`、`已完成`、`组织`和`设置`。组织状态通过 SSE 实时刷新；Owner/Admin 可审批、邀请和管理成员，每位用户可用下拉菜单调整本机对每个成员的 `autoExecute`。负责人也可以审阅、确认、重试或取消计划；接收方可以处理 Todo、重启后恢复并打开对应原生 Session。
 
 ## 语言
 
@@ -148,7 +180,9 @@ Relay API 注册在宿主 WebServer 的 `/squad/v1` 下；它验证 enrollment�
 
 - Node 首次启动生成并本地保存 Ed25519 身份；数据库会绑定身份，密钥或 DB 被替换时失败关闭。
 - Envelope 使用严格 Zod schema、canonical bytes 和 Ed25519 签名；相同 ID 不同 payload 视为冲突。
+- 组织根和追加式成员目录经过签名并在每个节点本地固定验证；协议 v2 将 Organization、发送者 membership 和接收者 membership 同时绑定进 Envelope。
 - Relay 邮箱请求使用短时签名、nonce 防重放和 recipient 隔离。
+- `/squad/v1/local/*` 管理接口只接受 loopback 客户端并拒绝转发请求；公网反向代理只应放行 Relay 所需的非 `local` 精确路由。
 - 附件仅接受 HTTPS，拒绝私网/loopback/重绑定地址，并校验声明大小与 SHA-256。
 - 远程 objective/context 始终作为不受信任任务数据进入接收方原生 Agent，不绕过 DSH Permission/Approval。
 - 进程在执行期间中断时标记 `EXECUTION_INTERRUPTED`，不会猜测并自动重放未知外部副作用。
@@ -177,7 +211,7 @@ pnpm test
 pnpm smoke:delegation
 ```
 
-`smoke:delegation` 会构建真实 tarball，安装到 Alice、Bob、Relay 三套隔离 DSH Home，并用真实 Chromium 验证：WebUI 配对、Bob 离线投递、Relay/Node 重启、接收端专属 Skill、HumanTodo 部分完成、相同 Session 恢复、Outcome 隐私边界和插件可逆禁用。
+`smoke:delegation` 会构建真实 tarball，安装到 Alice、Bob、Relay 三套隔离 DSH Home，并用真实 Chromium 验证：WebUI 配对、Team Planner 草案审批与幂等分派、Bob 离线投递、Relay/Node 重启、接收端专属 Skill、HumanTodo 部分完成、相同 Session 恢复、Outcome 隐私边界和插件可逆禁用；组织协议另由签名目录、Relay 权限与本地持久化集成测试覆盖。
 
 ## 许可证
 

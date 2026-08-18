@@ -1,4 +1,4 @@
-import { createHash, randomUUID } from "node:crypto";
+import { createHash, randomBytes, randomUUID } from "node:crypto";
 import { mkdirSync } from "node:fs";
 import type { IncomingMessage, ServerResponse } from "node:http";
 import { dirname } from "node:path";
@@ -17,7 +17,25 @@ import {
   nodeIdSchema,
   type Envelope,
 } from "../shared/contracts.ts";
+import {
+  organizationDirectoryBundleSchema,
+  organizationDocumentSchema,
+  organizationIdFromInvitation,
+  organizationInvitation,
+  organizationJoinRequestSchema,
+  organizationMembershipCertificateSchema,
+  unsignedOrganizationJoinRequest,
+  type OrganizationDirectoryBundle,
+  type OrganizationDocument,
+  type OrganizationJoinRequest,
+  type OrganizationMembershipCertificate,
+} from "../shared/organizations.ts";
 import { nodeIdFromPublicKey, verifySignature } from "./identity.ts";
+import {
+  applyOrganizationCertificate,
+  verifyOrganizationDirectory,
+  verifyOrganizationDocument,
+} from "./organization.ts";
 import type { RelayInviteConfig } from "./config.ts";
 
 const enrollmentSchema = z.strictObject({
@@ -32,6 +50,28 @@ const authHeadersSchema = z.strictObject({
   timestamp: z.string().datetime({ offset: true }),
   nonce: z.string().uuid(),
   signature: z.string().min(1).max(256),
+});
+
+const createOrganizationSchema = z.strictObject({
+  document: organizationDocumentSchema,
+  ownerCertificate: organizationMembershipCertificateSchema,
+});
+
+const joinOrganizationSchema = z.strictObject({
+  invitation: z.string().min(48).max(512),
+  request: organizationJoinRequestSchema,
+});
+
+const approveJoinRequestSchema = z.strictObject({
+  certificate: organizationMembershipCertificateSchema,
+});
+
+const updateMemberCertificateSchema = z.strictObject({
+  certificate: organizationMembershipCertificateSchema,
+});
+
+const createOrganizationInvitationSchema = z.strictObject({
+  expiresInMinutes: z.number().int().min(5).max(10_080).default(1_440),
 });
 
 type SqlRow = Record<string, unknown>;
@@ -157,7 +197,88 @@ export class RelayServer {
         expires_at TEXT NOT NULL,
         PRIMARY KEY(node_id, nonce)
       );
+
+      CREATE TABLE IF NOT EXISTS relay_organizations (
+        organization_id TEXT PRIMARY KEY,
+        name TEXT NOT NULL,
+        document_json TEXT NOT NULL,
+        authority_id TEXT NOT NULL UNIQUE,
+        owner_membership_id TEXT NOT NULL,
+        revision INTEGER NOT NULL CHECK (revision >= 1),
+        created_at TEXT NOT NULL,
+        updated_at TEXT NOT NULL
+      );
+
+      CREATE TABLE IF NOT EXISTS relay_organization_events (
+        organization_id TEXT NOT NULL,
+        organization_revision INTEGER NOT NULL,
+        membership_id TEXT NOT NULL,
+        member_revision INTEGER NOT NULL,
+        node_id TEXT NOT NULL,
+        certificate_json TEXT NOT NULL,
+        issued_at TEXT NOT NULL,
+        PRIMARY KEY(organization_id, organization_revision),
+        UNIQUE(organization_id, membership_id, member_revision),
+        FOREIGN KEY(organization_id) REFERENCES relay_organizations(organization_id) ON DELETE CASCADE,
+        FOREIGN KEY(node_id) REFERENCES relay_nodes(node_id)
+      );
+
+      CREATE TABLE IF NOT EXISTS relay_organization_members (
+        organization_id TEXT NOT NULL,
+        membership_id TEXT NOT NULL,
+        node_id TEXT NOT NULL,
+        display_name TEXT NOT NULL,
+        public_key TEXT NOT NULL,
+        role TEXT NOT NULL CHECK (role IN ('OWNER', 'ADMIN', 'MEMBER')),
+        status TEXT NOT NULL CHECK (status IN ('ACTIVE', 'DISABLED')),
+        organization_revision INTEGER NOT NULL,
+        member_revision INTEGER NOT NULL,
+        issued_at TEXT NOT NULL,
+        PRIMARY KEY(organization_id, membership_id),
+        UNIQUE(organization_id, node_id),
+        FOREIGN KEY(organization_id) REFERENCES relay_organizations(organization_id) ON DELETE CASCADE,
+        FOREIGN KEY(node_id) REFERENCES relay_nodes(node_id)
+      );
+      CREATE INDEX IF NOT EXISTS relay_organization_members_node_idx
+        ON relay_organization_members(node_id, status);
+
+      CREATE TABLE IF NOT EXISTS relay_organization_invites (
+        token_hash TEXT PRIMARY KEY,
+        organization_id TEXT NOT NULL,
+        created_by_membership_id TEXT NOT NULL,
+        expires_at TEXT NOT NULL,
+        used_by_request_id TEXT,
+        used_at TEXT,
+        created_at TEXT NOT NULL,
+        FOREIGN KEY(organization_id) REFERENCES relay_organizations(organization_id) ON DELETE CASCADE
+      );
+
+      CREATE TABLE IF NOT EXISTS relay_organization_join_requests (
+        organization_id TEXT NOT NULL,
+        request_id TEXT NOT NULL,
+        membership_id TEXT NOT NULL,
+        node_id TEXT NOT NULL,
+        request_json TEXT NOT NULL,
+        status TEXT NOT NULL CHECK (status IN ('PENDING', 'APPROVED', 'REJECTED')),
+        requested_at TEXT NOT NULL,
+        resolved_at TEXT,
+        PRIMARY KEY(organization_id, request_id),
+        UNIQUE(organization_id, membership_id),
+        UNIQUE(organization_id, node_id),
+        FOREIGN KEY(organization_id) REFERENCES relay_organizations(organization_id) ON DELETE CASCADE,
+        FOREIGN KEY(node_id) REFERENCES relay_nodes(node_id)
+      );
     `);
+    const version = this.#db
+      .prepare("SELECT version FROM schema_meta WHERE singleton = 1")
+      .get() as SqlRow;
+    if (Number(version.version) === 1) {
+      this.#db.exec("UPDATE schema_meta SET version = 2 WHERE singleton = 1");
+    } else if (Number(version.version) !== 2) {
+      throw new Error(
+        `unsupported Squad Relay database version ${String(version.version)}`,
+      );
+    }
   }
 
   private seedInvite(invite: RelayInviteConfig): void {
@@ -299,6 +420,485 @@ export class RelayServer {
     return { nodeId: input.nodeId, enrolled: true };
   }
 
+  private organizationDirectory(organizationId: string): {
+    document: OrganizationDocument;
+    revision: number;
+    events: OrganizationMembershipCertificate[];
+    members: Map<string, OrganizationMembershipCertificate>;
+  } {
+    const row = this.#db
+      .prepare(
+        "SELECT document_json, revision FROM relay_organizations WHERE organization_id = ?",
+      )
+      .get(organizationId) as SqlRow | undefined;
+    if (row === undefined) throw new HttpError(404, "ORGANIZATION_NOT_FOUND");
+    const document = organizationDocumentSchema.parse(
+      JSON.parse(String(row.document_json)) as unknown,
+    );
+    const events = (
+      this.#db
+        .prepare(
+          "SELECT certificate_json FROM relay_organization_events WHERE organization_id = ? ORDER BY organization_revision",
+        )
+        .all(organizationId) as SqlRow[]
+    ).map((event) =>
+      organizationMembershipCertificateSchema.parse(
+        JSON.parse(String(event.certificate_json)) as unknown,
+      ),
+    );
+    const verified = verifyOrganizationDirectory(document, events);
+    if (verified.revision !== Number(row.revision)) {
+      throw new Error("Relay organization revision is inconsistent");
+    }
+    return {
+      document,
+      revision: verified.revision,
+      events,
+      members: verified.members,
+    };
+  }
+
+  private organizationMemberForNode(
+    directory: ReturnType<RelayServer["organizationDirectory"]>,
+    nodeId: string,
+  ): OrganizationMembershipCertificate | undefined {
+    return [...directory.members.values()].find(
+      (member) => member.nodeId === nodeId,
+    );
+  }
+
+  private assertOrganizationManager(
+    directory: ReturnType<RelayServer["organizationDirectory"]>,
+    nodeId: string,
+  ): OrganizationMembershipCertificate {
+    const member = this.organizationMemberForNode(directory, nodeId);
+    if (
+      member === undefined ||
+      member.status !== "ACTIVE" ||
+      !["OWNER", "ADMIN"].includes(member.role)
+    ) {
+      throw new HttpError(403, "ORGANIZATION_MANAGER_REQUIRED");
+    }
+    return member;
+  }
+
+  private insertOrganizationEventUnsafe(
+    certificate: OrganizationMembershipCertificate,
+  ): void {
+    this.#db
+      .prepare(
+        `
+        INSERT INTO relay_organization_events(
+          organization_id, organization_revision, membership_id,
+          member_revision, node_id, certificate_json, issued_at
+        ) VALUES (?, ?, ?, ?, ?, ?, ?)
+      `,
+      )
+      .run(
+        certificate.organizationId,
+        certificate.organizationRevision,
+        certificate.membershipId,
+        certificate.memberRevision,
+        certificate.nodeId,
+        JSON.stringify(certificate),
+        certificate.issuedAt,
+      );
+    this.#db
+      .prepare(
+        `
+        INSERT INTO relay_organization_members(
+          organization_id, membership_id, node_id, display_name, public_key,
+          role, status, organization_revision, member_revision, issued_at
+        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+        ON CONFLICT(organization_id, membership_id) DO UPDATE SET
+          display_name = excluded.display_name,
+          role = excluded.role,
+          status = excluded.status,
+          organization_revision = excluded.organization_revision,
+          member_revision = excluded.member_revision,
+          issued_at = excluded.issued_at
+      `,
+      )
+      .run(
+        certificate.organizationId,
+        certificate.membershipId,
+        certificate.nodeId,
+        certificate.displayName,
+        certificate.publicKey,
+        certificate.role,
+        certificate.status,
+        certificate.organizationRevision,
+        certificate.memberRevision,
+        certificate.issuedAt,
+      );
+    this.#db
+      .prepare(
+        "UPDATE relay_organizations SET revision = ?, updated_at = ? WHERE organization_id = ?",
+      )
+      .run(
+        certificate.organizationRevision,
+        new Date().toISOString(),
+        certificate.organizationId,
+      );
+  }
+
+  private createOrganization(
+    value: unknown,
+    authenticatedNodeId: string,
+    authenticatedPublicKey: string,
+  ): { organizationId: string; revision: number } {
+    const input = createOrganizationSchema.parse(value);
+    const document = verifyOrganizationDocument(input.document);
+    const verified = verifyOrganizationDirectory(document, [
+      input.ownerCertificate,
+    ]);
+    const owner = verified.members.get(document.ownerMembershipId);
+    if (
+      owner === undefined ||
+      owner.nodeId !== authenticatedNodeId ||
+      owner.publicKey !== authenticatedPublicKey
+    ) {
+      throw new HttpError(403, "ORGANIZATION_OWNER_MISMATCH");
+    }
+    const existing = this.#db
+      .prepare(
+        "SELECT document_json FROM relay_organizations WHERE organization_id = ?",
+      )
+      .get(document.organizationId) as SqlRow | undefined;
+    if (existing !== undefined) {
+      if (String(existing.document_json) !== JSON.stringify(document)) {
+        throw new HttpError(409, "ORGANIZATION_ID_CONFLICT");
+      }
+      return { organizationId: document.organizationId, revision: 1 };
+    }
+    const now = new Date().toISOString();
+    this.#db.exec("BEGIN IMMEDIATE");
+    try {
+      this.#db
+        .prepare(
+          `
+          INSERT INTO relay_organizations(
+            organization_id, name, document_json, authority_id,
+            owner_membership_id, revision, created_at, updated_at
+          ) VALUES (?, ?, ?, ?, ?, 1, ?, ?)
+        `,
+        )
+        .run(
+          document.organizationId,
+          document.name,
+          JSON.stringify(document),
+          document.authorityId,
+          document.ownerMembershipId,
+          document.createdAt,
+          now,
+        );
+      this.insertOrganizationEventUnsafe(input.ownerCertificate);
+      this.#db.exec("COMMIT");
+    } catch (error) {
+      this.#db.exec("ROLLBACK");
+      throw error;
+    }
+    return { organizationId: document.organizationId, revision: 1 };
+  }
+
+  private organizationBundles(nodeId: string): OrganizationDirectoryBundle[] {
+    const ids = (
+      this.#db
+        .prepare(
+          `
+          SELECT organization_id FROM relay_organization_members
+          WHERE node_id = ?
+          UNION
+          SELECT organization_id FROM relay_organization_join_requests
+          WHERE node_id = ? AND status = 'PENDING'
+          ORDER BY organization_id
+        `,
+        )
+        .all(nodeId, nodeId) as SqlRow[]
+    ).map((row) => String(row.organization_id));
+    return ids.map((organizationId) => {
+      const directory = this.organizationDirectory(organizationId);
+      const selfMember = this.organizationMemberForNode(directory, nodeId);
+      const selfPending = this.#db
+        .prepare(
+          "SELECT request_json FROM relay_organization_join_requests WHERE organization_id = ? AND node_id = ? AND status = 'PENDING'",
+        )
+        .get(organizationId, nodeId) as SqlRow | undefined;
+      const mayManage =
+        selfMember?.status === "ACTIVE" &&
+        ["OWNER", "ADMIN"].includes(selfMember.role);
+      const pendingJoinRequests = mayManage
+        ? (
+            this.#db
+              .prepare(
+                "SELECT request_json FROM relay_organization_join_requests WHERE organization_id = ? AND status = 'PENDING' ORDER BY requested_at, request_id",
+              )
+              .all(organizationId) as SqlRow[]
+          ).map((row) =>
+            organizationJoinRequestSchema.parse(
+              JSON.parse(String(row.request_json)) as unknown,
+            ),
+          )
+        : selfPending === undefined
+          ? []
+          : [
+              organizationJoinRequestSchema.parse(
+                JSON.parse(String(selfPending.request_json)) as unknown,
+              ),
+            ];
+      const selfStatus =
+        selfMember === undefined
+          ? "PENDING"
+          : selfMember.status === "ACTIVE"
+            ? "ACTIVE"
+            : "DISABLED";
+      return organizationDirectoryBundleSchema.parse({
+        document: directory.document,
+        revision: directory.revision,
+        events: directory.events,
+        selfStatus,
+        pendingJoinRequests,
+      });
+    });
+  }
+
+  private createOrganizationInvitation(
+    organizationId: string,
+    value: unknown,
+    authenticatedNodeId: string,
+  ): { invitation: string; expiresAt: string } {
+    const input = createOrganizationInvitationSchema.parse(value);
+    const directory = this.organizationDirectory(organizationId);
+    const manager = this.assertOrganizationManager(
+      directory,
+      authenticatedNodeId,
+    );
+    const secret = randomBytes(32).toString("base64url");
+    const invitation = organizationInvitation(organizationId, secret);
+    const expiresAt = new Date(
+      Date.now() + input.expiresInMinutes * 60_000,
+    ).toISOString();
+    this.#db
+      .prepare(
+        `
+        INSERT INTO relay_organization_invites(
+          token_hash, organization_id, created_by_membership_id,
+          expires_at, created_at
+        ) VALUES (?, ?, ?, ?, ?)
+      `,
+      )
+      .run(
+        inviteHash(invitation),
+        organizationId,
+        manager.membershipId,
+        expiresAt,
+        new Date().toISOString(),
+      );
+    return { invitation, expiresAt };
+  }
+
+  private joinOrganization(
+    value: unknown,
+    authenticatedNodeId: string,
+    authenticatedPublicKey: string,
+  ): { organizationId: string; requestId: string; status: "PENDING" } {
+    const input = joinOrganizationSchema.parse(value);
+    const organizationId = organizationIdFromInvitation(input.invitation);
+    const request = input.request;
+    if (
+      request.organizationId !== organizationId ||
+      request.nodeId !== authenticatedNodeId ||
+      request.publicKey !== authenticatedPublicKey ||
+      nodeIdFromPublicKey(request.publicKey) !== request.nodeId ||
+      !verifySignature(
+        unsignedOrganizationJoinRequest(request),
+        request.signature,
+        request.publicKey,
+      )
+    ) {
+      throw new HttpError(400, "INVALID_JOIN_REQUEST");
+    }
+    if (Math.abs(Date.now() - Date.parse(request.requestedAt)) > 5 * 60_000) {
+      throw new HttpError(400, "JOIN_REQUEST_EXPIRED");
+    }
+    this.organizationDirectory(organizationId);
+    const existingMember = this.#db
+      .prepare(
+        "SELECT membership_id FROM relay_organization_members WHERE organization_id = ? AND node_id = ?",
+      )
+      .get(organizationId, authenticatedNodeId) as SqlRow | undefined;
+    if (existingMember !== undefined) {
+      throw new HttpError(409, "ALREADY_ORGANIZATION_MEMBER");
+    }
+    const existingRequest = this.#db
+      .prepare(
+        "SELECT request_id, request_json, status FROM relay_organization_join_requests WHERE organization_id = ? AND node_id = ?",
+      )
+      .get(organizationId, authenticatedNodeId) as SqlRow | undefined;
+    if (existingRequest !== undefined) {
+      if (
+        existingRequest.status === "PENDING" &&
+        String(existingRequest.request_json) === JSON.stringify(request)
+      ) {
+        return {
+          organizationId,
+          requestId: request.requestId,
+          status: "PENDING",
+        };
+      }
+      throw new HttpError(409, "JOIN_REQUEST_CONFLICT");
+    }
+    const invitation = this.#db
+      .prepare(
+        "SELECT organization_id, expires_at, used_by_request_id FROM relay_organization_invites WHERE token_hash = ?",
+      )
+      .get(inviteHash(input.invitation)) as SqlRow | undefined;
+    if (
+      invitation === undefined ||
+      invitation.organization_id !== organizationId
+    ) {
+      throw new HttpError(403, "INVALID_ORGANIZATION_INVITATION");
+    }
+    if (invitation.used_by_request_id !== null) {
+      throw new HttpError(409, "ORGANIZATION_INVITATION_ALREADY_USED");
+    }
+    if (Date.parse(String(invitation.expires_at)) <= Date.now()) {
+      throw new HttpError(410, "ORGANIZATION_INVITATION_EXPIRED");
+    }
+    const now = new Date().toISOString();
+    this.#db.exec("BEGIN IMMEDIATE");
+    try {
+      this.#db
+        .prepare(
+          `
+          INSERT INTO relay_organization_join_requests(
+            organization_id, request_id, membership_id, node_id,
+            request_json, status, requested_at
+          ) VALUES (?, ?, ?, ?, ?, 'PENDING', ?)
+        `,
+        )
+        .run(
+          organizationId,
+          request.requestId,
+          request.membershipId,
+          request.nodeId,
+          JSON.stringify(request),
+          request.requestedAt,
+        );
+      this.#db
+        .prepare(
+          "UPDATE relay_organization_invites SET used_by_request_id = ?, used_at = ? WHERE token_hash = ? AND used_by_request_id IS NULL",
+        )
+        .run(request.requestId, now, inviteHash(input.invitation));
+      this.#db.exec("COMMIT");
+    } catch (error) {
+      this.#db.exec("ROLLBACK");
+      throw error;
+    }
+    return { organizationId, requestId: request.requestId, status: "PENDING" };
+  }
+
+  private approveOrganizationJoin(
+    organizationId: string,
+    requestId: string,
+    value: unknown,
+    authenticatedNodeId: string,
+  ): { organizationId: string; revision: number } {
+    const input = approveJoinRequestSchema.parse(value);
+    const directory = this.organizationDirectory(organizationId);
+    const manager = this.assertOrganizationManager(
+      directory,
+      authenticatedNodeId,
+    );
+    const row = this.#db
+      .prepare(
+        "SELECT request_json, status FROM relay_organization_join_requests WHERE organization_id = ? AND request_id = ?",
+      )
+      .get(organizationId, requestId) as SqlRow | undefined;
+    if (row === undefined) throw new HttpError(404, "JOIN_REQUEST_NOT_FOUND");
+    if (row.status !== "PENDING") {
+      throw new HttpError(409, "JOIN_REQUEST_ALREADY_RESOLVED");
+    }
+    const request = organizationJoinRequestSchema.parse(
+      JSON.parse(String(row.request_json)) as unknown,
+    );
+    const certificate = input.certificate;
+    if (
+      certificate.organizationId !== organizationId ||
+      certificate.membershipId !== request.membershipId ||
+      certificate.nodeId !== request.nodeId ||
+      certificate.publicKey !== request.publicKey ||
+      certificate.displayName !== request.displayName ||
+      certificate.role !== "MEMBER" ||
+      certificate.status !== "ACTIVE" ||
+      certificate.memberRevision !== 1 ||
+      certificate.issuer.kind !== "MEMBER" ||
+      certificate.issuer.membershipId !== manager.membershipId ||
+      certificate.issuer.nodeId !== authenticatedNodeId
+    ) {
+      throw new HttpError(400, "JOIN_CERTIFICATE_MISMATCH");
+    }
+    applyOrganizationCertificate(
+      directory.document,
+      directory.members,
+      directory.revision,
+      certificate,
+    );
+    this.#db.exec("BEGIN IMMEDIATE");
+    try {
+      this.insertOrganizationEventUnsafe(certificate);
+      this.#db
+        .prepare(
+          "UPDATE relay_organization_join_requests SET status = 'APPROVED', resolved_at = ? WHERE organization_id = ? AND request_id = ?",
+        )
+        .run(new Date().toISOString(), organizationId, requestId);
+      this.#db.exec("COMMIT");
+    } catch (error) {
+      this.#db.exec("ROLLBACK");
+      throw error;
+    }
+    return { organizationId, revision: certificate.organizationRevision };
+  }
+
+  private updateOrganizationMember(
+    organizationId: string,
+    membershipId: string,
+    value: unknown,
+    authenticatedNodeId: string,
+  ): { organizationId: string; revision: number } {
+    const input = updateMemberCertificateSchema.parse(value);
+    const directory = this.organizationDirectory(organizationId);
+    const manager = this.assertOrganizationManager(
+      directory,
+      authenticatedNodeId,
+    );
+    const certificate = input.certificate;
+    if (
+      certificate.organizationId !== organizationId ||
+      certificate.membershipId !== membershipId ||
+      certificate.issuer.kind !== "MEMBER" ||
+      certificate.issuer.membershipId !== manager.membershipId ||
+      certificate.issuer.nodeId !== authenticatedNodeId
+    ) {
+      throw new HttpError(400, "MEMBER_CERTIFICATE_MISMATCH");
+    }
+    applyOrganizationCertificate(
+      directory.document,
+      directory.members,
+      directory.revision,
+      certificate,
+    );
+    this.#db.exec("BEGIN IMMEDIATE");
+    try {
+      this.insertOrganizationEventUnsafe(certificate);
+      this.#db.exec("COMMIT");
+    } catch (error) {
+      this.#db.exec("ROLLBACK");
+      throw error;
+    }
+    return { organizationId, revision: certificate.organizationRevision };
+  }
+
   private submit(
     value: unknown,
     authenticatedNodeId: string,
@@ -333,11 +933,36 @@ export class RelayServer {
       .get(envelope.senderNodeId) as SqlRow | undefined;
     const recipient = this.#db
       .prepare(
-        "SELECT node_id FROM relay_nodes WHERE node_id = ? AND disabled_at IS NULL",
+        "SELECT node_id, public_key FROM relay_nodes WHERE node_id = ? AND disabled_at IS NULL",
       )
       .get(envelope.recipientNodeId) as SqlRow | undefined;
     if (sender === undefined || recipient === undefined) {
       throw new HttpError(404, "NODE_NOT_FOUND");
+    }
+    if (envelope.protocolVersion === 2) {
+      const organizationId = envelope.organizationId;
+      const senderMembershipId = envelope.senderMembershipId;
+      const recipientMembershipId = envelope.recipientMembershipId;
+      if (
+        organizationId === undefined ||
+        senderMembershipId === undefined ||
+        recipientMembershipId === undefined
+      ) {
+        throw new HttpError(400, "ORGANIZATION_ROUTING_REQUIRED");
+      }
+      const directory = this.organizationDirectory(organizationId);
+      const senderMember = directory.members.get(senderMembershipId);
+      const recipientMember = directory.members.get(recipientMembershipId);
+      if (
+        senderMember?.status !== "ACTIVE" ||
+        senderMember.nodeId !== envelope.senderNodeId ||
+        senderMember.publicKey !== sender.public_key ||
+        recipientMember?.status !== "ACTIVE" ||
+        recipientMember.nodeId !== envelope.recipientNodeId ||
+        recipientMember.publicKey !== recipient.public_key
+      ) {
+        throw new HttpError(403, "ORGANIZATION_MEMBERSHIP_REJECTED");
+      }
     }
     if (
       !verifySignature(
@@ -459,7 +1084,7 @@ export class RelayServer {
       .run(new Date().toISOString(), envelopeId);
   }
 
-  private nodes(): Array<{
+  private nodes(requesterNodeId: string): Array<{
     nodeId: string;
     displayName: string;
     publicKey: string;
@@ -467,9 +1092,27 @@ export class RelayServer {
     return (
       this.#db
         .prepare(
-          "SELECT node_id, display_name, public_key FROM relay_nodes WHERE disabled_at IS NULL ORDER BY lower(display_name), node_id",
+          `
+          SELECT DISTINCT n.node_id, n.display_name, n.public_key
+          FROM relay_nodes n
+          WHERE n.disabled_at IS NULL
+            AND (
+              n.node_id = ?
+              OR EXISTS (
+                SELECT 1
+                FROM relay_organization_members self
+                JOIN relay_organization_members teammate
+                  ON teammate.organization_id = self.organization_id
+                WHERE self.node_id = ?
+                  AND self.status = 'ACTIVE'
+                  AND teammate.node_id = n.node_id
+                  AND teammate.status = 'ACTIVE'
+              )
+            )
+          ORDER BY lower(n.display_name), n.node_id
+        `,
         )
-        .all() as SqlRow[]
+        .all(requesterNodeId, requesterNodeId) as SqlRow[]
     ).map((row) => ({
       nodeId: String(row.node_id),
       displayName: String(row.display_name),
@@ -483,7 +1126,7 @@ export class RelayServer {
     const path = `${url.pathname}${url.search}`;
     try {
       if (req.method === "GET" && url.pathname === "/squad/v1/health") {
-        reply(res, 200, { ok: true, protocolVersion: 1 });
+        reply(res, 200, { ok: true, protocolVersions: [1, 2] });
         return true;
       }
       if (req.method === "POST" && url.pathname === "/squad/v1/enrollment") {
@@ -503,8 +1146,105 @@ export class RelayServer {
         return true;
       }
       if (req.method === "GET" && url.pathname === "/squad/v1/nodes") {
-        this.authenticate(req, path, Buffer.alloc(0));
-        reply(res, 200, { nodes: this.nodes() });
+        const auth = this.authenticate(req, path, Buffer.alloc(0));
+        reply(res, 200, { nodes: this.nodes(auth.nodeId) });
+        return true;
+      }
+      if (req.method === "POST" && url.pathname === "/squad/v1/organizations") {
+        const body = await readBody(req, 128 * 1024);
+        const auth = this.authenticate(req, path, body);
+        reply(
+          res,
+          201,
+          this.createOrganization(jsonBody(body), auth.nodeId, auth.publicKey),
+        );
+        return true;
+      }
+      if (req.method === "GET" && url.pathname === "/squad/v1/organizations") {
+        const auth = this.authenticate(req, path, Buffer.alloc(0));
+        reply(res, 200, {
+          organizations: this.organizationBundles(auth.nodeId),
+        });
+        return true;
+      }
+      if (
+        req.method === "POST" &&
+        url.pathname === "/squad/v1/organizations/join"
+      ) {
+        const body = await readBody(req, 64 * 1024);
+        const auth = this.authenticate(req, path, body);
+        reply(
+          res,
+          202,
+          this.joinOrganization(jsonBody(body), auth.nodeId, auth.publicKey),
+        );
+        return true;
+      }
+      const organizationInvitationRoute =
+        /^\/squad\/v1\/organizations\/([0-9a-f-]{36})\/invitations$/u.exec(
+          url.pathname,
+        );
+      if (
+        req.method === "POST" &&
+        organizationInvitationRoute?.[1] !== undefined
+      ) {
+        const body = await readBody(req, 8 * 1024);
+        const auth = this.authenticate(req, path, body);
+        reply(
+          res,
+          201,
+          this.createOrganizationInvitation(
+            organizationInvitationRoute[1],
+            jsonBody(body),
+            auth.nodeId,
+          ),
+        );
+        return true;
+      }
+      const approveOrganizationJoinRoute =
+        /^\/squad\/v1\/organizations\/([0-9a-f-]{36})\/join-requests\/([0-9a-f-]{36})\/approve$/u.exec(
+          url.pathname,
+        );
+      if (
+        req.method === "POST" &&
+        approveOrganizationJoinRoute?.[1] !== undefined &&
+        approveOrganizationJoinRoute[2] !== undefined
+      ) {
+        const body = await readBody(req, 64 * 1024);
+        const auth = this.authenticate(req, path, body);
+        reply(
+          res,
+          200,
+          this.approveOrganizationJoin(
+            approveOrganizationJoinRoute[1],
+            approveOrganizationJoinRoute[2],
+            jsonBody(body),
+            auth.nodeId,
+          ),
+        );
+        return true;
+      }
+      const organizationMemberRoute =
+        /^\/squad\/v1\/organizations\/([0-9a-f-]{36})\/members\/([0-9a-f-]{36})\/certificate$/u.exec(
+          url.pathname,
+        );
+      if (
+        req.method === "POST" &&
+        organizationMemberRoute?.[1] !== undefined &&
+        organizationMemberRoute[2] !== undefined
+      ) {
+        const body = await readBody(req, 64 * 1024);
+        const auth = this.authenticate(req, path, body);
+        reply(
+          res,
+          200,
+          this.updateOrganizationMember(
+            organizationMemberRoute[1],
+            organizationMemberRoute[2],
+            jsonBody(body),
+            auth.nodeId,
+          ),
+        );
         return true;
       }
       const ack = /^\/squad\/v1\/envelopes\/([0-9a-f-]{36})\/ack$/u.exec(

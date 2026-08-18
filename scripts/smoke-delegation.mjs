@@ -28,7 +28,7 @@ const skillFixture = join(
   "squad-count-items",
 );
 const artifactsDir = join(root, "artifacts");
-const pluginTarball = join(artifactsDir, "dsh-squad-plugin-0.2.0.tgz");
+const pluginTarball = join(artifactsDir, "dsh-squad-plugin-0.4.0.tgz");
 const fixtureTarball = join(
   artifactsDir,
   "dsh-squad-deterministic-agent-fixture-0.0.0.tgz",
@@ -385,14 +385,11 @@ async function pairPeer(page, peer, displayName, autoExecute) {
   await dialog.getByLabel("Ed25519 public key").fill(peer.publicKey);
   await dialog.getByLabel("Automatic execution").selectOption(autoExecute);
   await dialog.getByRole("button", { name: "Save peer", exact: true }).click();
-  await dialog.getByText(displayName, { exact: true }).first().waitFor();
-  const policyLabel = {
-    NEVER: "Never",
-    SAFE: "Safe objectives only",
-    TRUSTED: "Trusted objectives",
-  }[autoExecute];
-  assert(policyLabel !== undefined);
-  await dialog.getByText(policyLabel, { exact: true }).first().waitFor();
+  const peerRow = dialog.locator(".squad-peer").filter({
+    hasText: displayName,
+  });
+  await peerRow.waitFor({ state: "visible" });
+  assert.equal(await peerRow.locator("select").inputValue(), autoExecute);
   await closeInbox(dialog);
 }
 
@@ -418,7 +415,14 @@ async function assertChineseLocalization(browser, port) {
       await dialog.locator(".squad-panel").getAttribute("lang"),
       "zh-CN",
     );
-    for (const tab of ["待我处理", "运行中", "已发送", "已完成", "设置"]) {
+    for (const tab of [
+      "分派计划",
+      "待我处理",
+      "运行中",
+      "已发送",
+      "已完成",
+      "设置",
+    ]) {
       await dialog.getByRole("button", { name: tab, exact: true }).waitFor();
     }
     await dialog.getByRole("button", { name: "设置", exact: true }).click();
@@ -636,7 +640,7 @@ async function main() {
     log("starting one Relay plus two real, isolated DSH Web Hosts");
     await relay.start();
     const health = await fetchJson(`${relayUrl}/squad/v1/health`);
-    assert.deepEqual(health, { ok: true, protocolVersion: 1 });
+    assert.deepEqual(health, { ok: true, protocolVersions: [1, 2] });
     await alice.start();
     await bob.start();
 
@@ -665,6 +669,79 @@ async function main() {
           peer.policy.autoExecute === "TRUSTED",
       );
     });
+
+    log("creating a local Team Planner draft and approving it in WebUI");
+    const planFixtureMarker = "TEAM_PLAN_FIXTURE";
+    const plan = await fetchJson(
+      `http://127.0.0.1:${alicePort}/squad/v1/local/plans`,
+      {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({
+          title: "Team Planner smoke plan",
+          sourceSummary: "One reviewed item must become one signed delegation.",
+          items: [
+            {
+              to: bobIdentity.nodeId,
+              objective: `${planFixtureMarker}: verify the reviewed plan path`,
+              acceptanceCriteria: ["Return one explicit outcome"],
+            },
+          ],
+        }),
+      },
+    );
+    assert.equal(plan.status, "DRAFT");
+    assert.equal(plan.items.length, 1);
+    assert.equal(
+      matching(await localState(alicePort), planFixtureMarker, "OUTGOING")
+        .length,
+      0,
+      "a Team Planner draft must not dispatch before local approval",
+    );
+    let dialog = await openInbox(alicePage);
+    await dialog.getByRole("button", { name: "Plans", exact: true }).click();
+    await dialog
+      .getByText("Team Planner smoke plan", { exact: true })
+      .first()
+      .waitFor();
+    await dialog
+      .getByRole("button", { name: "Approve and dispatch", exact: true })
+      .click();
+    const dispatchedPlan = await waitFor(
+      "reviewed Team Planner dispatch",
+      async () => {
+        const state = await localState(alicePort);
+        const candidate = state.plans.find((item) => item.id === plan.id);
+        return candidate?.status === "DISPATCHED" ? candidate : undefined;
+      },
+    );
+    const plannedOutgoing = matching(
+      await localState(alicePort),
+      planFixtureMarker,
+      "OUTGOING",
+    );
+    assert.equal(plannedOutgoing.length, 1);
+    assert.equal(plannedOutgoing[0].id, plan.items[0].id);
+    assert.equal(dispatchedPlan.items[0].delegationId, plan.items[0].id);
+    await closeInbox(dialog);
+    const replayedApproval = await fetchJson(
+      `http://127.0.0.1:${alicePort}/squad/v1/local/plans/${plan.id}/approve`,
+      { method: "POST" },
+    );
+    assert.equal(replayedApproval.status, "DISPATCHED");
+    assert.equal(
+      matching(await localState(alicePort), planFixtureMarker, "OUTGOING")
+        .length,
+      1,
+      "replayed approval must not create a duplicate delegation",
+    );
+    const completedPlanDelegation = await waitForDelegation(
+      alicePort,
+      planFixtureMarker,
+      "OUTGOING",
+      "COMPLETED",
+    );
+    assert.equal(completedPlanDelegation.id, plan.items[0].id);
 
     const nativeSelfTest = await fetchJson(
       `http://127.0.0.1:${alicePort}/squad/v1/local/self-test/session`,
@@ -696,7 +773,7 @@ async function main() {
         return items[0];
       },
     );
-    let dialog = await assertInboxItem(alicePage, "Sent", "AUTO_SKILL_FIXTURE");
+    dialog = await assertInboxItem(alicePage, "Sent", "AUTO_SKILL_FIXTURE");
     await dialog.getByRole("button", { name: "Settings", exact: true }).click();
     await dialog
       .getByText("Bob Personal Agent", { exact: true })
@@ -804,14 +881,11 @@ async function main() {
     bobPage = await openDshPage(context, bobPort, false);
     dialog = await openInbox(bobPage);
     await dialog.getByRole("button", { name: "Settings", exact: true }).click();
-    await dialog
-      .getByText("Alice Personal Agent", { exact: true })
-      .first()
-      .waitFor();
-    await dialog
-      .getByText("Trusted objectives", { exact: true })
-      .first()
-      .waitFor();
+    const alicePeerRow = dialog.locator(".squad-peer").filter({
+      hasText: "Alice Personal Agent",
+    });
+    await alicePeerRow.waitFor({ state: "visible" });
+    assert.equal(await alicePeerRow.locator("select").inputValue(), "TRUSTED");
     await dialog
       .getByRole("button", { name: "Waiting for me", exact: true })
       .click();
@@ -1022,7 +1096,7 @@ async function main() {
     await disabledPage.close();
 
     log(
-      "PASS: tarball, bilingual native DSH UI, offline Relay, Skill, Todo, resume, privacy, and Chromium",
+      "PASS: tarball, Team Planner approval, bilingual DSH UI, offline Relay, Skill, Todo, resume, privacy, and Chromium",
     );
   } catch (error) {
     for (const host of [alice, bob, relay]) {

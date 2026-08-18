@@ -1,6 +1,7 @@
 import { z } from "zod";
 
 export const PROTOCOL_VERSION = 1 as const;
+export const ORGANIZATION_PROTOCOL_VERSION = 2 as const;
 export const MAX_ENVELOPE_BYTES = 256 * 1024;
 export const MAX_ATTACHMENT_BYTES = 25 * 1024 * 1024;
 
@@ -94,13 +95,19 @@ export const delegationCancelRequestSchema = z.strictObject({
 });
 
 const envelopeHeader = {
-  protocolVersion: z.literal(PROTOCOL_VERSION),
+  protocolVersion: z.union([
+    z.literal(PROTOCOL_VERSION),
+    z.literal(ORGANIZATION_PROTOCOL_VERSION),
+  ]),
   envelopeId: idSchema,
   senderNodeId: nodeIdSchema,
   recipientNodeId: nodeIdSchema,
   correlationId: idSchema,
   createdAt: timestampSchema,
   expiresAt: timestampSchema,
+  organizationId: idSchema.optional(),
+  senderMembershipId: idSchema.optional(),
+  recipientMembershipId: idSchema.optional(),
   signature: signatureSchema,
 };
 
@@ -196,6 +203,71 @@ export const createDelegationInputSchema = z.strictObject({
 });
 export type CreateDelegationInput = z.infer<typeof createDelegationInputSchema>;
 
+export const teamPlanStatusSchema = z.enum([
+  "DRAFT",
+  "DISPATCHING",
+  "DISPATCHED",
+  "PARTIAL",
+  "CANCELED",
+]);
+export type TeamPlanStatus = z.infer<typeof teamPlanStatusSchema>;
+
+export const teamPlanItemStatusSchema = z.enum([
+  "DRAFT",
+  "DISPATCHED",
+  "FAILED",
+  "CANCELED",
+]);
+export type TeamPlanItemStatus = z.infer<typeof teamPlanItemStatusSchema>;
+
+export const teamPlanItemInputSchema = z.strictObject({
+  to: createDelegationInputSchema.shape.to,
+  objective: createDelegationInputSchema.shape.objective,
+  context: createDelegationInputSchema.shape.context,
+  acceptanceCriteria: createDelegationInputSchema.shape.acceptanceCriteria,
+  attachmentRefs: createDelegationInputSchema.shape.attachmentRefs,
+});
+export type TeamPlanItemInput = z.infer<typeof teamPlanItemInputSchema>;
+
+export const createTeamPlanInputSchema = z.strictObject({
+  title: z.string().trim().min(1).max(240),
+  sourceSummary: z.string().max(50_000).optional(),
+  items: z.array(teamPlanItemInputSchema).min(1).max(32),
+});
+export type CreateTeamPlanInput = z.infer<typeof createTeamPlanInputSchema>;
+
+export interface TeamPlanItem {
+  id: string;
+  planId: string;
+  position: number;
+  peerNodeId: string;
+  peerDisplayName: string;
+  membershipId?: string;
+  objective: string;
+  context?: string;
+  acceptanceCriteria: string[];
+  attachmentRefs: AttachmentRef[];
+  status: TeamPlanItemStatus;
+  delegationId?: string;
+  error?: string;
+  createdAt: string;
+  updatedAt: string;
+}
+
+export interface TeamPlan {
+  id: string;
+  organizationId?: string;
+  title: string;
+  sourceSummary?: string;
+  status: TeamPlanStatus;
+  revision: number;
+  approvedAt?: string;
+  canceledAt?: string;
+  createdAt: string;
+  updatedAt: string;
+  items: TeamPlanItem[];
+}
+
 export const structuredOutcomeSchema = z.discriminatedUnion("kind", [
   z.strictObject({
     kind: z.literal("COMPLETE"),
@@ -239,6 +311,20 @@ export function assertEnvelopeSemantics(
   }
   if (expiresAt <= createdAt) {
     throw new Error("envelope expiry must be later than creation time");
+  }
+  const organizationFields = [
+    envelope.organizationId,
+    envelope.senderMembershipId,
+    envelope.recipientMembershipId,
+  ];
+  if (envelope.protocolVersion === ORGANIZATION_PROTOCOL_VERSION) {
+    if (organizationFields.some((value) => value === undefined)) {
+      throw new Error(
+        "organization envelopes require organization and membership routing",
+      );
+    }
+  } else if (organizationFields.some((value) => value !== undefined)) {
+    throw new Error("direct peer envelopes cannot carry organization routing");
   }
   const delegationId = envelopeDelegationId(envelope);
   if (delegationId !== undefined && delegationId !== envelope.correlationId) {

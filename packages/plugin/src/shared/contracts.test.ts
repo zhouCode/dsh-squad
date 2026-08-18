@@ -4,6 +4,7 @@ import {
   attachmentRefSchema,
   assertEnvelopeSemantics,
   createDelegationInputSchema,
+  createTeamPlanInputSchema,
   delegationRequestSchema,
   envelopeSchema,
   humanInputSchema,
@@ -36,6 +37,43 @@ describe("Squad contracts", () => {
     ).toBe(false);
   });
 
+  it("keeps team plans bounded, strict, and capability-free", () => {
+    expect(
+      createTeamPlanInputSchema.safeParse({
+        title: "Launch follow-up",
+        sourceSummary: "The team agreed on two independent workstreams.",
+        items: [
+          {
+            to: "Bob",
+            objective: "Draft the release notes",
+            acceptanceCriteria: ["Return a reviewable Markdown draft"],
+          },
+        ],
+      }).success,
+    ).toBe(true);
+    expect(
+      createTeamPlanInputSchema.safeParse({
+        title: "Unsafe plan",
+        items: [
+          {
+            to: "Bob",
+            objective: "Run a private tool",
+            skillName: "remote-skill",
+          },
+        ],
+      }).success,
+    ).toBe(false);
+    expect(
+      createTeamPlanInputSchema.safeParse({
+        title: "Too many items",
+        items: Array.from({ length: 33 }, (_, index) => ({
+          to: "Bob",
+          objective: `Task ${index}`,
+        })),
+      }).success,
+    ).toBe(false);
+  });
+
   it("accepts only bounded HTTPS attachment references", () => {
     expect(
       attachmentRefSchema.safeParse({
@@ -57,7 +95,7 @@ describe("Squad contracts", () => {
 
   it("rejects unknown envelope versions and unknown fields", () => {
     const base = {
-      protocolVersion: 2,
+      protocolVersion: 3,
       envelopeId: randomUUID(),
       kind: "DELEGATION_REQUEST",
       senderNodeId: `node_${"a".repeat(43)}`,
@@ -81,6 +119,40 @@ describe("Squad contracts", () => {
         remoteTool: "bash",
       }).success,
     ).toBe(false);
+  });
+
+  it("requires complete organization routing on protocol v2 envelopes", () => {
+    const delegationId = randomUUID();
+    const now = new Date();
+    const base = envelopeSchema.parse({
+      protocolVersion: 2,
+      envelopeId: randomUUID(),
+      kind: "DELEGATION_REQUEST",
+      senderNodeId: `node_${"a".repeat(43)}`,
+      recipientNodeId: `node_${"b".repeat(43)}`,
+      correlationId: delegationId,
+      createdAt: now.toISOString(),
+      expiresAt: new Date(now.getTime() + 60_000).toISOString(),
+      payload: {
+        delegationId,
+        objective: "test",
+        acceptanceCriteria: [],
+        attachmentRefs: [],
+        delegationDepth: 0,
+      },
+      signature: "a".repeat(86),
+    });
+    expect(() => assertEnvelopeSemantics(base)).toThrow(
+      "organization envelopes require",
+    );
+    expect(() =>
+      assertEnvelopeSemantics({
+        ...base,
+        organizationId: randomUUID(),
+        senderMembershipId: randomUUID(),
+        recipientMembershipId: randomUUID(),
+      }),
+    ).not.toThrow();
   });
 
   it("binds correlation IDs and validates HumanTodo submissions", () => {

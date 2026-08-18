@@ -10,17 +10,19 @@ DSH Squad 把运行在不同电脑、网络和地点上的个人 Agent，组成�
 
 - 通过一个持续在线的 Relay 实现跨地域协作，无需节点直连。
 - 团队成员的电脑暂时离线时，由持久邮箱保存待投递任务。
-- 使用 Ed25519 节点身份、Peer 公钥固定和策略化委派。
-- 每个 Peer 可分别配置 `NEVER`、`SAFE` 和 `TRUSTED` 自动执行模式。
+- 带签名的多组织成员目录、Owner/Admin/Member 角色、一次性邀请、审批和禁用，不再要求成员两两配置 Peer。
+- 一个节点可以加入多个组织；每个 DSH Session 独立选择一个组织成员目录或兼容的直接 Peer。
+- 每个成员可分别配置本机 `NEVER`、`SAFE` 和 `TRUSTED` 自动执行模式，并在 WebUI 下拉修改。
+- 本地 Team Planner 草案、负责人明确审阅和幂等批量分派。
 - 原生复用接收方的 DSH Agent、Session、Skill、工具、Permission/Approval 和 WebUI。
 - 私有 Session ID、HumanTodo 详情、人工回复、凭据和工作区路径始终保留在本地。
 
-这个包包含一个 Cordis Host 插件、两个原生 Agent 工具、一个 DSH Web Client Module、Relay Client 和可选的 Relay Server。它不会创建第二套 Runtime 或独立 SPA，也不强制使用 Docker。
+这个包包含一个 Cordis Host 插件、六个原生 Agent 工具、一个 DSH Web Client Module、Relay Client 和可选的 Relay Server。它不会创建第二套 Runtime 或独立 SPA，也不强制使用 Docker。
 
 ## 安装
 
 ```bash
-dsh plugin --profile web add ./dsh-squad-plugin-0.2.0.tgz --offline
+dsh plugin --profile web add ./dsh-squad-plugin-0.4.0.tgz --offline
 dsh web
 ```
 
@@ -35,7 +37,9 @@ dsh web
       invitation: replace-with-one-time-invitation
 ```
 
-原生 WebUI 提供`智能体收件箱` / `Agent Inbox`，用于管理 Peer 策略、收发箱状态、HumanTodo 输入和原生 DSH Session 链接。Agent 会获得 `delegate_to_agent` 和 `get_delegation_status` 两个工具。
+原生 WebUI 提供`智能体收件箱` / `Agent Inbox`，实时显示节点和当前 Session 组织，并管理签名成员目录、邀请审批、逐成员策略、Team Planner 草案、收发箱、HumanTodo 和原生 Session 链接。Agent 还获得组织列表与切换工具。计划草案会一直保留在本地，直到负责人确认；接收方自己的策略和审批仍然独立生效。
+
+聊天触发保持轻量：可以直接使用自然语言或 `@成员`，也可以使用统一命名空间下的 `/squad-*` 英文命令管理任务、计划、状态、组织、成员、邀请和角色。命令通过 DSH 原生的 `/` 菜单按需发现；插件不会增加命令按钮。
 
 ## 语言
 
@@ -43,7 +47,7 @@ dsh web
 
 ## 安全边界
 
-生产 Relay URL 必须使用 HTTPS。每个 Node 在本地保存独立的 Ed25519 身份，Peer 将 `nodeId` 固定到对应公钥。个人 DSH WebUI 应只监听 `127.0.0.1`；对外只通过经过加固的 HTTPS 反向代理开放 Relay API。当前 Relay 是受信任内容中转方，不提供端到端加密。
+生产 Relay URL 必须使用 HTTPS。每个 Node 在本地保存独立的 Ed25519 身份；组织根和追加式成员事件经过签名并在本机固定，协议 v2 同时绑定双方 membership。个人 DSH WebUI 应只监听 `127.0.0.1`；对外只通过经过加固的 HTTPS 反向代理开放 Relay API。当前 Relay 是受信任内容中转方，不提供端到端加密。
 
 只有明确的任务数据、公开状态、摘要和结果会跨 Node 传输。接收方的 Session ID、HumanTodo 详情、人工回复、凭据和工作区路径始终留在本地。
 

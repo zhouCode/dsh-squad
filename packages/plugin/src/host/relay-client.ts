@@ -1,4 +1,11 @@
 import { envelopeSchema, type Envelope } from "../shared/contracts.ts";
+import {
+  organizationDirectoryBundleSchema,
+  type OrganizationDirectoryBundle,
+  type OrganizationDocument,
+  type OrganizationJoinRequest,
+  type OrganizationMembershipCertificate,
+} from "../shared/organizations.ts";
 import type { NodeIdentity } from "./identity.ts";
 import { signedRequest } from "./relay.ts";
 
@@ -118,6 +125,88 @@ export class RelayClient {
 
   async acknowledge(envelopeId: string): Promise<void> {
     await this.request("POST", `/squad/v1/envelopes/${envelopeId}/ack`, {});
+  }
+
+  async createOrganization(
+    document: OrganizationDocument,
+    ownerCertificate: OrganizationMembershipCertificate,
+  ): Promise<void> {
+    await this.request("POST", "/squad/v1/organizations", {
+      document,
+      ownerCertificate,
+    });
+  }
+
+  async organizations(): Promise<OrganizationDirectoryBundle[]> {
+    const body = (await this.request("GET", "/squad/v1/organizations")) as {
+      organizations?: unknown;
+    };
+    if (!Array.isArray(body.organizations)) {
+      throw new RelayClientError(
+        502,
+        "INVALID_RESPONSE",
+        "Relay organization directory response is invalid",
+      );
+    }
+    return body.organizations.map((organization) =>
+      organizationDirectoryBundleSchema.parse(organization),
+    );
+  }
+
+  async createOrganizationInvitation(
+    organizationId: string,
+    expiresInMinutes = 1_440,
+  ): Promise<{ invitation: string; expiresAt: string }> {
+    const body = (await this.request(
+      "POST",
+      `/squad/v1/organizations/${organizationId}/invitations`,
+      { expiresInMinutes },
+    )) as { invitation?: unknown; expiresAt?: unknown };
+    if (
+      typeof body.invitation !== "string" ||
+      typeof body.expiresAt !== "string"
+    ) {
+      throw new RelayClientError(
+        502,
+        "INVALID_RESPONSE",
+        "Relay organization invitation response is invalid",
+      );
+    }
+    return { invitation: body.invitation, expiresAt: body.expiresAt };
+  }
+
+  async joinOrganization(
+    invitation: string,
+    request: OrganizationJoinRequest,
+  ): Promise<void> {
+    await this.request("POST", "/squad/v1/organizations/join", {
+      invitation,
+      request,
+    });
+  }
+
+  async approveOrganizationJoin(
+    organizationId: string,
+    requestId: string,
+    certificate: OrganizationMembershipCertificate,
+  ): Promise<void> {
+    await this.request(
+      "POST",
+      `/squad/v1/organizations/${organizationId}/join-requests/${requestId}/approve`,
+      { certificate },
+    );
+  }
+
+  async updateOrganizationMember(
+    organizationId: string,
+    membershipId: string,
+    certificate: OrganizationMembershipCertificate,
+  ): Promise<void> {
+    await this.request(
+      "POST",
+      `/squad/v1/organizations/${organizationId}/members/${membershipId}/certificate`,
+      { certificate },
+    );
   }
 
   async nodes(): Promise<

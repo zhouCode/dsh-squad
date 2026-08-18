@@ -10,17 +10,19 @@ DSH Squad turns personal Agents on different computers, networks, and locations 
 
 - Cross-location collaboration through one always-on Relay, without direct node connectivity.
 - Durable mailbox delivery when a teammate's computer is temporarily offline.
-- Ed25519 node identity, pinned Peer keys, and policy-controlled delegation.
-- Per-Peer `NEVER`, `SAFE`, and `TRUSTED` automatic-execution modes.
+- Signed multi-organization membership with Owner/Admin/Member roles, one-time invitations, approval, and revocation—without pairwise Peer setup.
+- One Node may join multiple organizations; each DSH Session selects one organization-scoped recipient directory or compatible direct Peers.
+- Per-member `NEVER`, `SAFE`, and `TRUSTED` local automatic-execution modes, editable in the WebUI.
+- Local Team Planner drafts with explicit owner review and idempotent batch dispatch.
 - Native reuse of the recipient's DSH Agent, Session, Skills, tools, Permission/Approval, and WebUI.
 - Local retention of private Session IDs, HumanTodo details, human responses, credentials, and workspace paths.
 
-The package contains one Cordis Host plugin, two native Agent tools, a DSH Web Client Module, a Relay client, and an optional Relay server. It does not create a second runtime or standalone SPA, and Docker is optional.
+The package contains one Cordis Host plugin, six native Agent tools, a DSH Web Client Module, a Relay client, and an optional Relay server. It does not create a second runtime or standalone SPA, and Docker is optional.
 
 ## Install
 
 ```bash
-dsh plugin --profile web add ./dsh-squad-plugin-0.2.0.tgz --offline
+dsh plugin --profile web add ./dsh-squad-plugin-0.4.0.tgz --offline
 dsh web
 ```
 
@@ -35,7 +37,9 @@ The bundled `cordis.patch.yml` inserts the `dsh-squad` entry. Override it in `$D
       invitation: replace-with-one-time-invitation
 ```
 
-The native WebUI exposes `Agent Inbox` / `智能体收件箱` for Peer policy, inbox and outbox state, HumanTodo input, and links to native DSH Sessions. Agents receive `delegate_to_agent` and `get_delegation_status`.
+The native WebUI exposes `Agent Inbox` / `智能体收件箱` for real-time Node and Session organization identity, signed membership, invitations and approvals, per-member policy, Team Planner review, inbox/outbox state, HumanTodo input, and native Session links. Agents also receive organization listing/selection tools. A Team Planner proposal stays local until its owner approves it; recipient policy and approval remain independent.
+
+Chat triggering stays unobtrusive: use natural language or `@member`, or use namespaced `/squad-*` commands for tasks, plans, status, organizations, members, invitations, and roles. They are discovered through DSH's native `/` menu; this package adds no command buttons.
 
 ## Languages
 
@@ -43,7 +47,7 @@ Simplified Chinese and English are complete, type-checked dictionaries owned by 
 
 ## Security boundary
 
-Production Relay URLs require HTTPS. Each Node keeps a local Ed25519 identity, and Peers pin `nodeId` to its public key. Personal DSH WebUIs should listen only on `127.0.0.1`; expose only the Relay API through a hardened HTTPS reverse proxy. The current Relay is a trusted content intermediary, not an end-to-end-encrypted service.
+Production Relay URLs require HTTPS. Each Node keeps a local Ed25519 identity; organization roots and append-only member events are signed and pinned locally, and protocol-v2 Delegations bind both membership IDs. Personal DSH WebUIs should listen only on `127.0.0.1`; expose only the Relay API through a hardened HTTPS reverse proxy. The current Relay is a trusted content intermediary, not an end-to-end-encrypted service.
 
 Only explicit task data, public status, summaries, and outcomes cross Nodes. Receiver Session IDs, HumanTodo details, human responses, credentials, and workspace paths remain local.
 
