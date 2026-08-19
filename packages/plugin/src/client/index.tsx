@@ -6,6 +6,8 @@ import {
   useState,
   useSyncExternalStore,
   type FormEvent,
+  type KeyboardEvent as ReactKeyboardEvent,
+  type ReactElement,
 } from "react";
 import type {
   ClientContext,
@@ -247,6 +249,132 @@ function describeError(
     return t("error.withDetail", { message: t(fallback), detail });
   }
   return cause instanceof Error ? cause.message : t(fallback);
+}
+
+interface ConfirmationOptions {
+  title: string;
+  message: string;
+  confirmLabel: string;
+  danger?: boolean;
+}
+
+interface PendingConfirmation extends ConfirmationOptions {
+  resolve: (confirmed: boolean) => void;
+}
+
+function ConfirmationDialog({
+  request,
+  settle,
+  t,
+}: {
+  request: PendingConfirmation;
+  settle: (confirmed: boolean) => void;
+  t: SquadTranslate;
+}) {
+  const dialog = useRef<HTMLDivElement>(null);
+  const cancel = useRef<HTMLButtonElement>(null);
+  useEffect(() => {
+    cancel.current?.focus();
+  }, []);
+  const onKeyDown = (event: ReactKeyboardEvent<HTMLDivElement>) => {
+    if (event.key === "Escape") {
+      event.preventDefault();
+      settle(false);
+      return;
+    }
+    if (event.key !== "Tab") return;
+    const focusable = [
+      ...(dialog.current?.querySelectorAll<HTMLElement>(
+        "button:not(:disabled), input:not(:disabled), select:not(:disabled), textarea:not(:disabled), [href]",
+      ) ?? []),
+    ];
+    if (focusable.length === 0) return;
+    const first = focusable[0];
+    const last = focusable.at(-1);
+    if (event.shiftKey && document.activeElement === first) {
+      event.preventDefault();
+      last?.focus();
+    } else if (!event.shiftKey && document.activeElement === last) {
+      event.preventDefault();
+      first?.focus();
+    }
+  };
+  return (
+    <div
+      className="squad-confirm-layer"
+      role="presentation"
+      onMouseDown={(event) => {
+        if (event.target === event.currentTarget) settle(false);
+      }}
+    >
+      <div
+        ref={dialog}
+        className="squad-confirm-dialog"
+        role="alertdialog"
+        aria-modal="true"
+        aria-label={request.title}
+        onKeyDown={onKeyDown}
+      >
+        <h2>{request.title}</h2>
+        <p>{request.message}</p>
+        <div className="squad-actions">
+          <button
+            ref={cancel}
+            type="button"
+            className="squad-secondary"
+            onClick={() => settle(false)}
+          >
+            {t("action.cancel")}
+          </button>
+          <button
+            type="button"
+            className={request.danger ? "squad-danger" : ""}
+            onClick={() => settle(true)}
+          >
+            {request.confirmLabel}
+          </button>
+        </div>
+      </div>
+    </div>
+  );
+}
+
+function useConfirmation(t: SquadTranslate): {
+  confirm: (options: ConfirmationOptions) => Promise<boolean>;
+  confirmation: ReactElement | null;
+} {
+  const [request, setRequest] = useState<PendingConfirmation>();
+  const active = useRef<PendingConfirmation>();
+  const confirm = useCallback(
+    (options: ConfirmationOptions) =>
+      new Promise<boolean>((resolve) => {
+        active.current?.resolve(false);
+        const next = { ...options, resolve };
+        active.current = next;
+        setRequest(next);
+      }),
+    [],
+  );
+  const settle = useCallback((confirmed: boolean) => {
+    const current = active.current;
+    active.current = undefined;
+    setRequest(undefined);
+    current?.resolve(confirmed);
+  }, []);
+  useEffect(
+    () => () => {
+      active.current?.resolve(false);
+      active.current = undefined;
+    },
+    [],
+  );
+  return {
+    confirm,
+    confirmation:
+      request === undefined ? null : (
+        <ConfirmationDialog request={request} settle={settle} t={t} />
+      ),
+  };
 }
 
 function SquadTrigger({
@@ -515,6 +643,7 @@ function DelegationDetail({
   const [selectedTodoIds, setSelectedTodoIds] = useState<string[]>([]);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string>();
+  const { confirm, confirmation } = useConfirmation(t);
 
   const act = async (action: string, body: unknown = {}) => {
     setBusy(true);
@@ -552,6 +681,18 @@ function DelegationDetail({
       if (!Array.isArray(attachmentRefs)) {
         throw new Error(t("error.attachmentArray"));
       }
+      if (
+        !(await confirm({
+          title: t("confirm.resumeTaskTitle"),
+          message: t("confirm.resumeTask", {
+            count: selectedTodoIds.length,
+            objective: item.objective,
+          }),
+          confirmLabel: t("action.completeSelected"),
+        }))
+      ) {
+        return;
+      }
       await act("human-input", {
         todoIds: selectedTodoIds,
         ...(response.trim() ? { response } : {}),
@@ -565,6 +706,41 @@ function DelegationDetail({
   };
   const awaitingAcceptance =
     item.status === "WAITING_HUMAN" && openTodos.length === 0;
+  const accept = async () => {
+    if (
+      await confirm({
+        title: t("confirm.acceptTaskTitle"),
+        message: t("confirm.acceptTask", { objective: item.objective }),
+        confirmLabel: t("action.acceptAndRun"),
+      })
+    ) {
+      await act("accept");
+    }
+  };
+  const reject = async () => {
+    if (
+      await confirm({
+        title: t("confirm.rejectTitle"),
+        message: t("confirm.rejectDelegation", { objective: item.objective }),
+        confirmLabel: t("action.reject"),
+        danger: true,
+      })
+    ) {
+      await act("reject");
+    }
+  };
+  const requestCancel = async () => {
+    if (
+      await confirm({
+        title: t("confirm.cancelDelegationTitle"),
+        message: t("confirm.cancelDelegation", { objective: item.objective }),
+        confirmLabel: t("action.requestCancel"),
+        danger: true,
+      })
+    ) {
+      await act("cancel");
+    }
+  };
   return (
     <article className="squad-detail">
       <header>
@@ -685,7 +861,7 @@ function DelegationDetail({
             <button
               className="squad-danger"
               disabled={busy}
-              onClick={() => act("reject")}
+              onClick={() => void reject()}
             >
               {t("action.reject")}
             </button>
@@ -694,13 +870,13 @@ function DelegationDetail({
       ) : null}
       {awaitingAcceptance ? (
         <div className="squad-actions">
-          <button disabled={busy} onClick={() => act("accept")}>
+          <button disabled={busy} onClick={() => void accept()}>
             {t("action.acceptAndRun")}
           </button>
           <button
             className="squad-danger"
             disabled={busy}
-            onClick={() => act("reject")}
+            onClick={() => void reject()}
           >
             {t("action.reject")}
           </button>
@@ -718,7 +894,7 @@ function DelegationDetail({
         <button
           className="squad-link-button"
           disabled={busy}
-          onClick={() => act("cancel")}
+          onClick={() => void requestCancel()}
         >
           {t("action.requestCancel")}
         </button>
@@ -750,6 +926,7 @@ function DelegationDetail({
         </section>
       ) : null}
       {error ? <p className="squad-error">{error}</p> : null}
+      {confirmation}
     </article>
   );
 }
@@ -765,6 +942,7 @@ function TeamPlanDetail({
 }) {
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string>();
+  const { confirm, confirmation } = useConfirmation(t);
   const act = async (action: "approve" | "retry" | "cancel") => {
     setBusy(true);
     setError(undefined);
@@ -782,6 +960,35 @@ function TeamPlanDetail({
   ).length;
   const canDispatch = ["DRAFT", "DISPATCHING", "PARTIAL"].includes(plan.status);
   const canCancel = !["DISPATCHED", "CANCELED"].includes(plan.status);
+  const dispatch = async () => {
+    const action = plan.status === "DRAFT" ? "approve" : "retry";
+    if (
+      action === "approve" &&
+      !(await confirm({
+        title: t("confirm.dispatchPlanTitle"),
+        message: t("confirm.dispatchPlan", {
+          title: plan.title,
+          count: plan.items.length,
+        }),
+        confirmLabel: t("action.approvePlan"),
+      }))
+    ) {
+      return;
+    }
+    await act(action);
+  };
+  const cancelPlan = async () => {
+    if (
+      await confirm({
+        title: t("confirm.cancelPlanTitle"),
+        message: t("confirm.cancelPlan", { title: plan.title }),
+        confirmLabel: t("action.cancelPlan"),
+        danger: true,
+      })
+    ) {
+      await act("cancel");
+    }
+  };
   return (
     <article className="squad-detail squad-plan-detail">
       <header>
@@ -804,12 +1011,7 @@ function TeamPlanDetail({
       {canDispatch || canCancel ? (
         <div className="squad-actions">
           {canDispatch ? (
-            <button
-              disabled={busy}
-              onClick={() =>
-                void act(plan.status === "DRAFT" ? "approve" : "retry")
-              }
-            >
+            <button disabled={busy} onClick={() => void dispatch()}>
               {plan.status === "DRAFT"
                 ? t("action.approvePlan")
                 : t("action.retryPlan")}
@@ -819,7 +1021,7 @@ function TeamPlanDetail({
             <button
               className="squad-danger"
               disabled={busy}
-              onClick={() => void act("cancel")}
+              onClick={() => void cancelPlan()}
             >
               {t("action.cancelPlan")}
             </button>
@@ -900,6 +1102,7 @@ function TeamPlanDetail({
         </div>
       </section>
       {error ? <p className="squad-error">{error}</p> : null}
+      {confirmation}
     </article>
   );
 }
@@ -943,6 +1146,7 @@ function OrganizationCenter({
   const [busy, setBusy] = useState<string>();
   const [error, setError] = useState<string>();
   const [notice, setNotice] = useState<string>();
+  const { confirm, confirmation } = useConfirmation(t);
   const [invitation, setInvitation] = useState<{
     token: string;
     expiresAt: string;
@@ -1052,6 +1256,118 @@ function OrganizationCenter({
     } finally {
       setBusy(undefined);
     }
+  };
+
+  const approveJoin = async (
+    organization: OrganizationView,
+    request: OrganizationView["pendingJoinRequests"][number],
+  ) => {
+    if (
+      !(await confirm({
+        title: t("confirm.approveJoinTitle"),
+        message: t("confirm.approveJoin", {
+          name: request.displayName,
+          organization: organization.name,
+        }),
+        confirmLabel: t("action.approveJoin"),
+      }))
+    ) {
+      return;
+    }
+    await run(`approve:${request.requestId}`, () =>
+      api(
+        `/organizations/${organization.organizationId}/join-requests/${request.requestId}/approve`,
+        { method: "POST", body: "{}" },
+      ),
+    );
+  };
+
+  const changeMemberRole = async (
+    organization: OrganizationView,
+    member: OrganizationView["members"][number],
+    role: "ADMIN" | "MEMBER",
+  ) => {
+    if (
+      !(await confirm({
+        title: t("confirm.changeRoleTitle"),
+        message: t("confirm.changeRole", {
+          name: member.displayName,
+          role: formatOrganizationRole(t, role),
+          organization: organization.name,
+        }),
+        confirmLabel: t("confirm.changeRoleAction"),
+        danger: member.role === "ADMIN",
+      }))
+    ) {
+      return;
+    }
+    await run(`role:${member.membershipId}`, () =>
+      api(
+        `/organizations/${organization.organizationId}/members/${member.membershipId}/role`,
+        { method: "POST", body: JSON.stringify({ role }) },
+      ),
+    );
+  };
+
+  const changeMemberStatus = async (
+    organization: OrganizationView,
+    member: OrganizationView["members"][number],
+  ) => {
+    const enabling = member.status !== "ACTIVE";
+    if (
+      !(await confirm({
+        title: enabling
+          ? t("confirm.enableMemberTitle")
+          : t("confirm.disableMemberTitle"),
+        message: t(
+          enabling ? "confirm.enableMember" : "confirm.disableMember",
+          { name: member.displayName, organization: organization.name },
+        ),
+        confirmLabel: enabling
+          ? t("action.enableMember")
+          : t("action.disableMember"),
+        danger: !enabling,
+      }))
+    ) {
+      return;
+    }
+    await run(`status:${member.membershipId}`, () =>
+      api(
+        `/organizations/${organization.organizationId}/members/${member.membershipId}/status`,
+        {
+          method: "POST",
+          body: JSON.stringify({ enabled: enabling }),
+        },
+      ),
+    );
+  };
+
+  const changeMemberPolicy = async (
+    organization: OrganizationView,
+    member: OrganizationView["members"][number],
+    autoExecute: AutoExecute,
+  ) => {
+    if (
+      autoExecute === "TRUSTED" &&
+      member.policy.autoExecute !== "TRUSTED" &&
+      !(await confirm({
+        title: t("confirm.trustedPolicyTitle"),
+        message: t("confirm.trustedPolicy", { name: member.displayName }),
+        confirmLabel: t("confirm.enableTrustedAction"),
+        danger: true,
+      }))
+    ) {
+      return;
+    }
+    await run(`policy:${member.membershipId}`, () =>
+      api(
+        `/organizations/${organization.organizationId}/members/${member.membershipId}/policy`,
+        {
+          method: "POST",
+          body: JSON.stringify({ autoExecute }),
+        },
+      ),
+    );
   };
 
   if (!state.relay.configured) {
@@ -1217,14 +1533,7 @@ function OrganizationCenter({
                       </div>
                       <button
                         disabled={busy !== undefined}
-                        onClick={() =>
-                          void run(`approve:${request.requestId}`, () =>
-                            api(
-                              `/organizations/${organization.organizationId}/join-requests/${request.requestId}/approve`,
-                              { method: "POST", body: "{}" },
-                            ),
-                          )
-                        }
+                        onClick={() => void approveJoin(organization, request)}
                       >
                         {t("action.approveJoin")}
                       </button>
@@ -1267,16 +1576,12 @@ function OrganizationCenter({
                               value={member.role}
                               disabled={busy !== undefined}
                               onChange={(event) =>
-                                void run(`role:${member.membershipId}`, () =>
-                                  api(
-                                    `/organizations/${organization.organizationId}/members/${member.membershipId}/role`,
-                                    {
-                                      method: "POST",
-                                      body: JSON.stringify({
-                                        role: event.currentTarget.value,
-                                      }),
-                                    },
-                                  ),
+                                void changeMemberRole(
+                                  organization,
+                                  member,
+                                  event.currentTarget.value as
+                                    | "ADMIN"
+                                    | "MEMBER",
                                 )
                               }
                             >
@@ -1304,14 +1609,10 @@ function OrganizationCenter({
                               disabled={busy !== undefined}
                               t={t}
                               onChange={(autoExecute) =>
-                                void run(`policy:${member.membershipId}`, () =>
-                                  api(
-                                    `/organizations/${organization.organizationId}/members/${member.membershipId}/policy`,
-                                    {
-                                      method: "POST",
-                                      body: JSON.stringify({ autoExecute }),
-                                    },
-                                  ),
+                                void changeMemberPolicy(
+                                  organization,
+                                  member,
+                                  autoExecute,
                                 )
                               }
                             />
@@ -1324,17 +1625,7 @@ function OrganizationCenter({
                             }
                             disabled={busy !== undefined}
                             onClick={() =>
-                              void run(`status:${member.membershipId}`, () =>
-                                api(
-                                  `/organizations/${organization.organizationId}/members/${member.membershipId}/status`,
-                                  {
-                                    method: "POST",
-                                    body: JSON.stringify({
-                                      enabled: member.status !== "ACTIVE",
-                                    }),
-                                  },
-                                ),
-                              )
+                              void changeMemberStatus(organization, member)
                             }
                           >
                             {member.status === "ACTIVE"
@@ -1358,6 +1649,7 @@ function OrganizationCenter({
         })}
       </div>
       {error ? <p className="squad-error">{error}</p> : null}
+      {confirmation}
     </div>
   );
 }
@@ -1396,6 +1688,7 @@ function NodeSetupForm({
   const [joinBusy, setJoinBusy] = useState(false);
   const [error, setError] = useState<string>();
   const [saved, setSaved] = useState(false);
+  const { confirm, confirmation } = useConfirmation(t);
 
   useEffect(() => {
     const nextMode =
@@ -1421,6 +1714,19 @@ function NodeSetupForm({
 
   const submit = async (event: FormEvent<HTMLFormElement>) => {
     event.preventDefault();
+    if (
+      !onboarding &&
+      mode !== initialMode &&
+      !(await confirm({
+        title: t("confirm.switchModeTitle"),
+        message: t("confirm.switchMode", {
+          mode: t(mode === "RELAY" ? "setup.relayTitle" : "setup.directTitle"),
+        }),
+        confirmLabel: t("confirm.switchModeAction"),
+      }))
+    ) {
+      return;
+    }
     setBusy(true);
     setError(undefined);
     setSaved(false);
@@ -1669,6 +1975,7 @@ function NodeSetupForm({
           ) : null}
         </div>
       </form>
+      {confirmation}
     </section>
   );
 }
@@ -1844,9 +2151,22 @@ function Settings({
     expiresAt: string;
   }>();
   const [copied, setCopied] = useState(false);
+  const { confirm, confirmation } = useConfirmation(t);
   const submitManualPeer = async (event: FormEvent<HTMLFormElement>) => {
     event.preventDefault();
-    const form = new FormData(event.currentTarget);
+    const formElement = event.currentTarget;
+    const form = new FormData(formElement);
+    if (
+      form.get("autoExecute") === "TRUSTED" &&
+      !(await confirm({
+        title: t("confirm.trustedPolicyTitle"),
+        message: t("confirm.trustedNewPeer"),
+        confirmLabel: t("confirm.enableTrustedAction"),
+        danger: true,
+      }))
+    ) {
+      return;
+    }
     setError(undefined);
     try {
       await api("/peers", {
@@ -1867,7 +2187,7 @@ function Settings({
           },
         }),
       });
-      event.currentTarget.reset();
+      formElement.reset();
       await refresh();
     } catch (cause) {
       setError(describeError(cause, t, "error.pairingFailed"));
@@ -1878,11 +2198,23 @@ function Settings({
     : state.relay.configured
       ? t("settings.relayConfigured")
       : t("settings.relayNotConfigured");
-  const updatePeerPolicy = async (nodeId: string, autoExecute: AutoExecute) => {
-    setBusyPeer(nodeId);
+  const updatePeerPolicy = async (peer: PeerView, autoExecute: AutoExecute) => {
+    if (
+      autoExecute === "TRUSTED" &&
+      peer.policy.autoExecute !== "TRUSTED" &&
+      !(await confirm({
+        title: t("confirm.trustedPolicyTitle"),
+        message: t("confirm.trustedPolicy", { name: peer.displayName }),
+        confirmLabel: t("confirm.enableTrustedAction"),
+        danger: true,
+      }))
+    ) {
+      return;
+    }
+    setBusyPeer(peer.nodeId);
     setError(undefined);
     try {
-      await api(`/peers/${nodeId}/policy`, {
+      await api(`/peers/${peer.nodeId}/policy`, {
         method: "POST",
         body: JSON.stringify({ autoExecute }),
       });
@@ -1928,6 +2260,17 @@ function Settings({
     const formElement = event.currentTarget;
     const form = new FormData(formElement);
     const transport = form.get("pairingTransport");
+    if (
+      form.get("pairingAutoExecute") === "TRUSTED" &&
+      !(await confirm({
+        title: t("confirm.trustedPolicyTitle"),
+        message: t("confirm.trustedNewPeer"),
+        confirmLabel: t("confirm.enableTrustedAction"),
+        danger: true,
+      }))
+    ) {
+      return;
+    }
     setPairingBusy("import");
     setError(undefined);
     try {
@@ -1983,9 +2326,12 @@ function Settings({
   };
   const removePeer = async (peer: PeerView) => {
     if (
-      !window.confirm(
-        t("settings.removeConfirmation", { name: peer.displayName }),
-      )
+      !(await confirm({
+        title: t("confirm.removePeerTitle"),
+        message: t("settings.removeConfirmation", { name: peer.displayName }),
+        confirmLabel: t("action.removePeer"),
+        danger: true,
+      }))
     ) {
       return;
     }
@@ -1999,6 +2345,20 @@ function Settings({
     } finally {
       setBusyPeer(undefined);
     }
+  };
+  const togglePeer = async (peer: PeerView) => {
+    if (
+      peer.enabled &&
+      !(await confirm({
+        title: t("confirm.disablePeerTitle"),
+        message: t("confirm.disablePeer", { name: peer.displayName }),
+        confirmLabel: t("action.disablePeer"),
+        danger: true,
+      }))
+    ) {
+      return;
+    }
+    await updatePeerConnection(peer.nodeId, { enabled: !peer.enabled });
   };
   return (
     <div className="squad-settings">
@@ -2042,11 +2402,7 @@ function Settings({
                 type="button"
                 className="squad-secondary"
                 disabled={busyPeer !== undefined}
-                onClick={() =>
-                  void updatePeerConnection(peer.nodeId, {
-                    enabled: !peer.enabled,
-                  })
-                }
+                onClick={() => void togglePeer(peer)}
               >
                 {peer.enabled
                   ? t("action.disablePeer")
@@ -2062,7 +2418,7 @@ function Settings({
                 disabled={busyPeer !== undefined || !peer.enabled}
                 t={t}
                 onChange={(autoExecute) =>
-                  void updatePeerPolicy(peer.nodeId, autoExecute)
+                  void updatePeerPolicy(peer, autoExecute)
                 }
               />
             </label>
@@ -2250,6 +2606,7 @@ function Settings({
         </form>
       </details>
       {error ? <p className="squad-error">{error}</p> : null}
+      {confirmation}
     </div>
   );
 }
@@ -2265,6 +2622,7 @@ function UpdateCenter({
 }) {
   const [busy, setBusy] = useState<"check" | "policy" | "install">();
   const [error, setError] = useState<string>();
+  const { confirm, confirmation } = useConfirmation(t);
   const updates = state.updates;
   const run = async (
     action: "check" | "policy" | "install",
@@ -2281,23 +2639,36 @@ function UpdateCenter({
       setBusy(undefined);
     }
   };
-  const setMode = (mode: UpdateMode) => {
+  const setMode = async (mode: UpdateMode) => {
     if (
       mode === "AUTOMATIC" &&
-      !window.confirm(t("updates.automaticConfirmation"))
+      !(await confirm({
+        title: t("confirm.automaticUpdatesTitle"),
+        message: t("updates.automaticConfirmation"),
+        confirmLabel: t("confirm.enableAutomaticUpdatesAction"),
+        danger: true,
+      }))
     ) {
       return;
     }
-    void run("policy", () =>
+    await run("policy", () =>
       api("/updates/policy", {
         method: "POST",
         body: JSON.stringify({ mode }),
       }),
     );
   };
-  const requestInstall = () => {
-    if (!window.confirm(t("updates.installConfirmation"))) return;
-    void run("install", () =>
+  const requestInstall = async () => {
+    if (
+      !(await confirm({
+        title: t("confirm.installUpdateTitle"),
+        message: t("updates.installConfirmation"),
+        confirmLabel: t("updates.installNow"),
+      }))
+    ) {
+      return;
+    }
+    await run("install", () =>
       api("/updates/install", { method: "POST", body: "{}" }),
     );
   };
@@ -2350,7 +2721,7 @@ function UpdateCenter({
           <select
             value={updates.policy.mode}
             disabled={busy !== undefined}
-            onChange={(event) => setMode(event.target.value as UpdateMode)}
+            onChange={(event) => void setMode(event.target.value as UpdateMode)}
           >
             {(["DISABLED", "NOTIFY", "AUTOMATIC"] as const).map((mode) => (
               <option key={mode} value={mode}>
@@ -2412,12 +2783,13 @@ function UpdateCenter({
             updates.status.available !== true ||
             updates.installRequested
           }
-          onClick={requestInstall}
+          onClick={() => void requestInstall()}
         >
           {t("updates.installNow")}
         </button>
       </div>
       {error ? <p className="squad-error">{error}</p> : null}
+      {confirmation}
     </div>
   );
 }
@@ -2788,6 +3160,7 @@ const css = `
 .squad-tabs{align-items:stretch}.squad-tab-group{display:flex;align-items:center;gap:4px;padding-right:10px;border-right:1px solid var(--dsw-alias-border-l2,#ddd)}.squad-tab-group:last-child{border-right:0}.squad-tab-group-label{align-self:center;color:var(--dsw-alias-label-secondary,#666);font-size:10px;letter-spacing:.08em;text-transform:uppercase;white-space:nowrap}.squad-loading{display:grid;place-items:center;align-content:center;gap:12px;min-height:260px;flex:1;padding:24px;text-align:center}.squad-loading button{border:0;border-radius:9px;padding:8px 12px;background:#315ee8;color:#fff;cursor:pointer}.squad-spinner{width:24px;height:24px;border:3px solid var(--dsw-alias-border-l2,#ddd);border-top-color:#315ee8;border-radius:50%;animation:squad-spin .8s linear infinite}@keyframes squad-spin{to{transform:rotate(360deg)}}@media(max-width:700px){.squad-tab-group-label{display:none}.squad-tab-group{padding-right:4px}}
 .squad-diagnostics{overflow:auto;padding:22px 26px;flex:1}.squad-diagnostics>header{display:flex;align-items:flex-start;justify-content:space-between;gap:16px}.squad-diagnostics>header h2{margin:0}.squad-diagnostics button{border:0;border-radius:9px;padding:8px 12px;background:#315ee8;color:#fff;cursor:pointer}.squad-diagnostics button:disabled{opacity:.5}.squad-diagnostic-grid{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:12px;margin-top:18px}.squad-diagnostic-grid article{min-width:0;border:1px solid var(--dsw-alias-border-l2,#ddd);border-radius:13px;padding:14px}.squad-diagnostic-grid article>header{display:flex;align-items:center;justify-content:space-between;gap:10px}.squad-diagnostic-grid h3{margin:0;font-size:14px}.squad-diagnostic-grid code{display:block;margin:10px 0;overflow-wrap:anywhere;font-size:11px}.squad-diagnostic-grid p,.squad-diagnostic-grid dl{font-size:12px}.squad-diagnostic-grid dl div{display:grid;gap:3px}.squad-diagnostic-grid dt{color:var(--dsw-alias-label-secondary,#666)}.squad-diagnostic-grid dd{margin:0}.squad-connection-unreachable{background:#fde4e1;color:#a52a24}.squad-connection-unverified{background:#fff0c7;color:#755400}.squad-connection-connected,.squad-connection-ready,.squad-connection-serving{background:#dff5e6;color:#176c35}@media(max-width:800px){.squad-diagnostic-grid{grid-template-columns:1fr}.squad-diagnostics{padding:16px}}
 .squad-settings>.squad-peer{display:grid;grid-template-columns:1fr;gap:8px;margin:10px 0;padding:14px;border:1px solid var(--dsw-alias-border-l2,#ddd);border-radius:12px}.squad-peer>header{display:flex;align-items:flex-start;justify-content:space-between;gap:12px}.squad-peer>header span{display:block;margin-top:4px;color:var(--dsw-alias-label-secondary,#666);font-size:12px}.squad-peer-disabled{opacity:.72}.squad-peer details,.squad-advanced-pairing{margin-top:8px}.squad-peer summary,.squad-advanced-pairing summary{cursor:pointer;color:#315ee8;font-size:13px}.squad-settings .squad-secondary{border:1px solid var(--dsw-alias-border-l2,#ccc);background:transparent;color:inherit}.squad-settings button:disabled{opacity:.5;cursor:not-allowed}.squad-pairing{margin-top:24px;padding-top:2px}.squad-pairing-grid{display:grid;grid-template-columns:1fr 1fr;gap:12px}.squad-pairing-grid>div,.squad-pairing-grid>form{min-width:0;border:1px solid var(--dsw-alias-border-l2,#ddd);border-radius:12px;padding:14px}.squad-pairing-grid h4{margin:0 0 7px}.squad-pairing-result{display:grid;gap:8px;margin-top:12px}.squad-pairing-result textarea{font-family:monospace;font-size:11px}.squad-advanced-pairing{margin:20px 0;padding:14px;border:1px dashed var(--dsw-alias-border-l2,#ccc);border-radius:12px}@media(max-width:700px){.squad-pairing-grid{grid-template-columns:1fr}}
+.squad-confirm-layer{position:fixed;z-index:1100;inset:0;display:grid;place-items:center;padding:20px;background:rgba(10,14,22,.52);pointer-events:auto}.squad-confirm-dialog{box-sizing:border-box;width:min(460px,100%);padding:22px;border:1px solid var(--dsw-alias-border-l2,#ddd);border-radius:15px;background:var(--dsw-specific-dialog-fill,#fff);color:var(--dsw-alias-label-primary,#151515);box-shadow:0 18px 60px rgba(0,0,0,.3)}.squad-confirm-dialog h2{margin:0 0 10px;font-size:20px}.squad-confirm-dialog p{line-height:1.55;white-space:pre-wrap}.squad-confirm-dialog button{border:0;border-radius:9px;padding:9px 13px;background:#315ee8;color:#fff;cursor:pointer}.squad-confirm-dialog .squad-secondary{border:1px solid var(--dsw-alias-border-l2,#ccc);background:transparent;color:inherit}.squad-confirm-dialog .squad-danger{background:#b13c35;color:#fff}
 `;
 
 function installStyles(): () => void {

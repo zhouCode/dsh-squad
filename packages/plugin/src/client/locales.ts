@@ -96,6 +96,55 @@ export const zh = {
   "action.disableMember": "禁用成员",
   "action.copyPrompt": "复制示例",
   "action.retry": "重试",
+  "action.cancel": "返回",
+  "confirm.rejectTitle": "拒绝这个任务？",
+  "confirm.rejectDelegation":
+    "拒绝后，发送方会收到明确的拒绝状态。任务：“{objective}”",
+  "confirm.cancelDelegationTitle": "请求取消这个任务？",
+  "confirm.cancelDelegation":
+    "若对方已开始运行，只能请求其停止；已经发生的外部副作用不会回滚。任务：“{objective}”",
+  "confirm.acceptTaskTitle": "接受并运行这个任务？",
+  "confirm.acceptTask":
+    "任务将交给本机 Agent，可能调用工具并产生外部副作用。任务：“{objective}”",
+  "confirm.resumeTaskTitle": "提交回复并继续运行？",
+  "confirm.resumeTask":
+    "将完成所选的 {count} 个待办，并让本机 Agent 继续任务：“{objective}”",
+  "confirm.switchModeTitle": "切换团队连接方式？",
+  "confirm.switchMode":
+    "节点会立即切换到“{mode}”。身份、组织和任务会保留，但新连接无法投递的任务将留在本地队列中。",
+  "confirm.switchModeAction": "确认切换",
+  "confirm.dispatchPlanTitle": "确认分派计划？",
+  "confirm.dispatchPlan":
+    "将从“{title}”创建并发送 {count} 个独立任务。发送后只能逐项请求取消。",
+  "confirm.cancelPlanTitle": "取消计划中的剩余项？",
+  "confirm.cancelPlan":
+    "“{title}”中尚未发送的计划项会被取消；已经发出的任务不会自动撤回。",
+  "confirm.approveJoinTitle": "批准成员加入？",
+  "confirm.approveJoin":
+    "“{name}”将加入“{organization}”，并可查看成员目录和接收组织任务。",
+  "confirm.changeRoleTitle": "更改组织角色？",
+  "confirm.changeRole":
+    "将“{name}”在“{organization}”中的角色改为“{role}”。管理员可以邀请、批准和管理普通成员。",
+  "confirm.changeRoleAction": "确认更改角色",
+  "confirm.enableMemberTitle": "重新启用成员？",
+  "confirm.enableMember":
+    "“{name}”将恢复“{organization}”的成员访问和任务路由。",
+  "confirm.disableMemberTitle": "禁用成员？",
+  "confirm.disableMember":
+    "“{name}”将无法继续通过“{organization}”收发任务；历史记录会保留。",
+  "confirm.trustedPolicyTitle": "允许无需确认地自动执行？",
+  "confirm.trustedPolicy":
+    "来自“{name}”的任务将跳过人工确认并在这台电脑上运行。对方可能触发工具和本机副作用。",
+  "confirm.trustedNewPeer":
+    "这个新对等方发送的任务将跳过人工确认并在这台电脑上运行。仅在你已核验其身份并完全信任时启用。",
+  "confirm.enableTrustedAction": "启用受信自动执行",
+  "confirm.removePeerTitle": "移除固定配对？",
+  "confirm.disablePeerTitle": "停用这个对等方？",
+  "confirm.disablePeer":
+    "停用“{name}”后，来自该对等方的新任务会被拒绝，等待投递的任务可能失败。",
+  "confirm.automaticUpdatesTitle": "启用自动更新？",
+  "confirm.enableAutomaticUpdatesAction": "启用自动更新",
+  "confirm.installUpdateTitle": "安装 Squad 更新？",
   "loading.title": "正在载入 Squad 状态…",
   "plan.approvalHint":
     "确认后，每个计划项会通过现有签名委派发送；接收方仍按自己的 Peer 策略决定是否执行。",
@@ -505,6 +554,55 @@ export const en = {
   "action.disableMember": "Disable member",
   "action.copyPrompt": "Copy example",
   "action.retry": "Retry",
+  "action.cancel": "Go back",
+  "confirm.rejectTitle": "Reject this task?",
+  "confirm.rejectDelegation":
+    "The sender receives an explicit rejected status. Task: “{objective}”",
+  "confirm.cancelDelegationTitle": "Request cancellation?",
+  "confirm.cancelDelegation":
+    "If the peer has started running, Squad can only ask it to stop. External side effects are not rolled back. Task: “{objective}”",
+  "confirm.acceptTaskTitle": "Accept and run this task?",
+  "confirm.acceptTask":
+    "The local Agent may invoke tools and cause external side effects. Task: “{objective}”",
+  "confirm.resumeTaskTitle": "Submit and resume execution?",
+  "confirm.resumeTask":
+    "This completes the {count} selected todos and lets the local Agent resume: “{objective}”",
+  "confirm.switchModeTitle": "Switch the team connection mode?",
+  "confirm.switchMode":
+    "This Node switches to “{mode}” immediately. Its identity, organizations, and tasks are retained, but work the new connection cannot deliver remains queued locally.",
+  "confirm.switchModeAction": "Confirm switch",
+  "confirm.dispatchPlanTitle": "Dispatch this plan?",
+  "confirm.dispatchPlan":
+    "This creates and sends {count} independent tasks from “{title}”. After sending, each task can only be canceled separately.",
+  "confirm.cancelPlanTitle": "Cancel remaining plan items?",
+  "confirm.cancelPlan":
+    "Unsent items in “{title}” will be canceled. Tasks already sent are not recalled automatically.",
+  "confirm.approveJoinTitle": "Approve this member?",
+  "confirm.approveJoin":
+    "“{name}” will join “{organization}” and can see its member directory and receive organization tasks.",
+  "confirm.changeRoleTitle": "Change organization role?",
+  "confirm.changeRole":
+    "Change “{name}” in “{organization}” to “{role}”. Admins can invite, approve, and manage regular members.",
+  "confirm.changeRoleAction": "Confirm role change",
+  "confirm.enableMemberTitle": "Enable this member again?",
+  "confirm.enableMember":
+    "“{name}” regains member access and task routing in “{organization}”.",
+  "confirm.disableMemberTitle": "Disable this member?",
+  "confirm.disableMember":
+    "“{name}” can no longer send or receive tasks through “{organization}”. History is retained.",
+  "confirm.trustedPolicyTitle": "Allow execution without confirmation?",
+  "confirm.trustedPolicy":
+    "Tasks from “{name}” will skip human approval and run on this computer. The peer may trigger tools and local side effects.",
+  "confirm.trustedNewPeer":
+    "Tasks from this new peer will skip human approval and run on this computer. Enable this only after verifying and fully trusting its identity.",
+  "confirm.enableTrustedAction": "Enable trusted execution",
+  "confirm.removePeerTitle": "Remove pinned pairing?",
+  "confirm.disablePeerTitle": "Disable this peer?",
+  "confirm.disablePeer":
+    "After disabling “{name}”, new tasks from that peer are rejected and queued deliveries may fail.",
+  "confirm.automaticUpdatesTitle": "Enable automatic updates?",
+  "confirm.enableAutomaticUpdatesAction": "Enable automatic updates",
+  "confirm.installUpdateTitle": "Install the Squad update?",
   "loading.title": "Loading Squad state…",
   "plan.approvalHint":
     "Approval creates one existing signed delegation per item; each recipient still decides execution through their own Peer policy.",
