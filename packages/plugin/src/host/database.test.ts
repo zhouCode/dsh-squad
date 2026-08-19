@@ -79,8 +79,57 @@ describe("SquadDatabase", () => {
     const schema = migrated
       .prepare("SELECT version FROM schema_meta WHERE singleton = 1")
       .get();
-    expect(schema?.version).toBe(8);
+    expect(schema?.version).toBe(9);
     migrated.close();
+  });
+
+  it("persists editable automation rules with deterministic priority", () => {
+    const root = mkdtempSync(join(tmpdir(), "dsh-squad-automation-db-"));
+    const path = join(root, "node.sqlite");
+    const db = new SquadDatabase(path);
+    const later = db.createAutomationRule({
+      name: "Documentation checks",
+      objectivePattern: "check docs/*",
+      allowedTools: ["files.read"],
+      maxRuntimeMinutes: 8,
+      priority: 200,
+      enabled: true,
+      allowAttachments: false,
+    });
+    const earlier = db.createAutomationRule({
+      name: "Summaries",
+      objectivePattern: "summarize *",
+      allowedTools: [],
+      maxRuntimeMinutes: 5,
+      priority: 10,
+      enabled: true,
+      allowAttachments: false,
+    });
+    expect(db.listAutomationRules().map((rule) => rule.id)).toEqual([
+      earlier.id,
+      later.id,
+    ]);
+    expect(
+      db.updateAutomationRule(later.id, {
+        name: "Read-only documentation checks",
+        objectivePattern: later.objectivePattern,
+        allowedTools: ["files.read", "search.text"],
+        maxRuntimeMinutes: later.maxRuntimeMinutes,
+        priority: later.priority,
+        enabled: later.enabled,
+        allowAttachments: later.allowAttachments,
+      }),
+    ).toMatchObject({
+      name: "Read-only documentation checks",
+      allowedTools: ["files.read", "search.text"],
+    });
+    db.deleteAutomationRule(earlier.id);
+    db.close();
+
+    const reopened = new SquadDatabase(path);
+    expect(reopened.listAutomationRules()).toHaveLength(1);
+    expect(reopened.listAutomationRules()[0]?.id).toBe(later.id);
+    reopened.close();
   });
 
   it("persists guided Node settings without an enrollment secret", () => {

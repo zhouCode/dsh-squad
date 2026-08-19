@@ -4,6 +4,7 @@ import {
   type CreateDelegationInput,
   type CreateTeamPlanInput,
 } from "../shared/contracts.ts";
+import { automationRuleInputSchema } from "../shared/automation.ts";
 import { updateModeSchema } from "../shared/updates.ts";
 import {
   importPairingBundleSchema,
@@ -213,6 +214,41 @@ export function createHttpHandler(squad: SquadService) {
         const body = await readJson(req);
         const plan = await squad.createTeamPlan(body as CreateTeamPlanInput);
         reply(res, 201, plan);
+        return;
+      }
+      if (
+        req.method === "POST" &&
+        url.pathname === "/squad/v1/local/automation-rules"
+      ) {
+        const body = await readJson(req, 32 * 1024);
+        reply(
+          res,
+          201,
+          await squad.createAutomationRule(
+            automationRuleInputSchema.parse(body),
+          ),
+        );
+        return;
+      }
+      const automationRule =
+        /^\/squad\/v1\/local\/automation-rules\/([0-9a-f-]{36})$/u.exec(
+          url.pathname,
+        );
+      if (automationRule?.[1] !== undefined && req.method === "POST") {
+        const body = await readJson(req, 32 * 1024);
+        reply(
+          res,
+          200,
+          await squad.updateAutomationRule(
+            automationRule[1],
+            automationRuleInputSchema.parse(body),
+          ),
+        );
+        return;
+      }
+      if (automationRule?.[1] !== undefined && req.method === "DELETE") {
+        await squad.deleteAutomationRule(automationRule[1]);
+        reply(res, 200, { ok: true });
         return;
       }
       if (req.method === "POST" && url.pathname === "/squad/v1/local/peers") {

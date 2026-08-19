@@ -8,6 +8,7 @@ import {
   delegationRequestSchema,
   envelopeSchema,
   humanTodoSchema,
+  idSchema,
   peerPolicySchema,
   peerTransportSchema,
   resultOutputSchema,
@@ -27,6 +28,12 @@ import {
   type TeamPlanItemStatus,
   type TeamPlanStatus,
 } from "../shared/contracts.ts";
+import {
+  automationRuleInputSchema,
+  automationRuleSchema,
+  type AutomationRule,
+  type AutomationRuleInput,
+} from "../shared/automation.ts";
 import {
   defaultOrganizationPeerPolicy,
   organizationDirectoryBundleSchema,
@@ -207,6 +214,23 @@ export class SquadDatabase {
         completed_at TEXT NOT NULL,
         updated_at TEXT NOT NULL
       );
+
+      CREATE TABLE IF NOT EXISTS automation_rules (
+        id TEXT PRIMARY KEY,
+        name TEXT NOT NULL,
+        objective_pattern TEXT NOT NULL,
+        allowed_tools_json TEXT NOT NULL,
+        preset TEXT,
+        allow_attachments INTEGER NOT NULL CHECK (allow_attachments IN (0, 1)),
+        max_runtime_minutes INTEGER NOT NULL,
+        max_tokens INTEGER,
+        priority INTEGER NOT NULL,
+        enabled INTEGER NOT NULL CHECK (enabled IN (0, 1)),
+        created_at TEXT NOT NULL,
+        updated_at TEXT NOT NULL
+      );
+      CREATE INDEX IF NOT EXISTS automation_rules_priority_idx
+        ON automation_rules(enabled, priority, created_at, id);
 
       CREATE TABLE IF NOT EXISTS peer_policies (
         node_id TEXT PRIMARY KEY,
@@ -529,7 +553,29 @@ export class SquadDatabase {
       this.#db.exec("UPDATE schema_meta SET version = 8 WHERE singleton = 1");
       currentVersion = 8;
     }
-    if (currentVersion !== 8) {
+    if (currentVersion === 8) {
+      this.#db.exec(`
+        CREATE TABLE IF NOT EXISTS automation_rules (
+          id TEXT PRIMARY KEY,
+          name TEXT NOT NULL,
+          objective_pattern TEXT NOT NULL,
+          allowed_tools_json TEXT NOT NULL,
+          preset TEXT,
+          allow_attachments INTEGER NOT NULL CHECK (allow_attachments IN (0, 1)),
+          max_runtime_minutes INTEGER NOT NULL,
+          max_tokens INTEGER,
+          priority INTEGER NOT NULL,
+          enabled INTEGER NOT NULL CHECK (enabled IN (0, 1)),
+          created_at TEXT NOT NULL,
+          updated_at TEXT NOT NULL
+        );
+        CREATE INDEX IF NOT EXISTS automation_rules_priority_idx
+          ON automation_rules(enabled, priority, created_at, id);
+        UPDATE schema_meta SET version = 9 WHERE singleton = 1;
+      `);
+      currentVersion = 9;
+    }
+    if (currentVersion !== 9) {
       throw new Error(
         `unsupported Squad database version ${String(currentVersion)}`,
       );
@@ -639,6 +685,113 @@ export class SquadDatabase {
     const saved = this.nodeSetup();
     if (saved === undefined) throw new Error("Squad setup was not persisted");
     return saved;
+  }
+
+  private automationRuleFromRow(row: SqlRow): AutomationRule {
+    return automationRuleSchema.parse({
+      id: row.id,
+      name: row.name,
+      objectivePattern: row.objective_pattern,
+      allowedTools: parseJson(row.allowed_tools_json, (input) =>
+        automationRuleInputSchema.shape.allowedTools.parse(input),
+      ),
+      ...(optionalString(row.preset) === undefined
+        ? {}
+        : { preset: row.preset }),
+      allowAttachments: asBoolean(row.allow_attachments),
+      maxRuntimeMinutes: row.max_runtime_minutes,
+      ...(typeof row.max_tokens === "number"
+        ? { maxTokens: row.max_tokens }
+        : {}),
+      priority: row.priority,
+      enabled: asBoolean(row.enabled),
+      createdAt: row.created_at,
+      updatedAt: row.updated_at,
+    });
+  }
+
+  listAutomationRules(): AutomationRule[] {
+    return (
+      this.#db
+        .prepare(
+          "SELECT * FROM automation_rules ORDER BY priority, created_at, id",
+        )
+        .all() as SqlRow[]
+    ).map((row) => this.automationRuleFromRow(row));
+  }
+
+  createAutomationRule(input: AutomationRuleInput): AutomationRule {
+    const parsed = automationRuleInputSchema.parse(input);
+    const now = new Date().toISOString();
+    const id = randomUUID();
+    this.#db
+      .prepare(
+        `
+        INSERT INTO automation_rules(
+          id, name, objective_pattern, allowed_tools_json, preset,
+          allow_attachments, max_runtime_minutes, max_tokens, priority,
+          enabled, created_at, updated_at
+        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+      `,
+      )
+      .run(
+        id,
+        parsed.name,
+        parsed.objectivePattern,
+        JSON.stringify(parsed.allowedTools),
+        parsed.preset ?? null,
+        parsed.allowAttachments ? 1 : 0,
+        parsed.maxRuntimeMinutes,
+        parsed.maxTokens ?? null,
+        parsed.priority,
+        parsed.enabled ? 1 : 0,
+        now,
+        now,
+      );
+    const created = this.listAutomationRules().find((rule) => rule.id === id);
+    if (created === undefined) throw new Error("automation rule disappeared");
+    return created;
+  }
+
+  updateAutomationRule(id: string, input: AutomationRuleInput): AutomationRule {
+    const parsedId = idSchema.parse(id);
+    const parsed = automationRuleInputSchema.parse(input);
+    const changed = this.#db
+      .prepare(
+        `
+        UPDATE automation_rules
+        SET name = ?, objective_pattern = ?, allowed_tools_json = ?,
+            preset = ?, allow_attachments = ?, max_runtime_minutes = ?,
+            max_tokens = ?, priority = ?, enabled = ?, updated_at = ?
+        WHERE id = ?
+      `,
+      )
+      .run(
+        parsed.name,
+        parsed.objectivePattern,
+        JSON.stringify(parsed.allowedTools),
+        parsed.preset ?? null,
+        parsed.allowAttachments ? 1 : 0,
+        parsed.maxRuntimeMinutes,
+        parsed.maxTokens ?? null,
+        parsed.priority,
+        parsed.enabled ? 1 : 0,
+        new Date().toISOString(),
+        parsedId,
+      ).changes;
+    if (changed !== 1) throw new Error("unknown automation rule");
+    const updated = this.listAutomationRules().find(
+      (rule) => rule.id === parsedId,
+    );
+    if (updated === undefined) throw new Error("automation rule disappeared");
+    return updated;
+  }
+
+  deleteAutomationRule(id: string): void {
+    const changed = this.#db
+      .prepare("DELETE FROM automation_rules WHERE id = ?")
+      .run(idSchema.parse(id)).changes;
+    if (changed !== 1) throw new Error("unknown automation rule");
   }
 
   upsertPeer(input: {

@@ -131,6 +131,7 @@ describe("Direct peer transport", () => {
       resolveConfig({
         dataDir: join(root, "bob"),
         displayName: "Bob",
+        execution: { safeObjectivePrefixes: ["review"] },
         direct: { enabled: true, publicUrl: bobHttp.url },
         updates: { stateDir: join(root, "bob-updates") },
       }),
@@ -154,7 +155,13 @@ describe("Direct peer transport", () => {
       publicKey: alice.identity.publicKey,
       transport: "DIRECT",
       directUrl: aliceHttp.url,
-      policy: peerPolicy(),
+      policy: { ...peerPolicy(), autoExecute: "SAFE" },
+    });
+    await bob.start();
+
+    expect(bob.localState().automation).toMatchObject({
+      rules: [],
+      legacyPrefixCount: 1,
     });
 
     const outgoing = await alice.delegate({

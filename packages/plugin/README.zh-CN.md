@@ -14,7 +14,7 @@ DSH Squad 把运行在不同电脑、网络和地点上的个人 Agent 组成任
 - 可选的外部更新器为持久在线 Relay 验证签名 Release、备份、重启、健康检查并在失败时回滚；默认只通知。
 - 带签名的多组织成员目录、Owner/Admin/Member 角色、一次性邀请、审批和禁用，不再要求成员两两配置 Peer。
 - 一个节点可以加入多个组织；每个 DSH Session 独立选择一个组织成员目录或兼容的直接 Peer。
-- 每个成员可分别配置本机 `NEVER`、`SAFE` 和 `TRUSTED` 自动执行模式，并在 WebUI 下拉修改。
+- 每个成员可分别选择“每次确认”“仅匹配本机规则”和“始终自动执行”；本机规则会强制限制目标、工具、附件、preset、时长与 Token，并可直接在 WebUI 管理。
 - 本地 Team Planner 草案、负责人明确审阅和幂等批量分派。
 - 原生复用接收方的 DSH Agent、Session、Skill、工具、Permission/Approval 和 WebUI。
 - 私有 Session ID、HumanTodo 详情、人工回复、凭据和工作区路径始终保留在本地。

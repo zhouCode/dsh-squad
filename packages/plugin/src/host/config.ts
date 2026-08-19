@@ -8,6 +8,10 @@ import {
   type PeerPolicy,
   type PeerTransport,
 } from "../shared/contracts.ts";
+import {
+  automationRuleInputSchema,
+  type AutomationRuleInput,
+} from "../shared/automation.ts";
 import { updateModeSchema, type UpdateMode } from "../shared/updates.ts";
 
 export interface PeerConfig {
@@ -34,6 +38,8 @@ export interface SquadConfig {
   execution?: {
     cwd?: string;
     preset?: string;
+    automationRules?: AutomationRuleInput[];
+    /** @deprecated Prefix-only SAFE authorization is ignored. Use automationRules. */
     safeObjectivePrefixes?: string[];
   };
   relay?: {
@@ -94,7 +100,8 @@ export interface ResolvedSquadConfig {
   execution: {
     cwd: string;
     preset?: string;
-    safeObjectivePrefixes: string[];
+    automationRules: AutomationRuleInput[];
+    legacySafeObjectivePrefixes: string[];
   };
   relay: {
     enabled: boolean;
@@ -225,9 +232,14 @@ export function resolveConfig(config: SquadConfig = {}): ResolvedSquadConfig {
     execution: {
       cwd: resolve(config.execution?.cwd ?? process.cwd()),
       ...(preset === undefined ? {} : { preset }),
-      safeObjectivePrefixes: (
+      automationRules: (config.execution?.automationRules ?? []).map((rule) =>
+        automationRuleInputSchema.parse(rule),
+      ),
+      legacySafeObjectivePrefixes: (
         config.execution?.safeObjectivePrefixes ?? []
-      ).map((value) => value.trim().toLowerCase()),
+      )
+        .map((value) => value.trim())
+        .filter(Boolean),
     },
     relay: {
       enabled: config.relay?.enabled ?? false,

@@ -17,6 +17,10 @@ import type { LocaleId } from "@deepseek-ai/dsh-client-locale/client";
 import type { PropsLocale } from "@deepseek-ai/dsh-client-ui-slots";
 import type { SidebarFooterActionOwnerProps } from "@deepseek-ai/dsh-client-ui-sidebar/client";
 import type { TeamPlan, TeamPlanStatus } from "../shared/contracts.ts";
+import type {
+  AutomationRuleInput,
+  AutomationRuleView,
+} from "../shared/automation.ts";
 import type { OrganizationView } from "../shared/organizations.ts";
 import {
   summarizeAttention,
@@ -121,6 +125,10 @@ interface LocalState {
   identity: { nodeId: string; displayName: string; publicKey: string };
   relay: { configured: boolean; serving: boolean; url?: string };
   direct: { serving: boolean; publicUrl?: string };
+  automation: {
+    rules: AutomationRuleView[];
+    legacyPrefixCount: number;
+  };
   peers: PeerView[];
   organizations: OrganizationView[];
   sessionOrganizations: Record<string, string>;
@@ -2316,6 +2324,379 @@ function ConnectionDiagnostics({
   );
 }
 
+function automationRuleBody(
+  rule: AutomationRuleView,
+  overrides: Partial<AutomationRuleInput> = {},
+): AutomationRuleInput {
+  return {
+    name: rule.name,
+    objectivePattern: rule.objectivePattern,
+    allowedTools: rule.allowedTools,
+    ...(rule.preset === undefined ? {} : { preset: rule.preset }),
+    allowAttachments: rule.allowAttachments,
+    maxRuntimeMinutes: rule.maxRuntimeMinutes,
+    ...(rule.maxTokens === undefined ? {} : { maxTokens: rule.maxTokens }),
+    priority: rule.priority,
+    enabled: rule.enabled,
+    ...overrides,
+  };
+}
+
+function automationRuleFromForm(form: FormData): AutomationRuleInput {
+  const preset = String(form.get("preset") ?? "").trim();
+  const maxTokensText = String(form.get("maxTokens") ?? "").trim();
+  return {
+    name: String(form.get("name") ?? ""),
+    objectivePattern: String(form.get("objectivePattern") ?? ""),
+    allowedTools: [
+      ...new Set(
+        String(form.get("allowedTools") ?? "")
+          .split(/[\s,]+/u)
+          .map((value) => value.trim())
+          .filter(Boolean),
+      ),
+    ],
+    ...(preset ? { preset } : {}),
+    allowAttachments: form.get("allowAttachments") === "on",
+    maxRuntimeMinutes: Number(form.get("maxRuntimeMinutes")),
+    ...(maxTokensText ? { maxTokens: Number(maxTokensText) } : {}),
+    priority: Number(form.get("priority")),
+    enabled: form.get("enabled") === "on",
+  };
+}
+
+function AutomationRuleFields({
+  rule,
+  t,
+}: {
+  rule?: AutomationRuleView;
+  t: SquadTranslate;
+}) {
+  return (
+    <>
+      <label>
+        {t("automation.name")}
+        <input
+          name="name"
+          required
+          maxLength={120}
+          defaultValue={rule?.name ?? ""}
+        />
+      </label>
+      <label>
+        {t("automation.objectivePattern")}
+        <input
+          name="objectivePattern"
+          required
+          maxLength={500}
+          defaultValue={rule?.objectivePattern ?? ""}
+          placeholder={t("automation.patternPlaceholder")}
+        />
+        <small>{t("automation.patternHint")}</small>
+      </label>
+      <label>
+        {t("automation.allowedTools")}
+        <textarea
+          name="allowedTools"
+          rows={4}
+          defaultValue={rule?.allowedTools.join("\n") ?? ""}
+          placeholder={t("automation.toolsPlaceholder")}
+        />
+        <small>{t("automation.toolsHint")}</small>
+      </label>
+      <div className="squad-automation-limits">
+        <label>
+          {t("automation.preset")}
+          <input
+            name="preset"
+            maxLength={160}
+            defaultValue={rule?.preset ?? ""}
+            placeholder={t("automation.defaultPreset")}
+          />
+        </label>
+        <label>
+          {t("automation.runtime")}
+          <input
+            name="maxRuntimeMinutes"
+            type="number"
+            required
+            min={1}
+            max={1_440}
+            defaultValue={rule?.maxRuntimeMinutes ?? 10}
+          />
+        </label>
+        <label>
+          {t("automation.maxTokens")}
+          <input
+            name="maxTokens"
+            type="number"
+            min={256}
+            max={1_000_000}
+            defaultValue={rule?.maxTokens ?? ""}
+          />
+        </label>
+        <label>
+          {t("automation.priority")}
+          <input
+            name="priority"
+            type="number"
+            required
+            min={0}
+            max={10_000}
+            defaultValue={rule?.priority ?? 100}
+          />
+        </label>
+      </div>
+      <label className="squad-check">
+        <input
+          name="allowAttachments"
+          type="checkbox"
+          defaultChecked={rule?.allowAttachments ?? false}
+        />
+        <span>{t("automation.allowAttachments")}</span>
+      </label>
+      <label className="squad-check">
+        <input
+          name="enabled"
+          type="checkbox"
+          defaultChecked={rule?.enabled ?? true}
+        />
+        <span>{t("automation.enabled")}</span>
+      </label>
+    </>
+  );
+}
+
+function AutomationRules({
+  state,
+  refresh,
+  t,
+}: {
+  state: LocalState;
+  refresh: () => Promise<void>;
+  t: SquadTranslate;
+}) {
+  const [editing, setEditing] = useState<string>();
+  const [busy, setBusy] = useState<string>();
+  const [error, setError] = useState<string>();
+  const { confirm, confirmation } = useConfirmation(t);
+  const save = async (
+    event: FormEvent<HTMLFormElement>,
+    rule?: AutomationRuleView,
+  ) => {
+    event.preventDefault();
+    const form = event.currentTarget;
+    const input = automationRuleFromForm(new FormData(form));
+    if (
+      input.enabled &&
+      !(await confirm({
+        title: t("confirm.automationRuleTitle"),
+        message: t("confirm.automationRule", {
+          name: input.name,
+          pattern: input.objectivePattern,
+          count: input.allowedTools.length,
+        }),
+        confirmLabel: t("confirm.enableAutomationRuleAction"),
+      }))
+    ) {
+      return;
+    }
+    const id = rule?.id ?? "create";
+    setBusy(id);
+    setError(undefined);
+    try {
+      await api(
+        rule === undefined
+          ? "/automation-rules"
+          : `/automation-rules/${rule.id}`,
+        {
+          method: "POST",
+          body: JSON.stringify(input),
+        },
+      );
+      if (rule === undefined) form.reset();
+      setEditing(undefined);
+      await refresh();
+    } catch (cause) {
+      setError(describeError(cause, t, "error.automationRuleFailed"));
+    } finally {
+      setBusy(undefined);
+    }
+  };
+  const toggle = async (rule: AutomationRuleView) => {
+    if (rule.source !== "INTERFACE") return;
+    if (
+      !rule.enabled &&
+      !(await confirm({
+        title: t("confirm.automationRuleTitle"),
+        message: t("confirm.automationRule", {
+          name: rule.name,
+          pattern: rule.objectivePattern,
+          count: rule.allowedTools.length,
+        }),
+        confirmLabel: t("confirm.enableAutomationRuleAction"),
+      }))
+    ) {
+      return;
+    }
+    setBusy(rule.id);
+    setError(undefined);
+    try {
+      await api(`/automation-rules/${rule.id}`, {
+        method: "POST",
+        body: JSON.stringify(
+          automationRuleBody(rule, { enabled: !rule.enabled }),
+        ),
+      });
+      await refresh();
+    } catch (cause) {
+      setError(describeError(cause, t, "error.automationRuleFailed"));
+    } finally {
+      setBusy(undefined);
+    }
+  };
+  const remove = async (rule: AutomationRuleView) => {
+    if (rule.source !== "INTERFACE") return;
+    if (
+      !(await confirm({
+        title: t("confirm.deleteAutomationRuleTitle"),
+        message: t("confirm.deleteAutomationRule", { name: rule.name }),
+        confirmLabel: t("action.deleteRule"),
+        danger: true,
+      }))
+    ) {
+      return;
+    }
+    setBusy(rule.id);
+    setError(undefined);
+    try {
+      await api(`/automation-rules/${rule.id}`, { method: "DELETE" });
+      if (editing === rule.id) setEditing(undefined);
+      await refresh();
+    } catch (cause) {
+      setError(describeError(cause, t, "error.automationRuleFailed"));
+    } finally {
+      setBusy(undefined);
+    }
+  };
+  const enabledCount = state.automation.rules.filter(
+    (rule) => rule.enabled,
+  ).length;
+  const usesRules = [
+    ...state.peers.map((peer) => peer.policy.autoExecute),
+    ...state.organizations.flatMap((organization) =>
+      organization.members.map((member) => member.policy.autoExecute),
+    ),
+  ].includes("SAFE");
+  return (
+    <section className="squad-automation">
+      <h2>{t("automation.title")}</h2>
+      <p className="squad-muted">{t("automation.intro")}</p>
+      {state.automation.legacyPrefixCount > 0 ? (
+        <p className="squad-warning">
+          {t("automation.legacyIgnored", {
+            count: state.automation.legacyPrefixCount,
+          })}
+        </p>
+      ) : null}
+      {usesRules && enabledCount === 0 ? (
+        <p className="squad-warning">{t("automation.noEnabledRules")}</p>
+      ) : null}
+      <div className="squad-automation-list">
+        {state.automation.rules.map((rule) => (
+          <article key={rule.id} className={rule.enabled ? "" : "disabled"}>
+            <header>
+              <div>
+                <strong>{rule.name}</strong>
+                <span>
+                  {rule.source === "FILE"
+                    ? t("automation.sourceFile")
+                    : t("automation.sourceInterface")}
+                  {rule.enabled ? "" : ` · ${t("automation.disabled")}`}
+                </span>
+              </div>
+              {rule.source === "INTERFACE" ? (
+                <div className="squad-actions">
+                  <button
+                    type="button"
+                    className="squad-secondary"
+                    disabled={busy !== undefined}
+                    onClick={() => void toggle(rule)}
+                  >
+                    {rule.enabled
+                      ? t("action.disableRule")
+                      : t("action.enableRule")}
+                  </button>
+                  <button
+                    type="button"
+                    className="squad-secondary"
+                    disabled={busy !== undefined}
+                    onClick={() => setEditing(rule.id)}
+                  >
+                    {t("action.editRule")}
+                  </button>
+                </div>
+              ) : null}
+            </header>
+            <code>{rule.objectivePattern}</code>
+            <p className="squad-muted">
+              {t("automation.ruleSummary", {
+                tools:
+                  rule.allowedTools.length === 0
+                    ? t("automation.noTools")
+                    : rule.allowedTools.join(", "),
+                runtime: rule.maxRuntimeMinutes,
+                attachments: rule.allowAttachments
+                  ? t("automation.attachmentsAllowed")
+                  : t("automation.attachmentsDenied"),
+              })}
+            </p>
+            {editing === rule.id && rule.source === "INTERFACE" ? (
+              <form onSubmit={(event) => void save(event, rule)}>
+                <AutomationRuleFields rule={rule} t={t} />
+                <div className="squad-actions">
+                  <button type="submit" disabled={busy !== undefined}>
+                    {busy === rule.id
+                      ? t("action.saving")
+                      : t("action.saveChanges")}
+                  </button>
+                  <button
+                    type="button"
+                    className="squad-secondary"
+                    disabled={busy !== undefined}
+                    onClick={() => setEditing(undefined)}
+                  >
+                    {t("action.cancel")}
+                  </button>
+                  <button
+                    type="button"
+                    className="squad-danger"
+                    disabled={busy !== undefined}
+                    onClick={() => void remove(rule)}
+                  >
+                    {t("action.deleteRule")}
+                  </button>
+                </div>
+              </form>
+            ) : null}
+          </article>
+        ))}
+      </div>
+      <details className="squad-automation-create">
+        <summary>{t("automation.create")}</summary>
+        <form onSubmit={(event) => void save(event)}>
+          <AutomationRuleFields t={t} />
+          <button type="submit" disabled={busy !== undefined}>
+            {busy === "create" ? t("action.saving") : t("action.createRule")}
+          </button>
+        </form>
+      </details>
+      {error ? <p className="squad-error">{error}</p> : null}
+      {confirmation}
+    </section>
+  );
+}
+
 function Settings({
   state,
   refresh,
@@ -2559,6 +2940,7 @@ function Settings({
       </p>
       {state.direct.publicUrl ? <code>{state.direct.publicUrl}</code> : null}
       <p className="squad-muted">{t("settings.languageHint")}</p>
+      <AutomationRules state={state} refresh={refresh} t={t} />
       <h2>{t("settings.peers")}</h2>
       {state.peers.length === 0 ? (
         <p className="squad-muted">{t("settings.noPeers")}</p>
@@ -3344,6 +3726,7 @@ const css = `
 .squad-settings>.squad-peer{display:grid;grid-template-columns:1fr;gap:8px;margin:10px 0;padding:14px;border:1px solid var(--dsw-alias-border-l2,#ddd);border-radius:12px}.squad-peer>header{display:flex;align-items:flex-start;justify-content:space-between;gap:12px}.squad-peer>header span{display:block;margin-top:4px;color:var(--dsw-alias-label-secondary,#666);font-size:12px}.squad-peer-disabled{opacity:.72}.squad-peer details,.squad-advanced-pairing{margin-top:8px}.squad-peer summary,.squad-advanced-pairing summary{cursor:pointer;color:#315ee8;font-size:13px}.squad-settings .squad-secondary{border:1px solid var(--dsw-alias-border-l2,#ccc);background:transparent;color:inherit}.squad-settings button:disabled{opacity:.5;cursor:not-allowed}.squad-pairing{margin-top:24px;padding-top:2px}.squad-pairing-grid{display:grid;grid-template-columns:1fr 1fr;gap:12px}.squad-pairing-grid>div,.squad-pairing-grid>form{min-width:0;border:1px solid var(--dsw-alias-border-l2,#ddd);border-radius:12px;padding:14px}.squad-pairing-grid h4{margin:0 0 7px}.squad-pairing-result{display:grid;gap:8px;margin-top:12px}.squad-pairing-result textarea{font-family:monospace;font-size:11px}.squad-advanced-pairing{margin:20px 0;padding:14px;border:1px dashed var(--dsw-alias-border-l2,#ccc);border-radius:12px}@media(max-width:700px){.squad-pairing-grid{grid-template-columns:1fr}}
 .squad-confirm-layer{position:fixed;z-index:1100;inset:0;display:grid;place-items:center;padding:20px;background:rgba(10,14,22,.52);pointer-events:auto}.squad-confirm-dialog{box-sizing:border-box;width:min(460px,100%);padding:22px;border:1px solid var(--dsw-alias-border-l2,#ddd);border-radius:15px;background:var(--dsw-specific-dialog-fill,#fff);color:var(--dsw-alias-label-primary,#151515);box-shadow:0 18px 60px rgba(0,0,0,.3)}.squad-confirm-dialog h2{margin:0 0 10px;font-size:20px}.squad-confirm-dialog p{line-height:1.55;white-space:pre-wrap}.squad-confirm-dialog button{border:0;border-radius:9px;padding:9px 13px;background:#315ee8;color:#fff;cursor:pointer}.squad-confirm-dialog .squad-secondary{border:1px solid var(--dsw-alias-border-l2,#ccc);background:transparent;color:inherit}.squad-confirm-dialog .squad-danger{background:#b13c35;color:#fff}
 .squad-detail input{box-sizing:border-box;width:100%;border:1px solid var(--dsw-alias-border-l2,#ccc);border-radius:9px;background:transparent;color:inherit;padding:9px;font:inherit}.squad-todo{border:1px solid var(--dsw-alias-border-l2,#ddd);border-left:3px solid #d59b1b;border-radius:10px;padding:14px;margin:12px 0}.squad-todo>header{display:flex;align-items:center;justify-content:space-between;gap:10px}.squad-attachment-editor{margin:14px 0;padding-top:12px;border-top:1px solid var(--dsw-alias-border-l2,#ddd)}.squad-attachment-editor>header{display:flex;align-items:flex-start;justify-content:space-between;gap:12px}.squad-attachment-editor>header div{display:grid;gap:4px}.squad-attachment-editor small{display:block;color:var(--dsw-alias-label-secondary,#666);line-height:1.4}.squad-attachment-editor fieldset{margin:12px 0;padding:10px 12px;border:1px solid var(--dsw-alias-border-l2,#ddd);border-radius:10px}.squad-attachment-editor legend{padding:0 5px;font-size:12px;font-weight:600}.squad-attachment-fields{display:grid;grid-template-columns:minmax(0,1.4fr) minmax(130px,.7fr);gap:0 10px}.squad-detail .squad-secondary{border:1px solid var(--dsw-alias-border-l2,#ccc);background:transparent;color:inherit}.squad-detail .squad-danger-text{color:#b13c35}.squad-todo button[type=submit]{margin-top:4px}@media(max-width:700px){.squad-attachment-editor>header,.squad-attachment-fields{display:grid;grid-template-columns:1fr}.squad-attachment-editor>header button{justify-self:start}}
+.squad-automation{margin:24px 0;padding:18px 0;border-top:1px solid var(--dsw-alias-border-l2,#ddd);border-bottom:1px solid var(--dsw-alias-border-l2,#ddd)}.squad-automation>h2{margin:0}.squad-automation-list{display:grid;gap:10px;margin:14px 0}.squad-automation-list>article{padding:13px;border:1px solid var(--dsw-alias-border-l2,#ddd);border-radius:12px}.squad-automation-list>article.disabled{opacity:.68}.squad-automation-list>article>header{display:flex;align-items:flex-start;justify-content:space-between;gap:12px}.squad-automation-list>article>header>div:first-child{display:grid;gap:4px}.squad-automation-list>article>header span{font-size:11px;color:var(--dsw-alias-label-secondary,#666)}.squad-automation-list code{display:block;margin-top:9px;overflow-wrap:anywhere}.squad-automation-list form{margin-top:14px;padding-top:10px;border-top:1px solid var(--dsw-alias-border-l2,#ddd)}.squad-automation-limits{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:0 10px}.squad-settings .squad-check{display:flex;align-items:center;gap:9px}.squad-settings .squad-check input{width:auto}.squad-automation-create{margin-top:12px;padding:12px;border:1px dashed var(--dsw-alias-border-l2,#ccc);border-radius:12px}.squad-automation-create>summary{cursor:pointer;color:#315ee8}.squad-automation-create form{margin-top:12px}.squad-automation small{color:var(--dsw-alias-label-secondary,#666);line-height:1.4}@media(max-width:700px){.squad-automation-list>article>header,.squad-automation-limits{display:grid;grid-template-columns:1fr}}
 `;
 
 function installStyles(): () => void {

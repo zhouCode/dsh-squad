@@ -14,7 +14,7 @@ DSH Squad turns personal Agents on different computers, networks, and locations 
 - Optional safe maintenance for an always-on Relay: signed-release verification, backup, restart, health check, and rollback, with notify-only as the default.
 - Signed multi-organization membership with Owner/Admin/Member roles, one-time invitations, approval, and revocation—without pairwise Peer setup.
 - One Node may join multiple organizations; each DSH Session selects one organization-scoped recipient directory or compatible direct Peers.
-- Per-member `NEVER`, `SAFE`, and `TRUSTED` local automatic-execution modes, editable in the WebUI.
+- Per-member always-ask, local-rule, and always-auto-run modes; local rules enforce objective, tool, attachment, preset, runtime, and token limits and are managed in the WebUI.
 - Local Team Planner drafts with explicit owner review and idempotent batch dispatch.
 - Native reuse of the recipient's DSH Agent, Session, Skills, tools, Permission/Approval, and WebUI.
 - Local retention of private Session IDs, HumanTodo details, human responses, credentials, and workspace paths.

@@ -39,6 +39,13 @@ import {
   type UnsignedEnvelope,
 } from "../shared/contracts.ts";
 import {
+  applyAutomationLimits,
+  automationRuleInputSchema,
+  matchesAutomationRule,
+  type AutomationRuleInput,
+  type AutomationRuleView,
+} from "../shared/automation.ts";
+import {
   decodeJoinPackage,
   encodeJoinPackage,
   unsignedJoinPackage,
@@ -162,6 +169,10 @@ export interface SquadLocalState {
   identity: { nodeId: string; displayName: string; publicKey: string };
   relay: { configured: boolean; serving: boolean; url?: string };
   direct: { serving: boolean; publicUrl?: string };
+  automation: {
+    rules: AutomationRuleView[];
+    legacyPrefixCount: number;
+  };
   peers: PeerRecord[];
   organizations: OrganizationView[];
   sessionOrganizations: Record<string, string>;
@@ -889,6 +900,66 @@ export class SquadService extends Service {
     const peer = this.database.updatePeerPolicy(nodeId, policy);
     this.touchLocalState();
     return Promise.resolve(peer);
+  }
+
+  createAutomationRule(
+    input: AutomationRuleInput,
+  ): Promise<AutomationRuleView> {
+    const rule = this.database.createAutomationRule(
+      automationRuleInputSchema.parse(input),
+    );
+    this.touchLocalState();
+    return Promise.resolve({ ...rule, source: "INTERFACE" });
+  }
+
+  updateAutomationRule(
+    id: string,
+    input: AutomationRuleInput,
+  ): Promise<AutomationRuleView> {
+    const rule = this.database.updateAutomationRule(
+      id,
+      automationRuleInputSchema.parse(input),
+    );
+    this.touchLocalState();
+    return Promise.resolve({ ...rule, source: "INTERFACE" });
+  }
+
+  deleteAutomationRule(id: string): Promise<void> {
+    this.database.deleteAutomationRule(id);
+    this.touchLocalState();
+    return Promise.resolve();
+  }
+
+  private automationRules(): AutomationRuleView[] {
+    const interfaceRules: AutomationRuleView[] = this.database
+      .listAutomationRules()
+      .map((rule) => ({ ...rule, source: "INTERFACE" }));
+    const fileRules: AutomationRuleView[] =
+      this.config.execution.automationRules.map((rule, index) => ({
+        ...rule,
+        id: `file-${index + 1}`,
+        source: "FILE",
+      }));
+    return [...interfaceRules, ...fileRules].sort(
+      (left, right) =>
+        left.priority - right.priority ||
+        (left.source === right.source
+          ? left.id.localeCompare(right.id)
+          : left.source === "INTERFACE"
+            ? -1
+            : 1),
+    );
+  }
+
+  private matchingAutomationRule(
+    input: Pick<DelegationRecord, "objective" | "attachmentRefs">,
+  ): AutomationRuleView | undefined {
+    return this.automationRules().find((rule) =>
+      matchesAutomationRule(rule, {
+        objective: input.objective,
+        attachmentCount: input.attachmentRefs.length,
+      }),
+    );
   }
 
   listOrganizations(): Promise<OrganizationView[]> {
@@ -1838,12 +1909,20 @@ export class SquadService extends Service {
     candidate: DelegationRecord,
     humanResponse?: string,
     alreadyRunning = false,
+    automationRule?: AutomationRuleInput,
   ): Promise<void> {
     if (this.#starting.has(candidate.id)) return;
     this.#starting.add(candidate.id);
     let running: DelegationRecord | undefined;
     try {
-      const policy = this.ensureExecutionAllowed(candidate, alreadyRunning);
+      const peerPolicy = this.ensureExecutionAllowed(candidate, alreadyRunning);
+      const policy =
+        automationRule === undefined
+          ? peerPolicy
+          : applyAutomationLimits(peerPolicy, automationRule);
+      if (automationRule !== undefined) {
+        await this.executor.validateAutomationRule(automationRule);
+      }
       const verifiedAttachments =
         humanResponse === undefined
           ? await this.attachments.verifyAll(candidate.attachmentRefs)
@@ -1873,7 +1952,12 @@ export class SquadService extends Service {
       this.touchLocalState();
       const outcome =
         humanResponse === undefined
-          ? await this.executor.execute(running, policy, verifiedAttachments)
+          ? await this.executor.execute(
+              running,
+              policy,
+              verifiedAttachments,
+              automationRule,
+            )
           : await this.executor.resume(running, policy, humanResponse);
       await this.handleOutcome(running.id, outcome);
     } catch (error) {
@@ -2142,12 +2226,13 @@ export class SquadService extends Service {
         this.enqueueResult(rejected);
         return;
       }
-      const safe = this.config.execution.safeObjectivePrefixes.some((prefix) =>
-        parsed.payload.objective.toLowerCase().startsWith(prefix),
-      );
+      const automationRule =
+        peer.policy.autoExecute === "SAFE"
+          ? this.matchingAutomationRule(delegation)
+          : undefined;
       if (
         peer.policy.autoExecute === "NEVER" ||
-        (peer.policy.autoExecute === "SAFE" && !safe)
+        (peer.policy.autoExecute === "SAFE" && automationRule === undefined)
       ) {
         const waiting = this.database.transition(
           delegation.id,
@@ -2158,7 +2243,12 @@ export class SquadService extends Service {
         );
         this.enqueueUpdate(waiting);
       } else {
-        void this.startExecution(delegation).catch((error: unknown) => {
+        void this.startExecution(
+          delegation,
+          undefined,
+          false,
+          automationRule,
+        ).catch((error: unknown) => {
           this.database.diagnostic(
             "EXECUTION_START_FAILED",
             delegation.id,
@@ -2493,6 +2583,11 @@ export class SquadService extends Service {
         ...(this.#nodeSettings.directPublicUrl === undefined
           ? {}
           : { publicUrl: this.#nodeSettings.directPublicUrl }),
+      },
+      automation: {
+        rules: this.automationRules(),
+        legacyPrefixCount:
+          this.config.execution.legacySafeObjectivePrefixes.length,
       },
       peers: this.database.listPeers(),
       organizations: this.database.listOrganizations(this.identity.nodeId),

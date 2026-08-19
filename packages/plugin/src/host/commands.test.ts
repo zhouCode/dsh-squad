@@ -163,7 +163,7 @@ describe("Squad slash commands", () => {
       sourceEventSeq: 41,
     });
     expect(result).toMatchObject({
-      text: expect.stringContaining("安全目标自动执行"),
+      text: expect.stringContaining("仅匹配本机规则"),
     });
     expect(harness.squad.listRecipients).toHaveBeenCalledOnce();
     expect(append).toHaveBeenCalledWith(

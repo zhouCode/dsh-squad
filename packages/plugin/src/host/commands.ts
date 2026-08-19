@@ -22,9 +22,9 @@ export const SQUAD_COMMAND_NAMES = [
 type RoutedCommand = "squad-plan" | "squad-task" | "squad-status";
 
 const autoExecuteLabels = {
-  NEVER: "需本地确认 / local approval required",
-  SAFE: "安全目标自动执行 / safe objectives auto-run",
-  TRUSTED: "受信目标自动执行 / trusted objectives auto-run",
+  NEVER: "每次由本人确认 / always ask owner",
+  SAFE: "仅匹配本机规则 / match local rules only",
+  TRUSTED: "始终自动执行（高风险） / always auto-run (high risk)",
 } as const;
 
 const routedInstructions: Record<RoutedCommand, string> = {

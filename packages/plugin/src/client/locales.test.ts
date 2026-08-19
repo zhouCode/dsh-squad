@@ -35,7 +35,7 @@ describe("Squad locale dictionaries", () => {
     const t = translator(zh);
     expect(formatStatus(t, "WAITING_HUMAN")).toBe("等待人工处理");
     expect(formatDelivery(t, "STORED_BY_RELAY")).toBe("中继已持久保存");
-    expect(formatPolicy(t, "SAFE")).toBe("仅安全目标");
+    expect(formatPolicy(t, "SAFE")).toBe("仅匹配本机规则");
     expect(formatPlanStatus(t, "PARTIAL")).toBe("部分失败");
     expect(formatPlanItemStatus(t, "DISPATCHED")).toBe("已创建委派");
     expect(formatUpdateMode(t, "NOTIFY")).toBe("仅通知（推荐）");

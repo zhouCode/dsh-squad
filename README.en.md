@@ -15,7 +15,7 @@ DSH Squad turns personal Agents running on different computers, networks, and lo
 - **Offline behavior has explicit semantics**: Relay mode persists work independently at the intermediary. Direct mode persists it in the sender's local SQLite outbox and retries automatically, while the WebUI shows waiting state, next retry, failed attempts, and the latest error. Duplicate delivery cannot create duplicate Sessions or executions.
 - **Delivery is observable in real time**: an authenticated Relay event stream wakes recipients immediately with polling as fallback, while Direct returns a signed durable-receipt from the receiving Node. Senders can distinguish local queueing, waiting for peer reachability, Relay persistence, and receipt by the peer Node.
 - **A Relay can maintain itself safely**: a separate updater verifies signed releases and, while the Node is idle, backs up, installs, restarts, and checks the reported version. Notify-only is the default and failures roll back.
-- **Trust is configured per person**: every direct Peer or organization member has an independent local `NEVER`, `SAFE`, or `TRUSTED` automatic-execution policy, editable from a dropdown in the WebUI.
+- **Per-person trust with enforced limits**: every direct Peer or organization member can be set to always ask, match local rules only, or always auto-run. A local rule matches the full objective and enforces tools, attachments, preset, runtime, and token limits; no match means human confirmation.
 - **No YAML edit for first-time setup**: open `Agent Inbox` to choose Relay or Direct, validate the connection, and save it locally through the Simplified Chinese or English guide; change it later in Settings.
 - **Native to DSH**: work runs in the recipient's existing Agent, Session, Skill catalog, tools, and Permission/Approval flow, without a second runtime or standalone management platform.
 
@@ -131,15 +131,23 @@ Unattended deployments and advanced options can still override `dsh-squad` in `$
     envelopeTtlMinutes: 60
     execution:
       cwd: /absolute/path/to/alice-workspace
-      # SAFE automatically runs only objectives beginning with these prefixes.
-      # Uncertain objectives wait for owner acceptance.
-      safeObjectivePrefixes:
-        - summarize
-        - analyze
+      # SAFE is shown as “Match local rules only”. Rules match the full
+      # objective and enforce a tool allowlist. An empty list allows no tools.
+      automationRules:
+        - name: Text-only meeting summaries
+          objectivePattern: "Summarize meeting notes: *"
+          allowedTools: []
+          allowAttachments: false
+          maxRuntimeMinutes: 5
+          maxTokens: 8000
+          priority: 100
+          enabled: true
     relay:
       url: https://relay.example.com
       invitation: replace-with-one-time-invitation
 ```
+
+Rules can also be created, edited, disabled, or deleted under `Agent Inbox → Settings → Local automation rules`. The legacy `safeObjectivePrefixes` compared only a string prefix while exposing an entire preset, so it could not form a real permission boundary. After upgrade it produces a migration warning and no longer grants automatic execution; migrate it to `automationRules` or interface-managed rules. The wire and database enum remains `SAFE` for compatibility with existing Peer configuration, but it now strictly means “match local rules”.
 
 Prefer joining a Relay organization through a one-time invitation under `Agent Inbox → Organizations`; this avoids pairwise setup. Add a Direct Peer by selecting `Direct peer-to-peer` under `Agent Inbox → Settings`, or declare it in configuration. Both sides must pin the other's `nodeId`, Ed25519 public key, and reachable endpoint; each `nodeId` must match its public-key fingerprint.
 

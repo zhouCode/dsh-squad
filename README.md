@@ -15,7 +15,7 @@ DSH Squad 把运行在不同电脑、网络和地点上的个人 Agent，组成�
 - **离线状态有明确语义**：Relay 模式由中继持久保存任务；Direct 模式由发送方本地 SQLite 保存并自动重试，界面会显示等待、重试时间、失败次数和最近错误。重复投递不会重复创建 Session 或执行任务。
 - **投递状态可实时观察**：Relay 用认证事件流即时唤醒收件节点并保留轮询兜底；Direct 返回接收节点签名的持久化回执。发送方可以区分“本地排队”“等待对方可达”“中继已保存”和“对方节点已接收”。
 - **Relay 可安全自维护**：独立更新器验证签名 Release，在节点空闲时备份、安装、重启并做版本健康检查；默认只通知，失败自动回滚。
-- **信任可以逐人配置**：每个直接 Peer 或组织成员都有独立的本机 `NEVER`、`SAFE`、`TRUSTED` 自动执行策略，可直接在界面下拉修改。
+- **信任可以逐人配置并真正限权**：每个直接 Peer 或组织成员都可选择“每次确认”“仅匹配本机规则”或“始终自动执行”。本机规则不仅匹配完整任务目标，还会强制限制工具、附件、preset、运行时长和 Token；没有匹配规则就等待本人确认。
 - **首次配置无需编辑 YAML**：首次打开`智能体收件箱`即可通过简体中文或英文向导选择 Relay / Direct、验证连接并本地保存；以后在设置页直接修改。
 - **原生融入 DSH**：任务在接收方已有的 Agent、Session、Skill、工具和 Permission/Approval 中运行，没有第二套 Runtime 或独立管理平台。
 
@@ -131,14 +131,23 @@ dsh web
     envelopeTtlMinutes: 60
     execution:
       cwd: /absolute/path/to/alice-workspace
-      # SAFE 只自动运行以前缀开头的目标；不确定时等待本人接受。
-      safeObjectivePrefixes:
-        - summarize
-        - analyze
+      # SAFE 的界面名称是“仅匹配本机规则”。规则完整匹配目标，
+      # 并在 Agent 运行时强制工具白名单；allowedTools 留空即不允许工具。
+      automationRules:
+        - name: 纯文本会议摘要
+          objectivePattern: "总结会议纪要：*"
+          allowedTools: []
+          allowAttachments: false
+          maxRuntimeMinutes: 5
+          maxTokens: 8000
+          priority: 100
+          enabled: true
     relay:
       url: https://relay.example.com
       invitation: replace-with-one-time-invitation
 ```
+
+也可以在`智能体收件箱 → 设置 → 本机自动执行规则`中创建、修改、停用或删除规则。`safeObjectivePrefixes` 只比较字符串前缀却会放开整个 preset，无法形成真实权限边界，因此升级后只会显示迁移警告，不再授予自动执行；使用该旧字段的节点应改为 `automationRules` 或界面规则。协议和数据库仍保留 `SAFE` 这个枚举值以兼容现有 Peer 配置，但它现在严格表示“匹配本机规则”。
 
 推荐在`智能体收件箱 → 组织`中通过一次性邀请加入 Relay 组织；这样无需为每一对成员分别配置。Direct Peer 可在`智能体收件箱 → 设置`中选择`Direct 点对点`后添加，也可以在配置中声明。双方都必须固定对方的 `nodeId`、Ed25519 公钥和可达地址；`nodeId` 必须与公钥指纹匹配。
 

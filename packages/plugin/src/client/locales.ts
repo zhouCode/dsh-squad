@@ -78,6 +78,11 @@ export const zh = {
   "action.submitTodo": "提交此项并继续",
   "action.addAttachment": "添加附件引用",
   "action.removeAttachment": "移除此附件",
+  "action.createRule": "创建规则",
+  "action.editRule": "编辑",
+  "action.enableRule": "启用",
+  "action.disableRule": "停用",
+  "action.deleteRule": "删除规则",
   "action.reject": "拒绝",
   "action.acceptAndRun": "接受并运行",
   "action.retryDelivery": "重试投递",
@@ -120,6 +125,13 @@ export const zh = {
   "confirm.switchMode":
     "节点会立即切换到“{mode}”。身份、组织和任务会保留，但新连接无法投递的任务将留在本地队列中。",
   "confirm.switchModeAction": "确认切换",
+  "confirm.automationRuleTitle": "启用本机自动执行规则？",
+  "confirm.automationRule":
+    "规则“{name}”会让匹配“{pattern}”的任务无需人工确认，并最多开放 {count} 个指定工具。仅对已设为“匹配本机规则”的成员生效。",
+  "confirm.enableAutomationRuleAction": "启用此规则",
+  "confirm.deleteAutomationRuleTitle": "删除自动执行规则？",
+  "confirm.deleteAutomationRule":
+    "删除“{name}”后，原本只匹配此规则的任务将等待本人确认。",
   "confirm.dispatchPlanTitle": "确认分派计划？",
   "confirm.dispatchPlan":
     "将从“{title}”创建并发送 {count} 个独立任务。发送后只能逐项请求取消。",
@@ -245,9 +257,41 @@ export const zh = {
   "transport.RELAY": "Relay 中继",
   "transport.DIRECT": "Direct 点对点",
   "settings.trustedWarning":
-    "“受信目标”会跳过人工确认并在本机运行；仅对你充分信任的成员启用。",
+    "“始终自动执行”会跳过目标匹配和人工确认，并使用完整本机 preset；仅对你充分信任的成员启用。",
   "settings.languageHint":
     "界面语言由 DSH 全局设置统一控制；首次使用时跟随系统语言。",
+  "automation.title": "本机自动执行规则",
+  "automation.intro":
+    "规则只决定已选“匹配本机规则”的发送方何时可以跳过确认。目标必须完整匹配，运行时还会强制执行工具白名单和资源上限。",
+  "automation.name": "规则名称",
+  "automation.objectivePattern": "目标通配模式",
+  "automation.patternPlaceholder": "例如：总结 * 的发布说明",
+  "automation.patternHint":
+    "不区分大小写并匹配完整目标；* 代表任意数量字符，? 代表一个字符。不会执行正则表达式。",
+  "automation.allowedTools": "允许的 DSH 工具",
+  "automation.toolsPlaceholder": "每行一个准确工具名；留空表示不允许调用工具",
+  "automation.toolsHint":
+    "这里只填写可执行工具名；run_code 和 Squad 结果工具由运行时管理。不存在的工具会让任务转为等待确认。",
+  "automation.preset": "Agent preset（可选）",
+  "automation.defaultPreset": "留空使用 Squad 默认 preset",
+  "automation.runtime": "最长运行时间（分钟）",
+  "automation.maxTokens": "最大 Token（可选）",
+  "automation.priority": "优先级（数值越小越先匹配）",
+  "automation.allowAttachments": "允许带附件的任务匹配此规则",
+  "automation.enabled": "创建后立即启用",
+  "automation.create": "新建自动执行规则",
+  "automation.sourceFile": "配置文件规则（只读）",
+  "automation.sourceInterface": "界面规则",
+  "automation.disabled": "已停用",
+  "automation.noTools": "不允许工具",
+  "automation.attachmentsAllowed": "允许附件",
+  "automation.attachmentsDenied": "不允许附件",
+  "automation.ruleSummary":
+    "工具：{tools} · 最长 {runtime} 分钟 · {attachments}",
+  "automation.noEnabledRules":
+    "已有成员使用“匹配本机规则”，但目前没有启用的规则；他们发来的任务都会等待本人确认。",
+  "automation.legacyIgnored":
+    "检测到 {count} 条旧 safeObjectivePrefixes。前缀匹配无法限制工具，现已停止作为自动执行授权；请在此创建显式规则。",
   "diagnostics.title": "连接诊断",
   "diagnostics.intro":
     "检查实际连接、事件通道和本地待投递队列；配置存在不等于端点可达。",
@@ -407,9 +451,9 @@ export const zh = {
   "delivery.RECEIVED_BY_NODE": "对方节点已接收",
   "delivery.DELIVERY_EXPIRED": "投递已过期",
   "delivery.RECEIVED_LOCAL": "已接收到本地",
-  "policy.NEVER": "从不",
-  "policy.SAFE": "仅安全目标",
-  "policy.TRUSTED": "受信任目标",
+  "policy.NEVER": "每次由本人确认",
+  "policy.SAFE": "仅匹配本机规则",
+  "policy.TRUSTED": "始终自动执行（高风险）",
   "error.requestFailed": "Squad 请求失败",
   "error.actionFailed": "操作失败",
   "error.humanInputRequired": "请填写回复或至少添加一个附件引用。",
@@ -431,6 +475,7 @@ export const zh = {
   "error.planActionFailed": "分派计划操作失败",
   "error.organizationActionFailed": "组织操作失败",
   "error.policyUpdateFailed": "无法更新自动执行策略",
+  "error.automationRuleFailed": "无法保存本机自动执行规则",
   "error.sessionOrganizationFailed": "无法切换会话组织",
   "error.updateActionFailed": "更新操作失败",
   "error.connectionCheckFailed": "连接检查失败",
@@ -557,6 +602,11 @@ export const en = {
   "action.submitTodo": "Submit this item and continue",
   "action.addAttachment": "Add attachment reference",
   "action.removeAttachment": "Remove this attachment",
+  "action.createRule": "Create rule",
+  "action.editRule": "Edit",
+  "action.enableRule": "Enable",
+  "action.disableRule": "Disable",
+  "action.deleteRule": "Delete rule",
   "action.reject": "Reject",
   "action.acceptAndRun": "Accept and run",
   "action.retryDelivery": "Retry delivery",
@@ -599,6 +649,13 @@ export const en = {
   "confirm.switchMode":
     "This Node switches to “{mode}” immediately. Its identity, organizations, and tasks are retained, but work the new connection cannot deliver remains queued locally.",
   "confirm.switchModeAction": "Confirm switch",
+  "confirm.automationRuleTitle": "Enable this local automation rule?",
+  "confirm.automationRule":
+    "Rule “{name}” lets tasks matching “{pattern}” skip human confirmation with at most {count} explicitly allowed tools. It only affects senders set to “Match local rules”.",
+  "confirm.enableAutomationRuleAction": "Enable this rule",
+  "confirm.deleteAutomationRuleTitle": "Delete this automation rule?",
+  "confirm.deleteAutomationRule":
+    "After deleting “{name}”, tasks that matched only this rule wait for your confirmation.",
   "confirm.dispatchPlanTitle": "Dispatch this plan?",
   "confirm.dispatchPlan":
     "This creates and sends {count} independent tasks from “{title}”. After sending, each task can only be canceled separately.",
@@ -728,9 +785,42 @@ export const en = {
   "transport.RELAY": "Relay",
   "transport.DIRECT": "Direct peer-to-peer",
   "settings.trustedWarning":
-    "Trusted objectives skip human approval and run on this computer. Enable this only for members you fully trust.",
+    "Always auto-run skips objective matching and human confirmation with the full local preset. Enable it only for members you fully trust.",
   "settings.languageHint":
     "The DSH global language setting controls this interface; first use follows the system language.",
+  "automation.title": "Local automation rules",
+  "automation.intro":
+    "Rules only decide when senders set to “Match local rules” may skip confirmation. The full objective must match, and the runtime enforces the tool allowlist and resource limits.",
+  "automation.name": "Rule name",
+  "automation.objectivePattern": "Objective glob pattern",
+  "automation.patternPlaceholder": "For example: summarize release notes for *",
+  "automation.patternHint":
+    "Case-insensitive and matched against the full objective. * matches any number of characters and ? matches one. User regular expressions are never executed.",
+  "automation.allowedTools": "Allowed DSH tools",
+  "automation.toolsPlaceholder":
+    "One exact tool name per line; leave blank to allow no tools",
+  "automation.toolsHint":
+    "List executable tool names only. run_code and Squad's outcome tool are runtime-managed. An unavailable tool pauses the task for confirmation.",
+  "automation.preset": "Agent preset (optional)",
+  "automation.defaultPreset": "Leave blank for Squad's default preset",
+  "automation.runtime": "Maximum runtime in minutes",
+  "automation.maxTokens": "Maximum tokens (optional)",
+  "automation.priority": "Priority (lower values match first)",
+  "automation.allowAttachments": "Allow tasks with attachments to match",
+  "automation.enabled": "Enable immediately after creation",
+  "automation.create": "Create an automation rule",
+  "automation.sourceFile": "Configuration-file rule (read only)",
+  "automation.sourceInterface": "Interface rule",
+  "automation.disabled": "disabled",
+  "automation.noTools": "no tools allowed",
+  "automation.attachmentsAllowed": "attachments allowed",
+  "automation.attachmentsDenied": "attachments denied",
+  "automation.ruleSummary":
+    "Tools: {tools} · up to {runtime} minutes · {attachments}",
+  "automation.noEnabledRules":
+    "At least one member uses “Match local rules”, but no rules are enabled. Their tasks will all wait for your confirmation.",
+  "automation.legacyIgnored":
+    "Found {count} legacy safeObjectivePrefixes entries. Prefix matching cannot constrain tools, so it no longer grants automatic execution. Create explicit rules here.",
   "diagnostics.title": "Connection diagnostics",
   "diagnostics.intro":
     "Check actual endpoints, the event channel, and the local delivery queue; configured does not necessarily mean reachable.",
@@ -896,9 +986,9 @@ export const en = {
   "delivery.RECEIVED_BY_NODE": "Received by peer Node",
   "delivery.DELIVERY_EXPIRED": "Delivery expired",
   "delivery.RECEIVED_LOCAL": "Received locally",
-  "policy.NEVER": "Never",
-  "policy.SAFE": "Safe objectives only",
-  "policy.TRUSTED": "Trusted objectives",
+  "policy.NEVER": "Always ask me",
+  "policy.SAFE": "Match local rules only",
+  "policy.TRUSTED": "Always auto-run (high risk)",
   "error.requestFailed": "Squad request failed",
   "error.actionFailed": "Action failed",
   "error.humanInputRequired":
@@ -924,6 +1014,7 @@ export const en = {
   "error.planActionFailed": "Delegation plan action failed",
   "error.organizationActionFailed": "Organization action failed",
   "error.policyUpdateFailed": "Could not update automatic execution policy",
+  "error.automationRuleFailed": "Could not save the local automation rule",
   "error.sessionOrganizationFailed": "Could not change session organization",
   "error.updateActionFailed": "Update action failed",
   "error.connectionCheckFailed": "Connection check failed",

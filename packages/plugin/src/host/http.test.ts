@@ -146,4 +146,98 @@ describe("Squad host health", () => {
     });
     expect(checkConnections).toHaveBeenCalledOnce();
   });
+
+  it("validates and manages local automation rules", async () => {
+    const created = {
+      id: "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa",
+      source: "INTERFACE" as const,
+      name: "Review docs",
+      objectivePattern: "review docs:*",
+      allowedTools: ["read_file"],
+      allowAttachments: false,
+      maxRuntimeMinutes: 5,
+      priority: 10,
+      enabled: true,
+    };
+    const createAutomationRule = vi.fn(async () => created);
+    const updateAutomationRule = vi.fn(async () => ({
+      ...created,
+      enabled: false,
+    }));
+    const deleteAutomationRule = vi.fn(async () => undefined);
+    const squad = {
+      createAutomationRule,
+      updateAutomationRule,
+      deleteAutomationRule,
+    } as unknown as SquadService;
+    const server = createServer(createHttpHandler(squad));
+    servers.push(server);
+    await new Promise<void>((resolve) =>
+      server.listen(0, "127.0.0.1", resolve),
+    );
+    const address = server.address() as AddressInfo;
+    const base = `http://127.0.0.1:${address.port}/squad/v1/local/automation-rules`;
+    const input = {
+      name: "Review docs",
+      objectivePattern: "review docs:*",
+      allowedTools: ["read_file"],
+      allowAttachments: false,
+      maxRuntimeMinutes: 5,
+      priority: 10,
+      enabled: true,
+    };
+
+    const createResponse = await fetch(base, {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify(input),
+    });
+    expect(createResponse.status).toBe(201);
+    expect(await createResponse.json()).toEqual(created);
+    expect(createAutomationRule).toHaveBeenCalledWith(input);
+
+    const updateResponse = await fetch(`${base}/${created.id}`, {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({ ...input, enabled: false }),
+    });
+    expect(updateResponse.status).toBe(200);
+    expect(await updateResponse.json()).toMatchObject({ enabled: false });
+    expect(updateAutomationRule).toHaveBeenCalledWith(created.id, {
+      ...input,
+      enabled: false,
+    });
+
+    const deleteResponse = await fetch(`${base}/${created.id}`, {
+      method: "DELETE",
+    });
+    expect(deleteResponse.status).toBe(200);
+    expect(await deleteResponse.json()).toEqual({ ok: true });
+    expect(deleteAutomationRule).toHaveBeenCalledWith(created.id);
+  });
+
+  it("rejects unsafe automation rule payloads before they reach the service", async () => {
+    const createAutomationRule = vi.fn();
+    const squad = { createAutomationRule } as unknown as SquadService;
+    const server = createServer(createHttpHandler(squad));
+    servers.push(server);
+    await new Promise<void>((resolve) =>
+      server.listen(0, "127.0.0.1", resolve),
+    );
+    const address = server.address() as AddressInfo;
+    const response = await fetch(
+      `http://127.0.0.1:${address.port}/squad/v1/local/automation-rules`,
+      {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({
+          name: "Unsafe",
+          objectivePattern: "*",
+          allowedTools: ["run_code"],
+        }),
+      },
+    );
+    expect(response.status).toBe(400);
+    expect(createAutomationRule).not.toHaveBeenCalled();
+  });
 });
