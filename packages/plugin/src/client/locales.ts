@@ -113,6 +113,10 @@ export const zh = {
   "action.createOrganization": "创建组织",
   "action.joinOrganization": "申请加入",
   "action.leaveOrganization": "退出组织",
+  "action.transferOwnership": "转让所有权",
+  "action.acceptOwnership": "接受并成为 Owner",
+  "action.declineOwnership": "拒绝转让",
+  "action.cancelOwnershipTransfer": "取消转让",
   "action.createInvitation": "创建一次性邀请",
   "action.revokeInvitation": "撤销邀请",
   "action.createJoinPackage": "为新节点创建加入包",
@@ -164,6 +168,18 @@ export const zh = {
   "confirm.leaveOrganizationTitle": "退出此组织？",
   "confirm.leaveOrganization":
     "退出“{organization}”后，本节点将不再出现在活动成员目录中，也无法通过该组织收发新任务；历史记录会保留。",
+  "confirm.transferOwnershipTitle": "发起所有权转让？",
+  "confirm.transferOwnership":
+    "“{name}”需要在自己的节点明确接受，才会成为“{organization}”的唯一 Owner；接受后你将变为 Admin。转让完成前可以取消。",
+  "confirm.acceptOwnershipTitle": "接受组织所有权？",
+  "confirm.acceptOwnership":
+    "接受后，你将成为“{organization}”的唯一 Owner，并负责角色管理和后续所有权转让；原 Owner 将变为 Admin。",
+  "confirm.declineOwnershipTitle": "拒绝所有权转让？",
+  "confirm.declineOwnership":
+    "拒绝后，“{organization}”的现有 Owner 和角色保持不变。",
+  "confirm.cancelOwnershipTransferTitle": "取消所有权转让？",
+  "confirm.cancelOwnershipTransfer":
+    "取消后，“{organization}”的目标成员将无法再接受此提案，现有 Owner 和角色保持不变。",
   "confirm.changeRoleTitle": "更改组织角色？",
   "confirm.changeRole":
     "将“{name}”在“{organization}”中的角色改为“{role}”。管理员可以邀请、批准和管理普通成员。",
@@ -453,7 +469,12 @@ export const zh = {
   "organizations.localPolicy": "本机接收策略",
   "organizations.directoryRevision": "签名目录修订 {revision}",
   "organizations.pendingHint": "加入申请已发送，等待 Owner 或 Admin 批准。",
-  "organizations.ownerLeaveHint": "Owner 需要先转让所有权，才能退出组织。",
+  "organizations.ownerLeaveHint":
+    "Owner 需要先转让所有权，接受完成后才能退出组织。原 Owner 会变为 Admin。",
+  "organizations.pendingOwnershipTransfer": "待确认的所有权转让",
+  "organizations.ownershipTransferRoute": "{from} → {to}",
+  "organizations.ownershipTransferExpires": "接受截止时间：{time}",
+  "organizations.newOwner": "新 Owner",
   "organizations.securityHint":
     "组织目录由成员签名并在本机验证；Relay 只中继目录和加密身份边界，不获得本机 Agent 能力。",
   "organizations.relayRequired": "组织目录需要 Relay 连接",
@@ -580,6 +601,19 @@ export const zh = {
   "errorCode.ORGANIZATION_INVITATION_NOT_FOUND": "找不到组织邀请",
   "errorCode.OWNER_TRANSFER_REQUIRED": "Owner 必须先转让所有权",
   "errorCode.LEAVE_CERTIFICATE_MISMATCH": "退出组织的签名凭证不匹配",
+  "errorCode.ORGANIZATION_OWNER_REQUIRED": "只有当前 Owner 可以发起转让",
+  "errorCode.OWNERSHIP_TRANSFER_MISMATCH": "所有权转让与当前组织不匹配",
+  "errorCode.OWNERSHIP_TRANSFER_EXPIRY_INVALID": "所有权转让的有效期无效",
+  "errorCode.OWNERSHIP_TRANSFER_INVALID": "所有权转让签名或角色变化无效",
+  "errorCode.OWNERSHIP_TRANSFER_CONFLICT": "所有权转让 ID 已存在冲突",
+  "errorCode.OWNERSHIP_TRANSFER_ALREADY_PENDING": "已有一项所有权转让等待处理",
+  "errorCode.OWNERSHIP_TRANSFER_NOT_FOUND": "找不到所有权转让",
+  "errorCode.OWNERSHIP_TRANSFER_ALREADY_RESOLVED": "所有权转让已经处理",
+  "errorCode.OWNERSHIP_TRANSFER_TARGET_REQUIRED": "只有目标成员可以接受转让",
+  "errorCode.OWNERSHIP_TRANSFER_STALE": "组织目录已变化，请重新发起转让",
+  "errorCode.OWNERSHIP_TRANSFER_ACCEPTANCE_EXPIRED": "所有权转让接受请求已过期",
+  "errorCode.OWNERSHIP_TRANSFER_PARTICIPANT_REQUIRED":
+    "只有当前 Owner 或目标成员可以处理此转让",
   "errorCode.INVALID_RESPONSE": "Relay 返回了无效响应",
   "summary.executionInterrupted":
     "接收方 DSH 在执行期间停止。可能已经发生的外部副作用不会自动重放。",
@@ -698,6 +732,10 @@ export const en = {
   "action.createOrganization": "Create organization",
   "action.joinOrganization": "Request to join",
   "action.leaveOrganization": "Leave organization",
+  "action.transferOwnership": "Transfer ownership",
+  "action.acceptOwnership": "Accept and become Owner",
+  "action.declineOwnership": "Decline transfer",
+  "action.cancelOwnershipTransfer": "Cancel transfer",
   "action.createInvitation": "Create one-time invitation",
   "action.revokeInvitation": "Revoke invitation",
   "action.createJoinPackage": "Create join package for a new Node",
@@ -749,6 +787,18 @@ export const en = {
   "confirm.leaveOrganizationTitle": "Leave this organization?",
   "confirm.leaveOrganization":
     "After leaving “{organization}”, this Node disappears from the active directory and cannot send or receive new organization tasks. History is retained.",
+  "confirm.transferOwnershipTitle": "Propose an ownership transfer?",
+  "confirm.transferOwnership":
+    "“{name}” must explicitly accept on their own Node before becoming the sole Owner of “{organization}”. You then become an Admin. The proposal can be canceled until acceptance.",
+  "confirm.acceptOwnershipTitle": "Accept organization ownership?",
+  "confirm.acceptOwnership":
+    "You will become the sole Owner of “{organization}”, responsible for role management and future ownership transfers. The previous Owner becomes an Admin.",
+  "confirm.declineOwnershipTitle": "Decline the ownership transfer?",
+  "confirm.declineOwnership":
+    "The current Owner and all roles in “{organization}” remain unchanged.",
+  "confirm.cancelOwnershipTransferTitle": "Cancel the ownership transfer?",
+  "confirm.cancelOwnershipTransfer":
+    "The target member can no longer accept this proposal for “{organization}”. The current Owner and all roles remain unchanged.",
   "confirm.changeRoleTitle": "Change organization role?",
   "confirm.changeRole":
     "Change “{name}” in “{organization}” to “{role}”. Admins can invite, approve, and manage regular members.",
@@ -1050,7 +1100,12 @@ export const en = {
   "organizations.pendingHint":
     "The join request was sent and is waiting for an Owner or Admin.",
   "organizations.ownerLeaveHint":
-    "The Owner must transfer ownership before leaving the organization.",
+    "The Owner must transfer ownership and wait for acceptance before leaving. The previous Owner becomes an Admin.",
+  "organizations.pendingOwnershipTransfer":
+    "Ownership transfer awaiting confirmation",
+  "organizations.ownershipTransferRoute": "{from} → {to}",
+  "organizations.ownershipTransferExpires": "Acceptance deadline: {time}",
+  "organizations.newOwner": "New Owner",
   "organizations.securityHint":
     "Members sign the organization directory and every Node verifies it locally. Relay only brokers the directory and identity boundary; it gains no local Agent capability.",
   "organizations.relayRequired": "Organizations require a Relay connection",
@@ -1194,6 +1249,30 @@ export const en = {
     "The Owner must transfer ownership first",
   "errorCode.LEAVE_CERTIFICATE_MISMATCH":
     "The signed organization-leave certificate does not match",
+  "errorCode.ORGANIZATION_OWNER_REQUIRED":
+    "Only the current Owner can propose a transfer",
+  "errorCode.OWNERSHIP_TRANSFER_MISMATCH":
+    "The ownership transfer does not match this organization",
+  "errorCode.OWNERSHIP_TRANSFER_EXPIRY_INVALID":
+    "The ownership transfer lifetime is invalid",
+  "errorCode.OWNERSHIP_TRANSFER_INVALID":
+    "The ownership transfer signatures or role transitions are invalid",
+  "errorCode.OWNERSHIP_TRANSFER_CONFLICT":
+    "The ownership transfer ID conflicts with an existing proposal",
+  "errorCode.OWNERSHIP_TRANSFER_ALREADY_PENDING":
+    "Another ownership transfer is already pending",
+  "errorCode.OWNERSHIP_TRANSFER_NOT_FOUND":
+    "The ownership transfer was not found",
+  "errorCode.OWNERSHIP_TRANSFER_ALREADY_RESOLVED":
+    "The ownership transfer has already been resolved",
+  "errorCode.OWNERSHIP_TRANSFER_TARGET_REQUIRED":
+    "Only the target member can accept this transfer",
+  "errorCode.OWNERSHIP_TRANSFER_STALE":
+    "The organization directory changed; propose a new transfer",
+  "errorCode.OWNERSHIP_TRANSFER_ACCEPTANCE_EXPIRED":
+    "The ownership transfer acceptance has expired",
+  "errorCode.OWNERSHIP_TRANSFER_PARTICIPANT_REQUIRED":
+    "Only the current Owner or target member can resolve this transfer",
   "errorCode.INVALID_RESPONSE": "The Relay returned an invalid response",
   "summary.executionInterrupted":
     "The receiving DSH process stopped while execution was active. Potential external side effects were not replayed.",
@@ -1358,6 +1437,24 @@ const errorCodeKeys = {
     "errorCode.ORGANIZATION_INVITATION_NOT_FOUND",
   OWNER_TRANSFER_REQUIRED: "errorCode.OWNER_TRANSFER_REQUIRED",
   LEAVE_CERTIFICATE_MISMATCH: "errorCode.LEAVE_CERTIFICATE_MISMATCH",
+  ORGANIZATION_OWNER_REQUIRED: "errorCode.ORGANIZATION_OWNER_REQUIRED",
+  OWNERSHIP_TRANSFER_MISMATCH: "errorCode.OWNERSHIP_TRANSFER_MISMATCH",
+  OWNERSHIP_TRANSFER_EXPIRY_INVALID:
+    "errorCode.OWNERSHIP_TRANSFER_EXPIRY_INVALID",
+  OWNERSHIP_TRANSFER_INVALID: "errorCode.OWNERSHIP_TRANSFER_INVALID",
+  OWNERSHIP_TRANSFER_CONFLICT: "errorCode.OWNERSHIP_TRANSFER_CONFLICT",
+  OWNERSHIP_TRANSFER_ALREADY_PENDING:
+    "errorCode.OWNERSHIP_TRANSFER_ALREADY_PENDING",
+  OWNERSHIP_TRANSFER_NOT_FOUND: "errorCode.OWNERSHIP_TRANSFER_NOT_FOUND",
+  OWNERSHIP_TRANSFER_ALREADY_RESOLVED:
+    "errorCode.OWNERSHIP_TRANSFER_ALREADY_RESOLVED",
+  OWNERSHIP_TRANSFER_TARGET_REQUIRED:
+    "errorCode.OWNERSHIP_TRANSFER_TARGET_REQUIRED",
+  OWNERSHIP_TRANSFER_STALE: "errorCode.OWNERSHIP_TRANSFER_STALE",
+  OWNERSHIP_TRANSFER_ACCEPTANCE_EXPIRED:
+    "errorCode.OWNERSHIP_TRANSFER_ACCEPTANCE_EXPIRED",
+  OWNERSHIP_TRANSFER_PARTICIPANT_REQUIRED:
+    "errorCode.OWNERSHIP_TRANSFER_PARTICIPANT_REQUIRED",
   INVALID_RESPONSE: "errorCode.INVALID_RESPONSE",
 } as const satisfies Record<string, SquadLocaleKey>;
 

@@ -76,7 +76,7 @@ Agent 会调用 `propose_team_plan`。负责人确认后，Squad 才为每个计
 
 ## 组织、角色与 Session 隔离
 
-创建组织的节点是唯一 `Owner`。Owner 可以指定零个或多个 `Admin`；其他参与者加入后都是 `Member`。Owner 和 Admin 可以创建一次性邀请并批准或拒绝加入申请，Admin 只能管理普通 Member，只有 Owner 能任命或撤销 Admin。被拒绝的申请会立即从双方待处理列表消失，申请者需要新邀请才能再次申请。目录 v1 暂不支持 Owner 转让，避免在尚未定义恢复流程时产生双 Owner 或无 Owner 状态。
+创建组织的节点是唯一 `Owner`。Owner 可以指定零个或多个 `Admin`；其他参与者加入后都是 `Member`。Owner 和 Admin 可以创建一次性邀请并批准或拒绝加入申请，Admin 只能管理普通 Member，只有 Owner 能任命或撤销 Admin。被拒绝的申请会立即从双方待处理列表消失，申请者需要新邀请才能再次申请。Owner 可以向任一活动成员发起所有权转让；目标成员必须在自己的节点明确接受，Relay 才会把“旧 Owner 变为 Admin”和“目标成员变为唯一 Owner”作为一条原子目录事件提交。任一方都能在接受前取消或拒绝，目录发生其他变化时旧提案自动失效。
 
 Owner 和 Admin 还能在 WebUI 查看最近 200 条邀请的有效、已使用、已过期或已撤销状态，并撤销尚未使用的邀请。邀请 token 只在创建时显示一次；状态列表只使用独立随机 ID 和审计时间，不返回 token 或 token 哈希。
 

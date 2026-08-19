@@ -287,6 +287,59 @@ describe("Squad host health", () => {
     expect(leaveOrganization).toHaveBeenCalledWith(organizationId);
   });
 
+  it("proposes, accepts, and declines ownership transfers through the local API", async () => {
+    const organizationId = "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa";
+    const transferId = "bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb";
+    const targetMembershipId = "cccccccc-cccc-4ccc-8ccc-cccccccccccc";
+    const proposeOrganizationOwnershipTransfer = vi.fn(async () => undefined);
+    const acceptOrganizationOwnershipTransfer = vi.fn(async () => undefined);
+    const declineOrganizationOwnershipTransfer = vi.fn(async () => undefined);
+    const squad = {
+      proposeOrganizationOwnershipTransfer,
+      acceptOrganizationOwnershipTransfer,
+      declineOrganizationOwnershipTransfer,
+    } as unknown as SquadService;
+    const server = createServer(createHttpHandler(squad));
+    servers.push(server);
+    await new Promise<void>((resolve) =>
+      server.listen(0, "127.0.0.1", resolve),
+    );
+    const address = server.address() as AddressInfo;
+    const base = `http://127.0.0.1:${address.port}/squad/v1/local/organizations/${organizationId}/owner-transfers`;
+
+    const proposed = await fetch(base, {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({ targetMembershipId, expiresInMinutes: 60 }),
+    });
+    expect(proposed.status).toBe(202);
+    expect(proposeOrganizationOwnershipTransfer).toHaveBeenCalledWith(
+      organizationId,
+      targetMembershipId,
+      60,
+    );
+
+    const accepted = await fetch(`${base}/${transferId}/accept`, {
+      method: "POST",
+      body: "{}",
+    });
+    expect(accepted.status).toBe(200);
+    expect(acceptOrganizationOwnershipTransfer).toHaveBeenCalledWith(
+      organizationId,
+      transferId,
+    );
+
+    const declined = await fetch(`${base}/${transferId}/decline`, {
+      method: "POST",
+      body: "{}",
+    });
+    expect(declined.status).toBe(200);
+    expect(declineOrganizationOwnershipTransfer).toHaveBeenCalledWith(
+      organizationId,
+      transferId,
+    );
+  });
+
   it("validates and manages local automation rules", async () => {
     const created = {
       id: "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa",

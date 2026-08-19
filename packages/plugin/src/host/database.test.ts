@@ -79,7 +79,15 @@ describe("SquadDatabase", () => {
     const schema = migrated
       .prepare("SELECT version FROM schema_meta WHERE singleton = 1")
       .get();
-    expect(schema?.version).toBe(9);
+    expect(schema?.version).toBe(10);
+    const organizationColumns = migrated
+      .prepare("PRAGMA table_info(organizations)")
+      .all() as Array<{ name?: string }>;
+    expect(
+      organizationColumns.some(
+        (column) => column.name === "pending_owner_transfer_json",
+      ),
+    ).toBe(true);
     migrated.close();
   });
 

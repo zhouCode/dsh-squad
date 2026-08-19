@@ -15,26 +15,36 @@ import {
   envelopePayloadBytes,
   envelopeSchema,
   nodeIdSchema,
+  signatureSchema,
+  timestampSchema,
   type Envelope,
 } from "../shared/contracts.ts";
 import {
   organizationDirectoryBundleSchema,
+  organizationDirectoryEventSchema,
   organizationDocumentSchema,
   organizationIdFromInvitation,
   organizationInvitation,
   organizationInvitationViewSchema,
   organizationJoinRequestSchema,
   organizationMembershipCertificateSchema,
+  organizationOwnershipTransferEventSchema,
+  organizationOwnershipTransferProposalSchema,
+  type OrganizationDirectoryEvent,
   unsignedOrganizationJoinRequest,
   type OrganizationDirectoryBundle,
   type OrganizationDocument,
   type OrganizationJoinRequest,
   type OrganizationInvitationView,
   type OrganizationMembershipCertificate,
+  type OrganizationOwnershipTransferEvent,
+  type OrganizationOwnershipTransferProposal,
 } from "../shared/organizations.ts";
 import { nodeIdFromPublicKey, verifySignature } from "./identity.ts";
 import {
+  applyOrganizationDirectoryEvent,
   applyOrganizationCertificate,
+  verifyOrganizationOwnershipTransferProposal,
   verifyOrganizationDirectory,
   verifyOrganizationDocument,
 } from "./organization.ts";
@@ -70,6 +80,15 @@ const approveJoinRequestSchema = z.strictObject({
 
 const updateMemberCertificateSchema = z.strictObject({
   certificate: organizationMembershipCertificateSchema,
+});
+
+const proposeOwnershipTransferSchema = z.strictObject({
+  proposal: organizationOwnershipTransferProposalSchema,
+});
+
+const acceptOwnershipTransferSchema = z.strictObject({
+  acceptedAt: timestampSchema,
+  acceptanceSignature: signatureSchema,
 });
 
 const createOrganizationInvitationSchema = z.strictObject({
@@ -281,6 +300,21 @@ export class RelayServer {
         FOREIGN KEY(organization_id) REFERENCES relay_organizations(organization_id) ON DELETE CASCADE,
         FOREIGN KEY(node_id) REFERENCES relay_nodes(node_id)
       );
+
+      CREATE TABLE IF NOT EXISTS relay_organization_owner_transfers (
+        organization_id TEXT NOT NULL,
+        transfer_id TEXT NOT NULL,
+        proposal_json TEXT NOT NULL,
+        status TEXT NOT NULL CHECK (status IN ('PENDING', 'ACCEPTED', 'REJECTED', 'CANCELED', 'STALE')),
+        proposed_at TEXT NOT NULL,
+        expires_at TEXT NOT NULL,
+        resolved_at TEXT,
+        PRIMARY KEY(organization_id, transfer_id),
+        FOREIGN KEY(organization_id) REFERENCES relay_organizations(organization_id) ON DELETE CASCADE
+      );
+      CREATE UNIQUE INDEX IF NOT EXISTS relay_organization_owner_transfer_pending_idx
+        ON relay_organization_owner_transfers(organization_id)
+        WHERE status = 'PENDING';
     `);
     let version = Number(
       (
@@ -347,7 +381,11 @@ export class RelayServer {
       this.#db.exec("UPDATE schema_meta SET version = 4 WHERE singleton = 1");
       version = 4;
     }
-    if (version !== 4) {
+    if (version === 4) {
+      this.#db.exec("UPDATE schema_meta SET version = 5 WHERE singleton = 1");
+      version = 5;
+    }
+    if (version !== 5) {
       throw new Error(
         `unsupported Squad Relay database version ${String(version)}`,
       );
@@ -578,7 +616,7 @@ export class RelayServer {
   private organizationDirectory(organizationId: string): {
     document: OrganizationDocument;
     revision: number;
-    events: OrganizationMembershipCertificate[];
+    events: OrganizationDirectoryEvent[];
     members: Map<string, OrganizationMembershipCertificate>;
   } {
     const row = this.#db
@@ -597,7 +635,7 @@ export class RelayServer {
         )
         .all(organizationId) as SqlRow[]
     ).map((event) =>
-      organizationMembershipCertificateSchema.parse(
+      organizationDirectoryEventSchema.parse(
         JSON.parse(String(event.certificate_json)) as unknown,
       ),
     );
@@ -637,9 +675,257 @@ export class RelayServer {
     return member;
   }
 
+  private pendingOwnershipTransfer(
+    organizationId: string,
+    currentRevision: number,
+  ): OrganizationOwnershipTransferProposal | undefined {
+    const row = this.#db
+      .prepare(
+        "SELECT transfer_id, proposal_json, expires_at FROM relay_organization_owner_transfers WHERE organization_id = ? AND status = 'PENDING'",
+      )
+      .get(organizationId) as SqlRow | undefined;
+    if (row === undefined) return undefined;
+    const proposal = organizationOwnershipTransferProposalSchema.parse(
+      JSON.parse(String(row.proposal_json)) as unknown,
+    );
+    if (
+      Date.parse(String(row.expires_at)) <= Date.now() ||
+      proposal.organizationRevision !== currentRevision + 1
+    ) {
+      this.#db
+        .prepare(
+          "UPDATE relay_organization_owner_transfers SET status = 'STALE', resolved_at = ? WHERE organization_id = ? AND transfer_id = ? AND status = 'PENDING'",
+        )
+        .run(new Date().toISOString(), organizationId, String(row.transfer_id));
+      return undefined;
+    }
+    return proposal;
+  }
+
+  private proposeOwnershipTransfer(
+    organizationId: string,
+    value: unknown,
+    authenticatedNodeId: string,
+  ): { organizationId: string; transferId: string; status: "PENDING" } {
+    const { proposal } = proposeOwnershipTransferSchema.parse(value);
+    const directory = this.organizationDirectory(organizationId);
+    const owner = this.organizationMemberForNode(
+      directory,
+      authenticatedNodeId,
+    );
+    if (
+      owner === undefined ||
+      owner.status !== "ACTIVE" ||
+      owner.role !== "OWNER"
+    ) {
+      throw new HttpError(403, "ORGANIZATION_OWNER_REQUIRED");
+    }
+    if (
+      proposal.organizationId !== organizationId ||
+      proposal.previousOwnerCertificate.membershipId !== owner.membershipId
+    ) {
+      throw new HttpError(400, "OWNERSHIP_TRANSFER_MISMATCH");
+    }
+    const proposedAt = Date.parse(proposal.proposedAt);
+    const expiresAt = Date.parse(proposal.expiresAt);
+    if (
+      Math.abs(Date.now() - proposedAt) > 5 * 60_000 ||
+      expiresAt <= Date.now() ||
+      expiresAt - proposedAt > 7 * 24 * 60 * 60_000
+    ) {
+      throw new HttpError(400, "OWNERSHIP_TRANSFER_EXPIRY_INVALID");
+    }
+    try {
+      verifyOrganizationOwnershipTransferProposal(
+        directory.document,
+        directory.members,
+        directory.revision,
+        proposal,
+      );
+    } catch (error) {
+      throw new HttpError(
+        400,
+        "OWNERSHIP_TRANSFER_INVALID",
+        error instanceof Error ? error.message : String(error),
+      );
+    }
+    const existing = this.#db
+      .prepare(
+        "SELECT proposal_json, status FROM relay_organization_owner_transfers WHERE organization_id = ? AND transfer_id = ?",
+      )
+      .get(organizationId, proposal.transferId) as SqlRow | undefined;
+    if (existing !== undefined) {
+      if (
+        existing.status === "PENDING" &&
+        String(existing.proposal_json) === JSON.stringify(proposal)
+      ) {
+        return {
+          organizationId,
+          transferId: proposal.transferId,
+          status: "PENDING",
+        };
+      }
+      throw new HttpError(409, "OWNERSHIP_TRANSFER_CONFLICT");
+    }
+    if (this.pendingOwnershipTransfer(organizationId, directory.revision)) {
+      throw new HttpError(409, "OWNERSHIP_TRANSFER_ALREADY_PENDING");
+    }
+    this.#db
+      .prepare(
+        `
+        INSERT INTO relay_organization_owner_transfers(
+          organization_id, transfer_id, proposal_json, status,
+          proposed_at, expires_at
+        ) VALUES (?, ?, ?, 'PENDING', ?, ?)
+      `,
+      )
+      .run(
+        organizationId,
+        proposal.transferId,
+        JSON.stringify(proposal),
+        proposal.proposedAt,
+        proposal.expiresAt,
+      );
+    return {
+      organizationId,
+      transferId: proposal.transferId,
+      status: "PENDING",
+    };
+  }
+
+  private acceptOwnershipTransfer(
+    organizationId: string,
+    transferId: string,
+    value: unknown,
+    authenticatedNodeId: string,
+  ): { organizationId: string; transferId: string; revision: number } {
+    const acceptance = acceptOwnershipTransferSchema.parse(value);
+    const row = this.#db
+      .prepare(
+        "SELECT proposal_json, status FROM relay_organization_owner_transfers WHERE organization_id = ? AND transfer_id = ?",
+      )
+      .get(organizationId, transferId) as SqlRow | undefined;
+    if (row === undefined) {
+      throw new HttpError(404, "OWNERSHIP_TRANSFER_NOT_FOUND");
+    }
+    if (row.status !== "PENDING") {
+      throw new HttpError(409, "OWNERSHIP_TRANSFER_ALREADY_RESOLVED");
+    }
+    const proposal = organizationOwnershipTransferProposalSchema.parse(
+      JSON.parse(String(row.proposal_json)) as unknown,
+    );
+    if (
+      proposal.newOwnerCertificate.nodeId !== authenticatedNodeId ||
+      proposal.transferId !== transferId
+    ) {
+      throw new HttpError(403, "OWNERSHIP_TRANSFER_TARGET_REQUIRED");
+    }
+    const directory = this.organizationDirectory(organizationId);
+    if (
+      proposal.organizationRevision !== directory.revision + 1 ||
+      Date.parse(proposal.expiresAt) <= Date.now()
+    ) {
+      this.#db
+        .prepare(
+          "UPDATE relay_organization_owner_transfers SET status = 'STALE', resolved_at = ? WHERE organization_id = ? AND transfer_id = ? AND status = 'PENDING'",
+        )
+        .run(new Date().toISOString(), organizationId, transferId);
+      throw new HttpError(409, "OWNERSHIP_TRANSFER_STALE");
+    }
+    if (
+      Math.abs(Date.now() - Date.parse(acceptance.acceptedAt)) > 5 * 60_000 ||
+      Date.parse(acceptance.acceptedAt) > Date.parse(proposal.expiresAt)
+    ) {
+      throw new HttpError(400, "OWNERSHIP_TRANSFER_ACCEPTANCE_EXPIRED");
+    }
+    const event: OrganizationOwnershipTransferEvent =
+      organizationOwnershipTransferEventSchema.parse({
+        ...proposal,
+        ...acceptance,
+      });
+    try {
+      applyOrganizationDirectoryEvent(
+        directory.document,
+        directory.members,
+        directory.revision,
+        event,
+      );
+    } catch (error) {
+      throw new HttpError(
+        400,
+        "OWNERSHIP_TRANSFER_INVALID",
+        error instanceof Error ? error.message : String(error),
+      );
+    }
+    this.#db.exec("BEGIN IMMEDIATE");
+    try {
+      this.insertOrganizationEventUnsafe(event);
+      const resolved = this.#db
+        .prepare(
+          "UPDATE relay_organization_owner_transfers SET status = 'ACCEPTED', resolved_at = ? WHERE organization_id = ? AND transfer_id = ? AND status = 'PENDING'",
+        )
+        .run(new Date().toISOString(), organizationId, transferId);
+      if (resolved.changes !== 1) {
+        throw new HttpError(409, "OWNERSHIP_TRANSFER_ALREADY_RESOLVED");
+      }
+      this.#db.exec("COMMIT");
+    } catch (error) {
+      this.#db.exec("ROLLBACK");
+      throw error;
+    }
+    return {
+      organizationId,
+      transferId,
+      revision: event.organizationRevision,
+    };
+  }
+
+  private declineOwnershipTransfer(
+    organizationId: string,
+    transferId: string,
+    authenticatedNodeId: string,
+  ): {
+    organizationId: string;
+    transferId: string;
+    status: "CANCELED" | "REJECTED";
+  } {
+    const row = this.#db
+      .prepare(
+        "SELECT proposal_json, status FROM relay_organization_owner_transfers WHERE organization_id = ? AND transfer_id = ?",
+      )
+      .get(organizationId, transferId) as SqlRow | undefined;
+    if (row === undefined) {
+      throw new HttpError(404, "OWNERSHIP_TRANSFER_NOT_FOUND");
+    }
+    if (row.status !== "PENDING") {
+      throw new HttpError(409, "OWNERSHIP_TRANSFER_ALREADY_RESOLVED");
+    }
+    const proposal = organizationOwnershipTransferProposalSchema.parse(
+      JSON.parse(String(row.proposal_json)) as unknown,
+    );
+    const status =
+      proposal.previousOwnerCertificate.nodeId === authenticatedNodeId
+        ? "CANCELED"
+        : proposal.newOwnerCertificate.nodeId === authenticatedNodeId
+          ? "REJECTED"
+          : undefined;
+    if (status === undefined) {
+      throw new HttpError(403, "OWNERSHIP_TRANSFER_PARTICIPANT_REQUIRED");
+    }
+    this.#db
+      .prepare(
+        "UPDATE relay_organization_owner_transfers SET status = ?, resolved_at = ? WHERE organization_id = ? AND transfer_id = ? AND status = 'PENDING'",
+      )
+      .run(status, new Date().toISOString(), organizationId, transferId);
+    return { organizationId, transferId, status };
+  }
+
   private insertOrganizationEventUnsafe(
-    certificate: OrganizationMembershipCertificate,
+    event: OrganizationDirectoryEvent,
   ): void {
+    const eventMember =
+      "transferId" in event ? event.newOwnerCertificate : event;
+    const issuedAt = "transferId" in event ? event.acceptedAt : event.issuedAt;
     this.#db
       .prepare(
         `
@@ -650,17 +936,16 @@ export class RelayServer {
       `,
       )
       .run(
-        certificate.organizationId,
-        certificate.organizationRevision,
-        certificate.membershipId,
-        certificate.memberRevision,
-        certificate.nodeId,
-        JSON.stringify(certificate),
-        certificate.issuedAt,
+        event.organizationId,
+        event.organizationRevision,
+        eventMember.membershipId,
+        eventMember.memberRevision,
+        eventMember.nodeId,
+        JSON.stringify(event),
+        issuedAt,
       );
-    this.#db
-      .prepare(
-        `
+    const upsertMember = this.#db.prepare(
+      `
         INSERT INTO relay_organization_members(
           organization_id, membership_id, node_id, display_name, public_key,
           role, status, organization_revision, member_revision, issued_at
@@ -673,8 +958,13 @@ export class RelayServer {
           member_revision = excluded.member_revision,
           issued_at = excluded.issued_at
       `,
-      )
-      .run(
+    );
+    const members =
+      "transferId" in event
+        ? [event.previousOwnerCertificate, event.newOwnerCertificate]
+        : [event];
+    for (const certificate of members) {
+      upsertMember.run(
         certificate.organizationId,
         certificate.membershipId,
         certificate.nodeId,
@@ -686,15 +976,34 @@ export class RelayServer {
         certificate.memberRevision,
         certificate.issuedAt,
       );
+    }
     this.#db
       .prepare(
         "UPDATE relay_organizations SET revision = ?, updated_at = ? WHERE organization_id = ?",
       )
       .run(
-        certificate.organizationRevision,
+        event.organizationRevision,
         new Date().toISOString(),
-        certificate.organizationId,
+        event.organizationId,
       );
+    if ("transferId" in event) {
+      this.#db
+        .prepare(
+          "UPDATE relay_organizations SET owner_membership_id = ? WHERE organization_id = ?",
+        )
+        .run(event.newOwnerCertificate.membershipId, event.organizationId);
+      this.#db
+        .prepare(
+          "UPDATE relay_organization_owner_transfers SET status = 'STALE', resolved_at = ? WHERE organization_id = ? AND status = 'PENDING' AND transfer_id <> ?",
+        )
+        .run(new Date().toISOString(), event.organizationId, event.transferId);
+    } else {
+      this.#db
+        .prepare(
+          "UPDATE relay_organization_owner_transfers SET status = 'STALE', resolved_at = ? WHERE organization_id = ? AND status = 'PENDING'",
+        )
+        .run(new Date().toISOString(), event.organizationId);
+    }
   }
 
   private createOrganization(
@@ -807,12 +1116,27 @@ export class RelayServer {
           : selfMember.status === "ACTIVE"
             ? "ACTIVE"
             : "DISABLED";
+      const pendingOwnerTransfer =
+        selfMember?.status === "ACTIVE"
+          ? this.pendingOwnershipTransfer(organizationId, directory.revision)
+          : undefined;
+      const relevantOwnerTransfer =
+        pendingOwnerTransfer !== undefined &&
+        [
+          pendingOwnerTransfer.previousOwnerCertificate.membershipId,
+          pendingOwnerTransfer.newOwnerCertificate.membershipId,
+        ].includes(selfMember?.membershipId ?? "")
+          ? pendingOwnerTransfer
+          : undefined;
       return organizationDirectoryBundleSchema.parse({
         document: directory.document,
         revision: directory.revision,
         events: directory.events,
         selfStatus,
         pendingJoinRequests,
+        ...(relevantOwnerTransfer === undefined
+          ? {}
+          : { pendingOwnerTransfer: relevantOwnerTransfer }),
       });
     });
   }
@@ -1699,6 +2023,71 @@ export class RelayServer {
           this.rejectOrganizationJoin(
             rejectOrganizationJoinRoute[1],
             rejectOrganizationJoinRoute[2],
+            auth.nodeId,
+          ),
+        );
+        return true;
+      }
+      const ownershipTransferCollectionRoute =
+        /^\/squad\/v1\/organizations\/([0-9a-f-]{36})\/owner-transfers$/u.exec(
+          url.pathname,
+        );
+      if (
+        req.method === "POST" &&
+        ownershipTransferCollectionRoute?.[1] !== undefined
+      ) {
+        const body = await readBody(req, 128 * 1024);
+        const auth = this.authenticate(req, path, body);
+        reply(
+          res,
+          202,
+          this.proposeOwnershipTransfer(
+            ownershipTransferCollectionRoute[1],
+            jsonBody(body),
+            auth.nodeId,
+          ),
+        );
+        return true;
+      }
+      const acceptOwnershipTransferRoute =
+        /^\/squad\/v1\/organizations\/([0-9a-f-]{36})\/owner-transfers\/([0-9a-f-]{36})\/accept$/u.exec(
+          url.pathname,
+        );
+      if (
+        req.method === "POST" &&
+        acceptOwnershipTransferRoute?.[1] !== undefined &&
+        acceptOwnershipTransferRoute[2] !== undefined
+      ) {
+        const body = await readBody(req, 16 * 1024);
+        const auth = this.authenticate(req, path, body);
+        reply(
+          res,
+          200,
+          this.acceptOwnershipTransfer(
+            acceptOwnershipTransferRoute[1],
+            acceptOwnershipTransferRoute[2],
+            jsonBody(body),
+            auth.nodeId,
+          ),
+        );
+        return true;
+      }
+      const declineOwnershipTransferRoute =
+        /^\/squad\/v1\/organizations\/([0-9a-f-]{36})\/owner-transfers\/([0-9a-f-]{36})$/u.exec(
+          url.pathname,
+        );
+      if (
+        req.method === "DELETE" &&
+        declineOwnershipTransferRoute?.[1] !== undefined &&
+        declineOwnershipTransferRoute[2] !== undefined
+      ) {
+        const auth = this.authenticate(req, path, Buffer.alloc(0));
+        reply(
+          res,
+          200,
+          this.declineOwnershipTransfer(
+            declineOwnershipTransferRoute[1],
+            declineOwnershipTransferRoute[2],
             auth.nodeId,
           ),
         );

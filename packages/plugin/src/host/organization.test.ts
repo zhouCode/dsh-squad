@@ -4,8 +4,10 @@ import { join } from "node:path";
 import { randomUUID } from "node:crypto";
 import { describe, expect, it } from "vitest";
 import {
+  organizationOwnershipTransferAcceptance,
   unsignedOrganizationDocumentSchema,
   unsignedOrganizationMembershipCertificateSchema,
+  unsignedOrganizationOwnershipTransferProposalSchema,
 } from "../shared/organizations.ts";
 import { NodeIdentity } from "./identity.ts";
 import {
@@ -138,20 +140,89 @@ describe("organization signed directory", () => {
       ...leaveUnsigned,
       signature: member.sign(leaveUnsigned),
     };
+    const previousOwnerUnsigned =
+      unsignedOrganizationMembershipCertificateSchema.parse({
+        ...ownerUnsigned,
+        organizationRevision: 6,
+        memberRevision: 2,
+        role: "ADMIN",
+        issuer: {
+          kind: "MEMBER",
+          membershipId: ownerMembershipId,
+          nodeId: owner.nodeId,
+        },
+      });
+    const previousOwnerCertificate = {
+      ...previousOwnerUnsigned,
+      signature: owner.sign(previousOwnerUnsigned),
+    };
+    const newOwnerUnsigned =
+      unsignedOrganizationMembershipCertificateSchema.parse({
+        ...promoteUnsigned,
+        organizationRevision: 6,
+        memberRevision: 3,
+        role: "OWNER",
+        issuer: {
+          kind: "MEMBER",
+          membershipId: ownerMembershipId,
+          nodeId: owner.nodeId,
+        },
+      });
+    const newOwnerCertificate = {
+      ...newOwnerUnsigned,
+      signature: owner.sign(newOwnerUnsigned),
+    };
+    const transferUnsigned =
+      unsignedOrganizationOwnershipTransferProposalSchema.parse({
+        version: 1,
+        kind: "OWNER_TRANSFER",
+        transferId: randomUUID(),
+        organizationId,
+        organizationRevision: 6,
+        previousOwnerCertificate,
+        newOwnerCertificate,
+        proposedAt: now,
+        expiresAt: new Date(Date.parse(now) + 60_000).toISOString(),
+      });
+    const proposal = {
+      ...transferUnsigned,
+      proposerSignature: owner.sign(transferUnsigned),
+    };
+    const acceptedAt = new Date(Date.parse(now) + 1_000).toISOString();
+    const transfer = {
+      ...proposal,
+      acceptedAt,
+      acceptanceSignature: admin.sign(
+        organizationOwnershipTransferAcceptance(proposal, acceptedAt),
+      ),
+    };
     const verified = verifyOrganizationDirectory(document, [
       ownerCertificate,
       adminMember,
       promotedAdmin,
       memberCertificate,
       leftMember,
+      transfer,
     ]);
-    expect(verified.revision).toBe(5);
+    expect(verified.revision).toBe(6);
     expect(verified.members.get(promotedAdmin.membershipId)?.role).toBe(
-      "ADMIN",
+      "OWNER",
     );
+    expect(verified.members.get(ownerMembershipId)?.role).toBe("ADMIN");
     expect(verified.members.get(memberCertificate.membershipId)?.status).toBe(
       "DISABLED",
     );
+
+    expect(() =>
+      verifyOrganizationDirectory(document, [
+        ownerCertificate,
+        adminMember,
+        promotedAdmin,
+        memberCertificate,
+        leftMember,
+        { ...transfer, acceptanceSignature: owner.sign(transferUnsigned) },
+      ]),
+    ).toThrow("acceptance signature is invalid");
   });
 
   it("does not let an owner leave before ownership is transferred", () => {
@@ -216,7 +287,7 @@ describe("organization signed directory", () => {
 
     expect(() =>
       verifyOrganizationDirectory(document, [ownerCertificate, ownerLeave]),
-    ).toThrow("owner transfer is not supported");
+    ).toThrow("owner changes require an accepted ownership transfer event");
   });
 
   it("rejects an ordinary member issuing a directory event", () => {

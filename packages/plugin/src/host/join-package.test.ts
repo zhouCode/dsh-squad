@@ -136,6 +136,42 @@ describe("one-step team join package", () => {
         organization.organizationId,
       );
 
+      await alice.proposeOrganizationOwnershipTransfer(
+        organization.organizationId,
+        request.membershipId,
+        60,
+      );
+      const transferToBob = (await bob.relayClient?.organizations())?.[0]
+        ?.pendingOwnerTransfer;
+      if (transferToBob === undefined) {
+        throw new Error("missing transfer proposal for Bob");
+      }
+      await bob.acceptOrganizationOwnershipTransfer(
+        organization.organizationId,
+        transferToBob.transferId,
+      );
+      expect((await bob.listOrganizations())[0]?.role).toBe("OWNER");
+
+      const aliceMembershipId = organization.selfMembershipId;
+      if (aliceMembershipId === undefined) {
+        throw new Error("missing Alice membership");
+      }
+      await bob.proposeOrganizationOwnershipTransfer(
+        organization.organizationId,
+        aliceMembershipId,
+        60,
+      );
+      const transferToAlice = (await alice.relayClient?.organizations())?.[0]
+        ?.pendingOwnerTransfer;
+      if (transferToAlice === undefined) {
+        throw new Error("missing transfer proposal for Alice");
+      }
+      await alice.acceptOrganizationOwnershipTransfer(
+        organization.organizationId,
+        transferToAlice.transferId,
+      );
+      expect((await alice.listOrganizations())[0]?.role).toBe("OWNER");
+
       await bob.leaveOrganization(organization.organizationId);
       expect(bob.sessionOrganization("leave-session")).toBeUndefined();
       expect(bob.localState().organizations[0]).toMatchObject({

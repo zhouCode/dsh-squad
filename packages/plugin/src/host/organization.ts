@@ -19,13 +19,21 @@ import { dirname } from "node:path";
 import { z } from "zod";
 import { canonicalBytes } from "../shared/canonical.ts";
 import {
+  organizationDirectoryEventSchema,
   authorityIdSchema,
   organizationDocumentSchema,
   organizationMembershipCertificateSchema,
+  organizationOwnershipTransferAcceptance,
+  organizationOwnershipTransferEventSchema,
+  organizationOwnershipTransferProposalSchema,
   unsignedOrganizationDocument,
   unsignedOrganizationMembershipCertificate,
+  unsignedOrganizationOwnershipTransferProposal,
+  type OrganizationDirectoryEvent,
   type OrganizationDocument,
   type OrganizationMembershipCertificate,
+  type OrganizationOwnershipTransferEvent,
+  type OrganizationOwnershipTransferProposal,
 } from "../shared/organizations.ts";
 import { nodeIdFromPublicKey, verifySignature } from "./identity.ts";
 
@@ -243,7 +251,7 @@ export function applyOrganizationCertificate(
     if (issuer === undefined) throw new Error("missing certificate issuer");
     if (previous?.role === "OWNER" || certificate.role === "OWNER") {
       throw new Error(
-        "owner transfer is not supported by this directory version",
+        "owner changes require an accepted ownership transfer event",
       );
     }
     const selfDeparture =
@@ -273,26 +281,171 @@ export function applyOrganizationCertificate(
   members.set(certificate.membershipId, certificate);
 }
 
+export function verifyOrganizationOwnershipTransferProposal(
+  documentCandidate: OrganizationDocument,
+  members: Map<string, OrganizationMembershipCertificate>,
+  currentRevision: number,
+  candidate: OrganizationOwnershipTransferProposal,
+): OrganizationOwnershipTransferProposal {
+  const document = verifyOrganizationDocument(documentCandidate);
+  const proposal = organizationOwnershipTransferProposalSchema.parse(candidate);
+  if (proposal.organizationId !== document.organizationId) {
+    throw new Error("ownership transfer belongs to another organization");
+  }
+  if (proposal.organizationRevision !== currentRevision + 1) {
+    throw new Error("ownership transfer revision is not contiguous");
+  }
+  if (Date.parse(proposal.expiresAt) <= Date.parse(proposal.proposedAt)) {
+    throw new Error("ownership transfer expiry is invalid");
+  }
+  const activeOwners = [...members.values()].filter(
+    (member) => member.role === "OWNER" && member.status === "ACTIVE",
+  );
+  if (activeOwners.length !== 1) {
+    throw new Error("ownership transfer requires exactly one active owner");
+  }
+  const owner = activeOwners[0]!;
+  const previous = proposal.previousOwnerCertificate;
+  const next = proposal.newOwnerCertificate;
+  const target = members.get(next.membershipId);
+  if (
+    previous.membershipId !== owner.membershipId ||
+    target === undefined ||
+    target.membershipId === owner.membershipId ||
+    target.status !== "ACTIVE"
+  ) {
+    throw new Error("ownership transfer members do not match the directory");
+  }
+  for (const certificate of [previous, next]) {
+    if (
+      certificate.organizationId !== document.organizationId ||
+      certificate.organizationRevision !== proposal.organizationRevision ||
+      certificate.issuer.kind !== "MEMBER" ||
+      certificate.issuer.membershipId !== owner.membershipId ||
+      certificate.issuer.nodeId !== owner.nodeId
+    ) {
+      throw new Error("ownership transfer certificate issuer is mismatched");
+    }
+    if (nodeIdFromPublicKey(certificate.publicKey) !== certificate.nodeId) {
+      throw new Error("ownership transfer public key is mismatched");
+    }
+    verifyCertificateSignature(document, members, certificate);
+  }
+  if (
+    previous.memberRevision !== owner.memberRevision + 1 ||
+    previous.nodeId !== owner.nodeId ||
+    previous.publicKey !== owner.publicKey ||
+    previous.displayName !== owner.displayName ||
+    previous.role !== "ADMIN" ||
+    previous.status !== "ACTIVE"
+  ) {
+    throw new Error("previous owner transition is invalid");
+  }
+  if (
+    next.memberRevision !== target.memberRevision + 1 ||
+    next.nodeId !== target.nodeId ||
+    next.publicKey !== target.publicKey ||
+    next.displayName !== target.displayName ||
+    next.role !== "OWNER" ||
+    next.status !== "ACTIVE"
+  ) {
+    throw new Error("new owner transition is invalid");
+  }
+  if (
+    !verifySignature(
+      unsignedOrganizationOwnershipTransferProposal(proposal),
+      proposal.proposerSignature,
+      owner.publicKey,
+    )
+  ) {
+    throw new Error("ownership transfer proposal signature is invalid");
+  }
+  return proposal;
+}
+
+export function applyOrganizationOwnershipTransfer(
+  documentCandidate: OrganizationDocument,
+  members: Map<string, OrganizationMembershipCertificate>,
+  currentRevision: number,
+  candidate: OrganizationOwnershipTransferEvent,
+): void {
+  const event = organizationOwnershipTransferEventSchema.parse(candidate);
+  const {
+    acceptedAt: _acceptedAt,
+    acceptanceSignature: _acceptanceSignature,
+    ...proposalCandidate
+  } = event;
+  const proposal =
+    organizationOwnershipTransferProposalSchema.parse(proposalCandidate);
+  verifyOrganizationOwnershipTransferProposal(
+    documentCandidate,
+    members,
+    currentRevision,
+    proposal,
+  );
+  if (
+    Date.parse(event.acceptedAt) < Date.parse(event.proposedAt) ||
+    Date.parse(event.acceptedAt) > Date.parse(event.expiresAt)
+  ) {
+    throw new Error("ownership transfer acceptance time is invalid");
+  }
+  const target = members.get(event.newOwnerCertificate.membershipId);
+  if (
+    target === undefined ||
+    !verifySignature(
+      organizationOwnershipTransferAcceptance(proposal, event.acceptedAt),
+      event.acceptanceSignature,
+      target.publicKey,
+    )
+  ) {
+    throw new Error("ownership transfer acceptance signature is invalid");
+  }
+  members.set(
+    event.previousOwnerCertificate.membershipId,
+    event.previousOwnerCertificate,
+  );
+  members.set(
+    event.newOwnerCertificate.membershipId,
+    event.newOwnerCertificate,
+  );
+}
+
+export function applyOrganizationDirectoryEvent(
+  document: OrganizationDocument,
+  members: Map<string, OrganizationMembershipCertificate>,
+  currentRevision: number,
+  candidate: OrganizationDirectoryEvent,
+): void {
+  const event = organizationDirectoryEventSchema.parse(candidate);
+  if ("transferId" in event) {
+    applyOrganizationOwnershipTransfer(
+      document,
+      members,
+      currentRevision,
+      event,
+    );
+    return;
+  }
+  applyOrganizationCertificate(document, members, currentRevision, event);
+}
+
 export function verifyOrganizationDirectory(
   documentCandidate: OrganizationDocument,
-  eventCandidates: OrganizationMembershipCertificate[],
+  eventCandidates: OrganizationDirectoryEvent[],
 ): VerifiedOrganizationDirectory {
   const document = verifyOrganizationDocument(documentCandidate);
   const members = new Map<string, OrganizationMembershipCertificate>();
   let revision = 0;
   for (const event of eventCandidates) {
-    applyOrganizationCertificate(document, members, revision, event);
+    applyOrganizationDirectoryEvent(document, members, revision, event);
     revision = event.organizationRevision;
   }
   if (revision === 0) throw new Error("organization directory has no owner");
   const owners = [...members.values()].filter(
     (member) => member.role === "OWNER" && member.status === "ACTIVE",
   );
-  if (
-    owners.length !== 1 ||
-    owners[0]?.membershipId !== document.ownerMembershipId
-  ) {
-    throw new Error("organization directory must contain its active owner");
+  if (owners.length !== 1) {
+    throw new Error("organization directory must contain one active owner");
   }
   return { document, revision, members };
 }

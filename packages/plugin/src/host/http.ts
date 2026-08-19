@@ -486,6 +486,50 @@ export function createHttpHandler(squad: SquadService) {
         reply(res, 200, { ok: true });
         return;
       }
+      const ownershipTransferCollection =
+        /^\/squad\/v1\/local\/organizations\/([0-9a-f-]{36})\/owner-transfers$/u.exec(
+          url.pathname,
+        );
+      if (
+        req.method === "POST" &&
+        ownershipTransferCollection?.[1] !== undefined
+      ) {
+        const body = (await readJson(req, 8 * 1024)) as Record<string, unknown>;
+        await squad.proposeOrganizationOwnershipTransfer(
+          ownershipTransferCollection[1],
+          String(body.targetMembershipId ?? ""),
+          body.expiresInMinutes === undefined
+            ? undefined
+            : Number(body.expiresInMinutes),
+        );
+        reply(res, 202, { ok: true });
+        return;
+      }
+      const ownershipTransferAction =
+        /^\/squad\/v1\/local\/organizations\/([0-9a-f-]{36})\/owner-transfers\/([0-9a-f-]{36})\/(accept|decline)$/u.exec(
+          url.pathname,
+        );
+      if (
+        req.method === "POST" &&
+        ownershipTransferAction?.[1] !== undefined &&
+        ownershipTransferAction[2] !== undefined &&
+        ownershipTransferAction[3] !== undefined
+      ) {
+        await readJson(req, 1_024);
+        if (ownershipTransferAction[3] === "accept") {
+          await squad.acceptOrganizationOwnershipTransfer(
+            ownershipTransferAction[1],
+            ownershipTransferAction[2],
+          );
+        } else {
+          await squad.declineOrganizationOwnershipTransfer(
+            ownershipTransferAction[1],
+            ownershipTransferAction[2],
+          );
+        }
+        reply(res, 200, { ok: true });
+        return;
+      }
       const organizationMemberAction =
         /^\/squad\/v1\/local\/organizations\/([0-9a-f-]{36})\/members\/([0-9a-f-]{36})\/(role|status|policy)$/u.exec(
           url.pathname,

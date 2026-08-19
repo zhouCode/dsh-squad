@@ -85,6 +85,57 @@ export type OrganizationMembershipCertificate = z.infer<
   typeof organizationMembershipCertificateSchema
 >;
 
+export const unsignedOrganizationOwnershipTransferProposalSchema =
+  z.strictObject({
+    version: z.literal(ORGANIZATION_DIRECTORY_VERSION),
+    kind: z.literal("OWNER_TRANSFER"),
+    transferId: idSchema,
+    organizationId: idSchema,
+    organizationRevision: z.number().int().positive(),
+    previousOwnerCertificate: organizationMembershipCertificateSchema,
+    newOwnerCertificate: organizationMembershipCertificateSchema,
+    proposedAt: timestampSchema,
+    expiresAt: timestampSchema,
+  });
+export type UnsignedOrganizationOwnershipTransferProposal = z.infer<
+  typeof unsignedOrganizationOwnershipTransferProposalSchema
+>;
+
+export const organizationOwnershipTransferProposalSchema =
+  unsignedOrganizationOwnershipTransferProposalSchema
+    .extend({ proposerSignature: signatureSchema })
+    .strict();
+export type OrganizationOwnershipTransferProposal = z.infer<
+  typeof organizationOwnershipTransferProposalSchema
+>;
+
+export const organizationOwnershipTransferAcceptanceSchema = z.strictObject({
+  proposal: organizationOwnershipTransferProposalSchema,
+  acceptedAt: timestampSchema,
+});
+export type OrganizationOwnershipTransferAcceptance = z.infer<
+  typeof organizationOwnershipTransferAcceptanceSchema
+>;
+
+export const organizationOwnershipTransferEventSchema =
+  organizationOwnershipTransferProposalSchema
+    .extend({
+      acceptedAt: timestampSchema,
+      acceptanceSignature: signatureSchema,
+    })
+    .strict();
+export type OrganizationOwnershipTransferEvent = z.infer<
+  typeof organizationOwnershipTransferEventSchema
+>;
+
+export const organizationDirectoryEventSchema = z.union([
+  organizationOwnershipTransferEventSchema,
+  organizationMembershipCertificateSchema,
+]);
+export type OrganizationDirectoryEvent = z.infer<
+  typeof organizationDirectoryEventSchema
+>;
+
 export const unsignedOrganizationJoinRequestSchema = z.strictObject({
   version: z.literal(ORGANIZATION_DIRECTORY_VERSION),
   requestId: idSchema,
@@ -143,9 +194,10 @@ export type OrganizationInvitationView = z.infer<
 export const organizationDirectoryBundleSchema = z.strictObject({
   document: organizationDocumentSchema,
   revision: z.number().int().positive(),
-  events: z.array(organizationMembershipCertificateSchema).min(1).max(10_000),
+  events: z.array(organizationDirectoryEventSchema).min(1).max(10_000),
   selfStatus: z.enum(["ACTIVE", "PENDING", "DISABLED"]),
   pendingJoinRequests: z.array(organizationJoinRequestSchema).max(10_000),
+  pendingOwnerTransfer: organizationOwnershipTransferProposalSchema.optional(),
 });
 export type OrganizationDirectoryBundle = z.infer<
   typeof organizationDirectoryBundleSchema
@@ -176,6 +228,7 @@ export interface OrganizationView {
   createdAt: string;
   members: OrganizationMemberView[];
   pendingJoinRequests: OrganizationJoinRequest[];
+  pendingOwnerTransfer?: OrganizationOwnershipTransferProposal;
 }
 
 export const defaultOrganizationPeerPolicy: PeerPolicy = peerPolicySchema.parse(
@@ -201,6 +254,23 @@ export function unsignedOrganizationMembershipCertificate(
 ): UnsignedOrganizationMembershipCertificate {
   const { signature: _signature, ...unsigned } = certificate;
   return unsigned;
+}
+
+export function unsignedOrganizationOwnershipTransferProposal(
+  proposal: OrganizationOwnershipTransferProposal,
+): UnsignedOrganizationOwnershipTransferProposal {
+  const { proposerSignature: _signature, ...unsigned } = proposal;
+  return unsigned;
+}
+
+export function organizationOwnershipTransferAcceptance(
+  proposal: OrganizationOwnershipTransferProposal,
+  acceptedAt: string,
+): OrganizationOwnershipTransferAcceptance {
+  return organizationOwnershipTransferAcceptanceSchema.parse({
+    proposal,
+    acceptedAt,
+  });
 }
 
 export function unsignedOrganizationJoinRequest(

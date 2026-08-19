@@ -2032,6 +2032,89 @@ function OrganizationCenter({
     );
   };
 
+  const proposeOwnershipTransfer = async (
+    organization: OrganizationView,
+    target: OrganizationView["members"][number],
+  ) => {
+    if (
+      !(await confirm({
+        title: t("confirm.transferOwnershipTitle"),
+        message: t("confirm.transferOwnership", {
+          organization: organization.name,
+          name: target.displayName,
+        }),
+        confirmLabel: t("action.transferOwnership"),
+        danger: true,
+      }))
+    ) {
+      return;
+    }
+    await run(`owner-transfer:${organization.organizationId}`, () =>
+      api(`/organizations/${organization.organizationId}/owner-transfers`, {
+        method: "POST",
+        body: JSON.stringify({ targetMembershipId: target.membershipId }),
+      }),
+    );
+  };
+
+  const acceptOwnershipTransfer = async (organization: OrganizationView) => {
+    const transfer = organization.pendingOwnerTransfer;
+    if (transfer === undefined) return;
+    if (
+      !(await confirm({
+        title: t("confirm.acceptOwnershipTitle"),
+        message: t("confirm.acceptOwnership", {
+          organization: organization.name,
+        }),
+        confirmLabel: t("action.acceptOwnership"),
+        danger: true,
+      }))
+    ) {
+      return;
+    }
+    await run(`owner-transfer:${transfer.transferId}`, () =>
+      api(
+        `/organizations/${organization.organizationId}/owner-transfers/${transfer.transferId}/accept`,
+        { method: "POST", body: "{}" },
+      ),
+    );
+  };
+
+  const declineOwnershipTransfer = async (
+    organization: OrganizationView,
+    cancel: boolean,
+  ) => {
+    const transfer = organization.pendingOwnerTransfer;
+    if (transfer === undefined) return;
+    if (
+      !(await confirm({
+        title: t(
+          cancel
+            ? "confirm.cancelOwnershipTransferTitle"
+            : "confirm.declineOwnershipTitle",
+        ),
+        message: t(
+          cancel
+            ? "confirm.cancelOwnershipTransfer"
+            : "confirm.declineOwnership",
+          { organization: organization.name },
+        ),
+        confirmLabel: t(
+          cancel ? "action.cancelOwnershipTransfer" : "action.declineOwnership",
+        ),
+        danger: true,
+      }))
+    ) {
+      return;
+    }
+    await run(`owner-transfer:${transfer.transferId}`, () =>
+      api(
+        `/organizations/${organization.organizationId}/owner-transfers/${transfer.transferId}/decline`,
+        { method: "POST", body: "{}" },
+      ),
+    );
+  };
+
   const changeMemberRole = async (
     organization: OrganizationView,
     member: OrganizationView["members"][number],
@@ -2200,6 +2283,23 @@ function OrganizationCenter({
           const canAdminister =
             organization.membershipStatus === "ACTIVE" &&
             (organization.role === "OWNER" || organization.role === "ADMIN");
+          const ownerTransfer = organization.pendingOwnerTransfer;
+          const previousOwner = organization.members.find(
+            (member) =>
+              member.membershipId ===
+              ownerTransfer?.previousOwnerCertificate.membershipId,
+          );
+          const proposedOwner = organization.members.find(
+            (member) =>
+              member.membershipId ===
+              ownerTransfer?.newOwnerCertificate.membershipId,
+          );
+          const transferTargets = organization.members.filter(
+            (member) =>
+              !member.isSelf &&
+              member.status === "ACTIVE" &&
+              member.role !== "OWNER",
+          );
           return (
             <article
               className="squad-organization-card"
@@ -2224,6 +2324,58 @@ function OrganizationCenter({
                   revision: organization.revision,
                 })}
               </p>
+              {ownerTransfer ? (
+                <section className="squad-owner-transfer">
+                  <h3>{t("organizations.pendingOwnershipTransfer")}</h3>
+                  <p>
+                    {t("organizations.ownershipTransferRoute", {
+                      from:
+                        previousOwner?.displayName ??
+                        ownerTransfer.previousOwnerCertificate.membershipId,
+                      to:
+                        proposedOwner?.displayName ??
+                        ownerTransfer.newOwnerCertificate.membershipId,
+                    })}
+                  </p>
+                  <p className="squad-muted">
+                    {t("organizations.ownershipTransferExpires", {
+                      time: new Date(ownerTransfer.expiresAt).toLocaleString(),
+                    })}
+                  </p>
+                  {proposedOwner?.isSelf ? (
+                    <div className="squad-join-actions">
+                      <button
+                        disabled={busy !== undefined}
+                        onClick={() =>
+                          void acceptOwnershipTransfer(organization)
+                        }
+                      >
+                        {t("action.acceptOwnership")}
+                      </button>
+                      <button
+                        className="squad-danger"
+                        disabled={busy !== undefined}
+                        onClick={() =>
+                          void declineOwnershipTransfer(organization, false)
+                        }
+                      >
+                        {t("action.declineOwnership")}
+                      </button>
+                    </div>
+                  ) : null}
+                  {previousOwner?.isSelf ? (
+                    <button
+                      className="squad-danger"
+                      disabled={busy !== undefined}
+                      onClick={() =>
+                        void declineOwnershipTransfer(organization, true)
+                      }
+                    >
+                      {t("action.cancelOwnershipTransfer")}
+                    </button>
+                  ) : null}
+                </section>
+              ) : null}
               {canAdminister ? (
                 <>
                   <div className="squad-organization-admin">
@@ -2491,9 +2643,55 @@ function OrganizationCenter({
               {organization.membershipStatus === "ACTIVE" ? (
                 <div className="squad-organization-lifecycle">
                   {organization.role === "OWNER" ? (
-                    <p className="squad-muted">
-                      {t("organizations.ownerLeaveHint")}
-                    </p>
+                    <div className="squad-owner-transfer-create">
+                      <p className="squad-muted">
+                        {t("organizations.ownerLeaveHint")}
+                      </p>
+                      {ownerTransfer === undefined &&
+                      transferTargets.length > 0 ? (
+                        <div>
+                          <label>
+                            {t("organizations.newOwner")}
+                            <select
+                              id={`owner-target-${organization.organizationId}`}
+                              defaultValue={transferTargets[0]?.membershipId}
+                              disabled={busy !== undefined}
+                            >
+                              {transferTargets.map((member) => (
+                                <option
+                                  key={member.membershipId}
+                                  value={member.membershipId}
+                                >
+                                  {member.displayName} ·{" "}
+                                  {formatOrganizationRole(t, member.role)}
+                                </option>
+                              ))}
+                            </select>
+                          </label>
+                          <button
+                            className="squad-danger"
+                            disabled={busy !== undefined}
+                            onClick={() => {
+                              const input = document.getElementById(
+                                `owner-target-${organization.organizationId}`,
+                              ) as HTMLSelectElement | null;
+                              const target = transferTargets.find(
+                                (member) =>
+                                  member.membershipId === input?.value,
+                              );
+                              if (target) {
+                                void proposeOwnershipTransfer(
+                                  organization,
+                                  target,
+                                );
+                              }
+                            }}
+                          >
+                            {t("action.transferOwnership")}
+                          </button>
+                        </div>
+                      ) : null}
+                    </div>
                   ) : (
                     <button
                       className="squad-danger"
@@ -4402,7 +4600,7 @@ const css = `
 @media(max-width:700px){.squad-panel{inset:0;width:auto;border-radius:0}.squad-content{grid-template-columns:1fr}.squad-list{max-height:180px;border-right:0;border-bottom:1px solid var(--dsw-alias-border-l2,#ddd)}.squad-peer{grid-template-columns:1fr}.squad-panel-head{padding:16px}.squad-content main,.squad-settings{padding:16px}}
 .squad-context-bar{display:grid;grid-template-columns:minmax(150px,1fr) minmax(150px,1fr) minmax(220px,1.4fr);gap:14px;margin:0 22px 12px;padding:12px 14px;border:1px solid var(--dsw-alias-border-l2,#ddd);border-radius:12px;background:var(--dsw-alias-interactive-bg-hover,#f6f7f9)}.squad-context-bar>div,.squad-context-bar>label{display:grid;align-content:start;gap:4px;min-width:0;margin:0;font-size:12px}.squad-context-bar span,.squad-context-bar small{color:var(--dsw-alias-label-secondary,#666)}.squad-context-bar code{overflow:hidden;text-overflow:ellipsis;white-space:nowrap}.squad-context-bar select,.squad-organizations input,.squad-organizations textarea,.squad-organizations select,.squad-peer select{box-sizing:border-box;width:100%;border:1px solid var(--dsw-alias-border-l2,#ccc);border-radius:9px;background:var(--dsw-specific-dialog-fill,#fff);color:inherit;padding:8px;font:inherit}.squad-organizations{overflow:auto;padding:20px 24px;flex:1}.squad-organizations button{border:0;border-radius:9px;padding:8px 12px;background:#315ee8;color:#fff;cursor:pointer}.squad-organizations button:disabled{opacity:.5}.squad-organizations .squad-danger{background:#b13c35}.squad-organizations .squad-secondary{border:1px solid var(--dsw-alias-border-l2,#ccc);background:transparent;color:inherit}.squad-organization-intro{display:grid;grid-template-columns:1fr 1.35fr;gap:22px}.squad-organization-intro h2,.squad-organization-card h2{margin:0}.squad-organization-forms{display:grid;grid-template-columns:1fr 1fr;gap:12px}.squad-organization-forms form{border:1px solid var(--dsw-alias-border-l2,#ddd);border-radius:12px;padding:12px}.squad-organization-forms h3{margin:0 0 8px;font-size:13px}.squad-organizations label{display:grid;gap:5px;margin:8px 0;font-size:12px}.squad-organization-list{display:grid;gap:16px;margin-top:18px}.squad-organization-card{border:1px solid var(--dsw-alias-border-l2,#ddd);border-radius:14px;padding:16px}.squad-organization-card>header{display:flex;justify-content:space-between;gap:16px}.squad-organization-card code,.squad-invitation-result code,.squad-member code,.squad-join-request code{display:block;font-size:11px;overflow-wrap:anywhere}.squad-organization-badges{display:flex;align-items:flex-start;gap:6px}.squad-organization-badges span,.squad-member-role>span{font-size:11px;border-radius:999px;padding:4px 8px;background:var(--dsw-alias-interactive-bg-hover,#eee);white-space:nowrap}.squad-organization-admin{display:flex;align-items:end;gap:8px;margin:12px 0;flex-wrap:wrap}.squad-organization-admin label{margin:0;max-width:210px}.squad-join-request{display:flex;align-items:center;justify-content:space-between;gap:12px;padding:9px 0;border-bottom:1px solid var(--dsw-alias-border-l2,#ddd)}.squad-join-actions{display:flex;gap:7px;flex-wrap:wrap}.squad-member-list{display:grid;gap:8px}.squad-member{display:grid;grid-template-columns:minmax(170px,1.4fr) minmax(130px,.8fr) minmax(150px,1fr) auto;align-items:center;gap:10px;padding:10px;border-radius:10px;background:var(--dsw-alias-interactive-bg-hover,#f4f5f7)}.squad-member-role{display:flex;align-items:center;gap:6px}.squad-policy-control{margin:0!important}.squad-invitation-result{display:grid;gap:7px;margin-top:14px;padding:13px;border:1px solid #d59b1b;border-radius:12px;background:#fff8e5;color:#5d470a}.squad-notice{padding:10px 12px;border-radius:9px;background:#dff5e6;color:#176c35}.squad-warning{padding:10px 12px;border-radius:9px;background:#fff0c7;color:#755400;font-size:12px}
 .squad-invitation-history{margin:12px 0;border:1px solid var(--dsw-alias-border-l2,#ddd);border-radius:10px;padding:10px 12px}.squad-invitation-history>summary{cursor:pointer;font-size:13px;font-weight:600}.squad-invitation-list{display:grid;gap:8px}.squad-invitation-list>article{display:flex;align-items:center;justify-content:space-between;gap:12px;padding:10px;border-radius:9px;background:var(--dsw-alias-interactive-bg-hover,#f4f5f7)}.squad-invitation-list>article>div{display:grid;gap:3px;min-width:0}.squad-invitation-list span{font-size:11px;color:var(--dsw-alias-label-secondary,#666);overflow-wrap:anywhere}@media(max-width:700px){.squad-invitation-list>article{display:grid}}
-.squad-organization-lifecycle{display:flex;justify-content:flex-end;margin-top:16px;padding-top:14px;border-top:1px solid var(--dsw-alias-border-l2,#ddd)}.squad-organization-lifecycle p{margin:0}
+.squad-owner-transfer{display:grid;gap:8px;margin:12px 0;padding:13px;border:1px solid #d59b1b;border-radius:11px;background:#fff8e5;color:#5d470a}.squad-owner-transfer h3,.squad-owner-transfer p{margin:0}.squad-organization-lifecycle{display:flex;justify-content:flex-end;margin-top:16px;padding-top:14px;border-top:1px solid var(--dsw-alias-border-l2,#ddd)}.squad-organization-lifecycle p{margin:0}.squad-owner-transfer-create{display:grid;gap:8px;width:100%}.squad-owner-transfer-create>div{display:flex;align-items:end;justify-content:flex-end;gap:8px;flex-wrap:wrap}.squad-owner-transfer-create label{margin:0;min-width:220px}
 @media(max-width:700px){.squad-context-bar,.squad-organization-intro,.squad-organization-forms{grid-template-columns:1fr}.squad-context-bar{margin:0 12px 10px}.squad-organizations{padding:16px}.squad-member{grid-template-columns:1fr}.squad-organization-card>header{display:grid}}
 .squad-node-setup{box-sizing:border-box;overflow:auto;width:100%;max-width:720px;padding:4px 0 20px}.squad-onboarding{align-self:center;flex:1;padding:18px 30px 34px}.squad-node-setup>header{margin-bottom:18px}.squad-node-setup>header h2{font-size:26px;margin:7px 0}.squad-node-setup>header p{color:var(--dsw-alias-label-secondary,#666);line-height:1.55;max-width:620px}.squad-step{font-size:11px;letter-spacing:.12em;text-transform:uppercase;color:#315ee8}.squad-node-setup label{display:grid;gap:6px;margin:13px 0;font-size:13px}.squad-node-setup input,.squad-node-setup textarea{box-sizing:border-box;width:100%;border:1px solid var(--dsw-alias-border-l2,#ccc);border-radius:9px;background:transparent;color:inherit;padding:9px;font:inherit}.squad-node-setup input:disabled{opacity:.55}.squad-node-setup small{color:var(--dsw-alias-label-secondary,#666);line-height:1.45}.squad-mode-picker{display:grid;grid-template-columns:1fr 1fr;gap:10px;border:0;margin:18px 0;padding:0}.squad-mode-picker legend{grid-column:1/-1;padding:0 0 8px;font-size:13px;font-weight:600}.squad-node-setup .squad-mode-picker button{display:grid;gap:6px;border:1px solid var(--dsw-alias-border-l2,#ccc);border-radius:12px;background:transparent;color:inherit;padding:14px;text-align:left;cursor:pointer}.squad-node-setup .squad-mode-picker button.active{border-color:#315ee8;background:rgba(49,94,232,.08);box-shadow:inset 0 0 0 1px #315ee8}.squad-mode-picker button span{color:var(--dsw-alias-label-secondary,#666);font-size:12px;line-height:1.4}.squad-setup-fields{padding:2px 14px;border-radius:12px;background:var(--dsw-alias-interactive-bg-hover,#f6f7f9)}.squad-node-setup .squad-check{display:flex;align-items:center;gap:9px}.squad-node-setup .squad-check input{width:auto}.squad-node-setup button[type=submit]{border:0;border-radius:9px;padding:9px 14px;background:#315ee8;color:#fff;cursor:pointer}.squad-node-setup button:disabled{opacity:.55;cursor:not-allowed}.squad-node-setup .squad-secondary{border:1px solid var(--dsw-alias-border-l2,#ccc);border-radius:9px;padding:8px 13px;background:transparent;color:inherit;cursor:pointer}.squad-settings .squad-node-setup{border-bottom:1px solid var(--dsw-alias-border-l2,#ddd);margin-bottom:22px}.squad-settings .squad-node-setup>h2{margin-top:0}.squad-onboarding-join{padding:14px;border:1px solid #315ee8;border-radius:12px;background:rgba(49,94,232,.06)}.squad-onboarding-join h3{margin:0}.squad-onboarding-join p{font-size:12px;color:var(--dsw-alias-label-secondary,#666)}.squad-form-divider{display:flex;align-items:center;gap:10px;margin:18px 0;color:var(--dsw-alias-label-secondary,#666);font-size:12px}.squad-form-divider:before,.squad-form-divider:after{content:"";height:1px;flex:1;background:var(--dsw-alias-border-l2,#ddd)}
 .squad-setup-fields hr{border:0;border-top:1px solid var(--dsw-alias-border-l2,#ddd);margin:16px 0}.squad-connection-required{display:grid;align-content:center;justify-items:start;max-width:620px}.squad-connection-required h2{margin-bottom:0}

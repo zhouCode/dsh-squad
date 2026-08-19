@@ -57,15 +57,18 @@ import {
 } from "../shared/join-package.ts";
 import {
   organizationIdFromInvitation,
+  organizationOwnershipTransferAcceptance,
   organizationRoleSchema,
   unsignedOrganizationDocumentSchema,
   unsignedOrganizationJoinRequestSchema,
   unsignedOrganizationMembershipCertificateSchema,
+  unsignedOrganizationOwnershipTransferProposalSchema,
   type OrganizationDocument,
   type OrganizationJoinRequest,
   type OrganizationInvitationView,
   type OrganizationMemberView,
   type OrganizationMembershipCertificate,
+  type OrganizationOwnershipTransferProposal,
   type OrganizationRole,
   type OrganizationView,
 } from "../shared/organizations.ts";
@@ -1428,7 +1431,7 @@ export class SquadService extends Service {
   ): Promise<void> {
     const role = organizationRoleSchema.parse(roleCandidate);
     if (role === "OWNER") {
-      throw new Error("Owner transfer is not supported in directory v1");
+      throw new Error("use the confirmed ownership-transfer flow");
     }
     const organization = this.database.findOrganization(
       organizationId,
@@ -1470,6 +1473,123 @@ export class SquadService extends Service {
     await this.requireRelayClient().leaveOrganization(
       organizationId,
       certificate,
+    );
+    await this.syncOrganizations();
+  }
+
+  async proposeOrganizationOwnershipTransfer(
+    organizationId: string,
+    targetMembershipId: string,
+    expiresInMinutes = 1_440,
+  ): Promise<void> {
+    if (
+      !Number.isSafeInteger(expiresInMinutes) ||
+      expiresInMinutes < 5 ||
+      expiresInMinutes > 10_080
+    ) {
+      throw new Error("ownership transfer expiry must be 5 to 10080 minutes");
+    }
+    await this.syncOrganizations();
+    const directory = this.database.organizationDirectory(organizationId);
+    if (directory === undefined) throw new Error("unknown organization");
+    const owner = this.selfOrganizationMember(directory);
+    if (owner.role !== "OWNER") {
+      throw new Error("only the Owner can transfer ownership");
+    }
+    if (directory.pendingOwnerTransfer !== undefined) {
+      throw new Error("an ownership transfer is already pending");
+    }
+    const target = directory.members.get(targetMembershipId);
+    if (
+      target === undefined ||
+      target.status !== "ACTIVE" ||
+      target.membershipId === owner.membershipId
+    ) {
+      throw new Error("ownership can only transfer to another active member");
+    }
+    const proposedAt = new Date().toISOString();
+    const previousOwnerCertificate = this.memberCertificate(directory, {
+      membershipId: owner.membershipId,
+      memberRevision: owner.memberRevision + 1,
+      nodeId: owner.nodeId,
+      publicKey: owner.publicKey,
+      displayName: owner.displayName,
+      role: "ADMIN",
+      status: "ACTIVE",
+    });
+    const newOwnerCertificate = this.memberCertificate(directory, {
+      membershipId: target.membershipId,
+      memberRevision: target.memberRevision + 1,
+      nodeId: target.nodeId,
+      publicKey: target.publicKey,
+      displayName: target.displayName,
+      role: "OWNER",
+      status: "ACTIVE",
+    });
+    const unsigned = unsignedOrganizationOwnershipTransferProposalSchema.parse({
+      version: 1,
+      kind: "OWNER_TRANSFER",
+      transferId: randomUUID(),
+      organizationId,
+      organizationRevision: directory.revision + 1,
+      previousOwnerCertificate,
+      newOwnerCertificate,
+      proposedAt,
+      expiresAt: new Date(
+        Date.parse(proposedAt) + expiresInMinutes * 60_000,
+      ).toISOString(),
+    });
+    const proposal: OrganizationOwnershipTransferProposal = {
+      ...unsigned,
+      proposerSignature: this.identity.sign(unsigned),
+    };
+    await this.requireRelayClient().proposeOwnershipTransfer(
+      organizationId,
+      proposal,
+    );
+    await this.syncOrganizations();
+  }
+
+  async acceptOrganizationOwnershipTransfer(
+    organizationId: string,
+    transferId: string,
+  ): Promise<void> {
+    await this.syncOrganizations();
+    const directory = this.database.organizationDirectory(organizationId);
+    const proposal = directory?.pendingOwnerTransfer;
+    if (
+      proposal === undefined ||
+      proposal.transferId !== transferId ||
+      proposal.newOwnerCertificate.nodeId !== this.identity.nodeId
+    ) {
+      throw new Error("no ownership transfer is awaiting this Node");
+    }
+    const acceptedAt = new Date().toISOString();
+    await this.requireRelayClient().acceptOwnershipTransfer(
+      organizationId,
+      transferId,
+      {
+        acceptedAt,
+        acceptanceSignature: this.identity.sign(
+          organizationOwnershipTransferAcceptance(proposal, acceptedAt),
+        ),
+      },
+    );
+    await this.syncOrganizations();
+  }
+
+  async declineOrganizationOwnershipTransfer(
+    organizationId: string,
+    transferId: string,
+  ): Promise<void> {
+    await this.syncOrganizations();
+    const directory = this.database.organizationDirectory(organizationId);
+    if (directory?.pendingOwnerTransfer?.transferId !== transferId) {
+      throw new Error("unknown pending ownership transfer");
+    }
+    await this.requireRelayClient().declineOwnershipTransfer(
+      organizationId,
+      transferId,
     );
     await this.syncOrganizations();
   }

@@ -7,6 +7,7 @@ import {
   type OrganizationJoinRequest,
   type OrganizationInvitationView,
   type OrganizationMembershipCertificate,
+  type OrganizationOwnershipTransferProposal,
 } from "../shared/organizations.ts";
 import type { NodeIdentity } from "./identity.ts";
 import { signedRequest } from "./relay.ts";
@@ -395,6 +396,39 @@ export class RelayClient {
       "POST",
       `/squad/v1/organizations/${organizationId}/leave`,
       { certificate },
+    );
+  }
+
+  async proposeOwnershipTransfer(
+    organizationId: string,
+    proposal: OrganizationOwnershipTransferProposal,
+  ): Promise<void> {
+    await this.request(
+      "POST",
+      `/squad/v1/organizations/${organizationId}/owner-transfers`,
+      { proposal },
+    );
+  }
+
+  async acceptOwnershipTransfer(
+    organizationId: string,
+    transferId: string,
+    acceptance: { acceptedAt: string; acceptanceSignature: string },
+  ): Promise<void> {
+    await this.request(
+      "POST",
+      `/squad/v1/organizations/${organizationId}/owner-transfers/${transferId}/accept`,
+      acceptance,
+    );
+  }
+
+  async declineOwnershipTransfer(
+    organizationId: string,
+    transferId: string,
+  ): Promise<void> {
+    await this.request(
+      "DELETE",
+      `/squad/v1/organizations/${organizationId}/owner-transfers/${transferId}`,
     );
   }
 

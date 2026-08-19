@@ -10,6 +10,7 @@ All notable changes to this project are documented in this file. The format is b
 - Organization Owners and Admins can explicitly reject pending join requests; rejected applicants require a new one-time invitation before reapplying.
 - Organization invitation history exposes active, used, expired, and revoked states without returning secret tokens or hashes, and managers can revoke unused invitations.
 - Active Admins and Members can leave an organization with a self-signed directory event. Local Session contexts are cleared while membership history remains auditable; Owners must transfer ownership first.
+- Two-party signed ownership transfer lets the current Owner propose and the target explicitly accept before Relay atomically establishes one new Owner and demotes the previous Owner to Admin. Proposals support cancellation, rejection, expiry, and stale-revision invalidation.
 
 ## [0.7.0] - 2026-08-19
 

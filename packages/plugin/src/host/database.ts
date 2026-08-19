@@ -41,14 +41,17 @@ import {
 import {
   defaultOrganizationPeerPolicy,
   organizationDirectoryBundleSchema,
+  organizationDirectoryEventSchema,
   organizationDocumentSchema,
   organizationJoinRequestSchema,
-  organizationMembershipCertificateSchema,
+  organizationOwnershipTransferProposalSchema,
   type OrganizationDirectoryBundle,
+  type OrganizationDirectoryEvent,
   type OrganizationDocument,
   type OrganizationJoinRequest,
   type OrganizationMemberView,
   type OrganizationMembershipCertificate,
+  type OrganizationOwnershipTransferProposal,
   type OrganizationRole,
   type OrganizationView,
 } from "../shared/organizations.ts";
@@ -131,10 +134,11 @@ export interface OutboxDiagnostics {
 export interface OrganizationDirectoryRecord {
   document: OrganizationDocument;
   revision: number;
-  events: OrganizationMembershipCertificate[];
+  events: OrganizationDirectoryEvent[];
   members: Map<string, OrganizationMembershipCertificate>;
   selfStatus: "ACTIVE" | "PENDING" | "DISABLED";
   pendingJoinRequests: OrganizationJoinRequest[];
+  pendingOwnerTransfer?: OrganizationOwnershipTransferProposal;
 }
 
 export interface ResolvedDelegationRecipient {
@@ -377,6 +381,7 @@ export class SquadDatabase {
         document_json TEXT NOT NULL,
         self_status TEXT NOT NULL CHECK (self_status IN ('ACTIVE', 'PENDING', 'DISABLED')),
         highest_revision INTEGER NOT NULL CHECK (highest_revision >= 0),
+        pending_owner_transfer_json TEXT,
         created_at TEXT NOT NULL,
         updated_at TEXT NOT NULL
       );
@@ -575,7 +580,23 @@ export class SquadDatabase {
       `);
       currentVersion = 9;
     }
-    if (currentVersion !== 9) {
+    if (currentVersion === 9) {
+      const organizationColumns = this.#db
+        .prepare("PRAGMA table_info(organizations)")
+        .all() as SqlRow[];
+      if (
+        !organizationColumns.some(
+          (column) => column.name === "pending_owner_transfer_json",
+        )
+      ) {
+        this.#db.exec(
+          "ALTER TABLE organizations ADD COLUMN pending_owner_transfer_json TEXT",
+        );
+      }
+      this.#db.exec("UPDATE schema_meta SET version = 10 WHERE singleton = 1");
+      currentVersion = 10;
+    }
+    if (currentVersion !== 10) {
       throw new Error(
         `unsupported Squad database version ${String(currentVersion)}`,
       );
@@ -1028,7 +1049,7 @@ export class SquadDatabase {
     }
     const existing = this.#db
       .prepare(
-        "SELECT document_json, self_status, highest_revision FROM organizations WHERE organization_id = ?",
+        "SELECT document_json, self_status, highest_revision, pending_owner_transfer_json FROM organizations WHERE organization_id = ?",
       )
       .get(bundle.document.organizationId) as SqlRow | undefined;
     if (
@@ -1081,7 +1102,11 @@ export class SquadDatabase {
       existing === undefined ||
       previousRevision !== bundle.revision ||
       existing.self_status !== bundle.selfStatus ||
-      previousRequests !== nextRequests;
+      previousRequests !== nextRequests ||
+      (optionalString(existing.pending_owner_transfer_json) ?? "") !==
+        (bundle.pendingOwnerTransfer === undefined
+          ? ""
+          : JSON.stringify(bundle.pendingOwnerTransfer));
     const now = new Date().toISOString();
     this.transaction(() => {
       this.#db
@@ -1089,12 +1114,13 @@ export class SquadDatabase {
           `
           INSERT INTO organizations(
             organization_id, name, document_json, self_status,
-            highest_revision, created_at, updated_at
-          ) VALUES (?, ?, ?, ?, ?, ?, ?)
+            highest_revision, pending_owner_transfer_json, created_at, updated_at
+          ) VALUES (?, ?, ?, ?, ?, ?, ?, ?)
           ON CONFLICT(organization_id) DO UPDATE SET
             name = excluded.name,
             self_status = excluded.self_status,
             highest_revision = excluded.highest_revision,
+            pending_owner_transfer_json = excluded.pending_owner_transfer_json,
             updated_at = excluded.updated_at
         `,
         )
@@ -1104,6 +1130,9 @@ export class SquadDatabase {
           JSON.stringify(bundle.document),
           bundle.selfStatus,
           bundle.revision,
+          bundle.pendingOwnerTransfer === undefined
+            ? null
+            : JSON.stringify(bundle.pendingOwnerTransfer),
           bundle.document.createdAt,
           now,
         );
@@ -1114,13 +1143,15 @@ export class SquadDatabase {
         ) VALUES (?, ?, ?, ?, ?, ?)
       `);
       for (const event of bundle.events) {
+        const eventMember =
+          "transferId" in event ? event.newOwnerCertificate : event;
         insertEvent.run(
           bundle.document.organizationId,
           event.organizationRevision,
-          event.membershipId,
-          event.memberRevision,
+          eventMember.membershipId,
+          eventMember.memberRevision,
           JSON.stringify(event),
-          event.issuedAt,
+          "transferId" in event ? event.acceptedAt : event.issuedAt,
         );
       }
       const upsertMember = this.#db.prepare(`
@@ -1219,7 +1250,7 @@ export class SquadDatabase {
         )
         .all(organizationId) as SqlRow[]
     ).map((event) =>
-      organizationMembershipCertificateSchema.parse(
+      organizationDirectoryEventSchema.parse(
         JSON.parse(String(event.certificate_json)) as unknown,
       ),
     );
@@ -1238,6 +1269,12 @@ export class SquadDatabase {
         JSON.parse(String(request.request_json)) as unknown,
       ),
     );
+    const pendingOwnerTransfer =
+      optionalString(row.pending_owner_transfer_json) === undefined
+        ? undefined
+        : organizationOwnershipTransferProposalSchema.parse(
+            JSON.parse(String(row.pending_owner_transfer_json)) as unknown,
+          );
     return {
       document,
       revision: verified.revision,
@@ -1245,6 +1282,7 @@ export class SquadDatabase {
       members: verified.members,
       selfStatus: row.self_status as "ACTIVE" | "PENDING" | "DISABLED",
       pendingJoinRequests,
+      ...(pendingOwnerTransfer === undefined ? {} : { pendingOwnerTransfer }),
     };
   }
 
@@ -1311,6 +1349,9 @@ export class SquadDatabase {
         createdAt: String(row.created_at),
         members,
         pendingJoinRequests: directory.pendingJoinRequests,
+        ...(directory.pendingOwnerTransfer === undefined
+          ? {}
+          : { pendingOwnerTransfer: directory.pendingOwnerTransfer }),
       };
     });
   }
