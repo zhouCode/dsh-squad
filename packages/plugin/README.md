@@ -86,6 +86,8 @@ Finished delegations and fully dispatched or canceled plans share a reversible l
 
 Chat triggering stays unobtrusive: use natural language or `@member`, or use namespaced `/squad-*` commands for tasks, plans, status, organizations, members, invitations, and roles. They are discovered through DSH's native `/` menu; this package adds no command buttons.
 
+The workbench is a keyboard-contained modal with focus restoration, Escape handling, Tab loops, Arrow/Home/End tab navigation, explicit focus indicators, text-backed status cues, and reduced-motion support.
+
 ## Updates
 
 v0.5.0 adds `Agent Inbox → Updates` and a separate `dsh-squad-update` executable. The default is notify-only; users may instead disable checks or opt into installation while the Node is idle. The plugin process never replaces itself. Only a separately configured systemd updater may stop the service, back up the profile and explicit data paths, install a GitHub Release verified by both an Ed25519-signed manifest and SHA-256, restart, and check the reported version. Failure restores the old profile and data.

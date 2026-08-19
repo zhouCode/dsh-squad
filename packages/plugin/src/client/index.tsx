@@ -37,6 +37,7 @@ import type {
   UpdateReadiness,
   UpdateSnapshot,
 } from "../shared/updates.ts";
+import { tabAfterKey, tabStopForGroup } from "./accessibility.ts";
 import {
   parseAttachmentDrafts,
   type AttachmentDraft,
@@ -327,6 +328,40 @@ interface PendingConfirmation extends ConfirmationOptions {
   resolve: (confirmed: boolean) => void;
 }
 
+const focusableSelector = [
+  'button:not(:disabled):not([tabindex="-1"])',
+  'input:not(:disabled):not([tabindex="-1"])',
+  'select:not(:disabled):not([tabindex="-1"])',
+  'textarea:not(:disabled):not([tabindex="-1"])',
+  'a[href]:not([tabindex="-1"])',
+  '[tabindex]:not([tabindex="-1"])',
+].join(",");
+
+function trapDialogFocus(
+  event: ReactKeyboardEvent<HTMLElement>,
+  dialog: HTMLElement | null,
+): void {
+  if (event.key !== "Tab" || dialog === null) return;
+  const focusable = [
+    ...dialog.querySelectorAll<HTMLElement>(focusableSelector),
+  ];
+  const first = focusable[0];
+  const last = focusable.at(-1);
+  if (first === undefined || last === undefined) {
+    event.preventDefault();
+    dialog.focus();
+    return;
+  }
+  const active = document.activeElement;
+  if (event.shiftKey && (active === first || !dialog.contains(active))) {
+    event.preventDefault();
+    last.focus();
+  } else if (!event.shiftKey && (active === last || !dialog.contains(active))) {
+    event.preventDefault();
+    first.focus();
+  }
+}
+
 function ConfirmationDialog({
   request,
   settle,
@@ -339,30 +374,18 @@ function ConfirmationDialog({
   const dialog = useRef<HTMLDivElement>(null);
   const cancel = useRef<HTMLButtonElement>(null);
   useEffect(() => {
+    const previousFocused = document.activeElement as HTMLElement | null;
     cancel.current?.focus();
+    return () => previousFocused?.focus();
   }, []);
   const onKeyDown = (event: ReactKeyboardEvent<HTMLDivElement>) => {
+    event.stopPropagation();
     if (event.key === "Escape") {
       event.preventDefault();
       settle(false);
       return;
     }
-    if (event.key !== "Tab") return;
-    const focusable = [
-      ...(dialog.current?.querySelectorAll<HTMLElement>(
-        "button:not(:disabled), input:not(:disabled), select:not(:disabled), textarea:not(:disabled), [href]",
-      ) ?? []),
-    ];
-    if (focusable.length === 0) return;
-    const first = focusable[0];
-    const last = focusable.at(-1);
-    if (event.shiftKey && document.activeElement === first) {
-      event.preventDefault();
-      last?.focus();
-    } else if (!event.shiftKey && document.activeElement === last) {
-      event.preventDefault();
-      first?.focus();
-    }
+    trapDialogFocus(event, dialog.current);
   };
   return (
     <div
@@ -602,6 +625,7 @@ function SquadTrigger({
       type="button"
       aria-label={label}
       aria-expanded={open}
+      aria-controls="squad-panel-dialog"
       title={t("inbox.title")}
       lang={t("html.lang")}
       onClick={() => setPanelOpen(!open)}
@@ -4921,6 +4945,8 @@ function SquadPanel({
   const [refreshing, setRefreshing] = useState(false);
   const [now, setNow] = useState(() => Date.now());
   const lastFocused = useRef<HTMLElement | null>(null);
+  const panel = useRef<HTMLDivElement>(null);
+  const closeButton = useRef<HTMLButtonElement>(null);
 
   const refresh = useCallback(
     async (forceTransport = false) => {
@@ -4949,6 +4975,17 @@ function SquadPanel({
   useEffect(() => {
     if (!open) return;
     lastFocused.current = document.activeElement as HTMLElement | null;
+    const frame = window.requestAnimationFrame(() =>
+      closeButton.current?.focus(),
+    );
+    return () => {
+      window.cancelAnimationFrame(frame);
+      lastFocused.current?.focus();
+    };
+  }, [open]);
+
+  useEffect(() => {
+    if (!open) return;
     setEventStream("CONNECTING");
     void refresh();
     const events = new EventSource("/squad/v1/local/events");
@@ -4959,7 +4996,6 @@ function SquadPanel({
     return () => {
       events.removeEventListener("state", stateChanged);
       events.close();
-      lastFocused.current?.focus();
     };
   }, [open, refresh]);
 
@@ -5074,26 +5110,60 @@ function SquadPanel({
     ...(lastRefreshedAt === undefined ? {} : { lastRefreshedAt }),
     now,
   });
+  const activateTab = (next: Tab) => {
+    setTab(next);
+    setSelectedId(undefined);
+  };
+  const handleTabKey = (
+    event: ReactKeyboardEvent<HTMLButtonElement>,
+    tabs: readonly Tab[],
+    current: Tab,
+  ) => {
+    const next = tabAfterKey(tabs, current, event.key);
+    if (next === undefined) return;
+    event.preventDefault();
+    activateTab(next);
+    window.requestAnimationFrame(() =>
+      document.getElementById(`squad-tab-${next}`)?.focus(),
+    );
+  };
+  const handlePanelKey = (event: ReactKeyboardEvent<HTMLDivElement>) => {
+    if (event.defaultPrevented) return;
+    if (event.key === "Escape") {
+      event.preventDefault();
+      setPanelOpen(false);
+      return;
+    }
+    trapDialogFocus(event, panel.current);
+  };
   if (!open) return null;
   return (
-    <div
-      className="squad-overlay"
-      role="dialog"
-      aria-modal="true"
-      aria-label={t("inbox.title")}
-    >
-      <button
+    <div className="squad-overlay">
+      <div
         className="squad-backdrop"
-        aria-label={t("inbox.close")}
+        aria-hidden="true"
         onClick={() => setPanelOpen(false)}
       />
-      <div className="squad-panel" lang={t("html.lang")}>
+      <div
+        id="squad-panel-dialog"
+        ref={panel}
+        className="squad-panel"
+        lang={t("html.lang")}
+        role="dialog"
+        aria-modal="true"
+        aria-labelledby="squad-panel-title"
+        aria-busy={state === undefined || refreshing}
+        tabIndex={-1}
+        onKeyDown={handlePanelKey}
+      >
         <header className="squad-panel-head">
           <div>
             <span className="squad-eyebrow">DSH Squad</span>
-            <h1>{t("inbox.title")}</h1>
+            <h1 id="squad-panel-title">{t("inbox.title")}</h1>
           </div>
           <button
+            ref={closeButton}
+            type="button"
             className="squad-close"
             onClick={() => setPanelOpen(false)}
             aria-label={t("close")}
@@ -5153,15 +5223,18 @@ function SquadPanel({
                 <span className="squad-tab-group-label">{t(group.label)}</span>
                 {group.tabs.map((value) => (
                   <button
+                    id={`squad-tab-${value}`}
                     key={value}
                     className={tab === value ? "active" : ""}
-                    onClick={() => {
-                      setTab(value);
-                      setSelectedId(undefined);
-                    }}
+                    onClick={() => activateTab(value)}
+                    onKeyDown={(event) =>
+                      handleTabKey(event, group.tabs, value)
+                    }
                     role="tab"
                     aria-selected={tab === value}
-                    tabIndex={tab === value ? 0 : -1}
+                    tabIndex={
+                      tabStopForGroup(group.tabs, tab) === value ? 0 : -1
+                    }
                   >
                     {t(tabKeys[value])}
                     {value === "waiting" &&
@@ -5190,7 +5263,9 @@ function SquadPanel({
             <strong>{t("loading.title")}</strong>
             {error ? (
               <>
-                <p className="squad-error">{error}</p>
+                <p className="squad-error" role="alert">
+                  {error}
+                </p>
                 <button onClick={() => void refresh()}>
                   {t("action.retry")}
                 </button>
@@ -5198,7 +5273,9 @@ function SquadPanel({
             ) : null}
           </div>
         ) : error ? (
-          <p className="squad-error squad-load-error">{error}</p>
+          <p className="squad-error squad-load-error" role="alert">
+            {error}
+          </p>
         ) : null}
         {state?.setup.required ? null : tab === "overview" && state ? (
           <Overview
@@ -5362,6 +5439,7 @@ function SquadPanel({
 }
 
 const css = `
+.squad-trigger:focus-visible,.squad-overlay :is(button,a,input,select,textarea,[tabindex]):focus-visible{outline:3px solid #315ee8;outline-offset:2px}
 .squad-trigger{appearance:none;border:0;background:transparent;color:var(--dsw-alias-label-primary);cursor:pointer;border-radius:10px;display:flex;align-items:center;justify-content:center;gap:8px;height:36px;padding:0 9px;font:inherit;white-space:nowrap}.squad-trigger:hover{background:var(--dsw-alias-interactive-bg-hover)}.squad-trigger-wide{width:100%;justify-content:flex-start}.squad-trigger-icon{font-size:20px;line-height:1}.squad-overlay{position:fixed;inset:0;z-index:1000;pointer-events:none}.squad-backdrop{position:absolute;inset:0;border:0;background:rgba(10,14,22,.34);pointer-events:auto}.squad-panel{position:absolute;pointer-events:auto;top:12px;bottom:12px;right:12px;width:min(920px,calc(100vw - 24px));border:1px solid var(--dsw-alias-border-l2,#ddd);border-radius:18px;background:var(--dsw-specific-dialog-fill,#fff);color:var(--dsw-alias-label-primary,#151515);box-shadow:0 18px 60px rgba(0,0,0,.24);display:flex;flex-direction:column;overflow:hidden}.squad-panel-head{display:flex;justify-content:space-between;align-items:center;padding:22px 24px 12px}.squad-panel-head h1{font-size:24px;margin:2px 0}.squad-eyebrow{font-size:11px;letter-spacing:.14em;text-transform:uppercase;color:var(--dsw-alias-label-secondary,#666)}.squad-close{border:0;background:transparent;color:inherit;font-size:30px;cursor:pointer}.squad-tabs{display:flex;gap:4px;padding:0 18px 14px;overflow:auto;border-bottom:1px solid var(--dsw-alias-border-l2,#ddd)}.squad-tabs button{border:0;border-radius:999px;background:transparent;color:var(--dsw-alias-label-secondary,#666);padding:7px 12px;cursor:pointer;white-space:nowrap}.squad-tabs button.active{background:var(--dsw-alias-interactive-bg-hover,#eee);color:var(--dsw-alias-label-primary,#111)}.squad-content{display:grid;grid-template-columns:290px minmax(0,1fr);min-height:0;flex:1}.squad-list{border-right:1px solid var(--dsw-alias-border-l2,#ddd);padding:10px;overflow:auto}.squad-list button{display:block;width:100%;text-align:left;border:0;background:transparent;color:inherit;border-radius:12px;padding:12px;cursor:pointer}.squad-list button:hover,.squad-list button.active{background:var(--dsw-alias-interactive-bg-hover,#eee)}.squad-list strong,.squad-list span{display:block}.squad-list strong{overflow:hidden;text-overflow:ellipsis;white-space:nowrap}.squad-list span{font-size:12px;margin-top:5px;color:var(--dsw-alias-label-secondary,#666)}.squad-content main,.squad-settings{overflow:auto;padding:22px 26px}.squad-detail>header{display:flex;align-items:center;gap:10px}.squad-detail h2{font-size:22px;line-height:1.35}.squad-detail h3,.squad-settings h3{font-size:14px;margin:24px 0 8px}.squad-detail dl{display:grid;gap:5px}.squad-detail dl div{display:grid;grid-template-columns:78px 1fr;gap:10px}.squad-detail dt{color:var(--dsw-alias-label-secondary,#666)}.squad-detail dd{margin:0;overflow-wrap:anywhere}.squad-status{font-size:11px;font-weight:700;border-radius:999px;padding:4px 8px;background:#e8edf6}.squad-status-completed,.squad-plan-status-dispatched{background:#dff5e6;color:#176c35}.squad-status-failed,.squad-status-rejected,.squad-plan-status-partial{background:#fde4e1;color:#a52a24}.squad-status-waiting_human,.squad-plan-status-draft,.squad-plan-status-dispatching{background:#fff0c7;color:#755400}.squad-direction,.squad-muted{color:var(--dsw-alias-label-secondary,#666);font-size:12px}.squad-prewrap{white-space:pre-wrap;overflow-wrap:anywhere}.squad-todo{border-left:3px solid #d59b1b;padding:2px 12px;margin:10px 0}.squad-todo p{margin:5px 0}.squad-todo-select{display:flex!important;align-items:center;grid-template-columns:auto 1fr!important}.squad-todo-select input{width:auto!important}.squad-detail label,.squad-settings label{display:grid;gap:6px;margin:12px 0;font-size:13px}.squad-detail textarea,.squad-settings textarea,.squad-settings input,.squad-settings select{box-sizing:border-box;width:100%;border:1px solid var(--dsw-alias-border-l2,#ccc);border-radius:9px;background:transparent;color:inherit;padding:9px;font:inherit}.squad-actions{display:flex;gap:8px;margin:12px 0;flex-wrap:wrap}.squad-detail button,.squad-settings button{border:0;border-radius:9px;padding:8px 12px;background:#315ee8;color:#fff;cursor:pointer}.squad-detail button:disabled{opacity:.5}.squad-detail .squad-danger{background:#b13c35}.squad-detail .squad-link-button{display:block;margin:9px 0;background:transparent;color:#315ee8;padding-left:0}.squad-error{color:#b13c35}.squad-load-error{padding:0 24px}.squad-empty{color:var(--dsw-alias-label-secondary,#666);padding:12px}.squad-settings{max-width:680px}.squad-settings code,.squad-peer code,.squad-plan-item code{display:block;overflow-wrap:anywhere;font-size:11px}.squad-peer{display:grid;grid-template-columns:150px 1fr auto;gap:10px;padding:10px 0;border-bottom:1px solid var(--dsw-alias-border-l2,#ddd)}.squad-plan-items{display:grid;gap:12px}.squad-plan-item{border:1px solid var(--dsw-alias-border-l2,#ddd);border-radius:12px;padding:14px}.squad-plan-item>header{display:flex;align-items:flex-start;justify-content:space-between;gap:12px}.squad-plan-item>header strong{line-height:1.4}.squad-plan-item-status{font-size:11px;white-space:nowrap;color:var(--dsw-alias-label-secondary,#666)}.squad-plan-item-status-failed{color:#b13c35}.squad-plan-item-status-dispatched{color:#176c35}.squad-plan-item dl{margin-bottom:0}.squad-plan-item ul{margin:4px 0;padding-left:20px}.squad-plan-item a{color:#315ee8}
 .squad-delegation-progress{margin:18px 0;padding:14px;border:1px solid var(--dsw-alias-border-l2,#ddd);border-radius:12px}.squad-delegation-progress h3{margin:0 0 12px}.squad-delegation-progress ol{display:grid;grid-template-columns:repeat(4,minmax(0,1fr));gap:0;margin:0;padding:0;list-style:none}.squad-delegation-progress li{position:relative;display:grid;grid-template-columns:14px minmax(0,1fr);gap:7px;padding-right:8px}.squad-delegation-progress li:not(:last-child):after{content:"";position:absolute;top:6px;left:12px;right:-2px;height:2px;background:var(--dsw-alias-border-l2,#ddd)}.squad-progress-marker{z-index:1;width:10px;height:10px;border:2px solid var(--dsw-alias-border-l2,#aaa);border-radius:50%;background:var(--dsw-specific-dialog-fill,#fff)}.squad-delegation-progress li>div{z-index:1;display:grid;align-content:start;gap:3px;min-width:0;background:var(--dsw-specific-dialog-fill,#fff)}.squad-delegation-progress li strong{font-size:12px}.squad-delegation-progress li small,.squad-delegation-progress li time,.squad-delegation-progress li span{font-size:10px;color:var(--dsw-alias-label-secondary,#666);overflow-wrap:anywhere}.squad-delegation-progress .squad-progress-done .squad-progress-marker{border-color:#278447;background:#278447}.squad-delegation-progress .squad-progress-current .squad-progress-marker{border-color:#315ee8;background:#315ee8;box-shadow:0 0 0 3px rgba(49,94,232,.15)}.squad-delegation-progress .squad-progress-error .squad-progress-marker{border-color:#b13c35;background:#b13c35}.squad-next-action{display:grid;gap:3px;margin-top:14px;padding:10px;border-radius:9px;background:var(--dsw-alias-interactive-bg-hover,#f4f5f7)}.squad-next-action strong{font-size:11px}.squad-next-action span{font-size:12px}
 @media(max-width:700px){.squad-panel{inset:0;width:auto;border-radius:0}.squad-content{grid-template-columns:1fr}.squad-list{max-height:180px;border-right:0;border-bottom:1px solid var(--dsw-alias-border-l2,#ddd)}.squad-peer{grid-template-columns:1fr}.squad-panel-head{padding:16px}.squad-content main,.squad-settings{padding:16px}}
@@ -5379,6 +5457,7 @@ const css = `
 .squad-update-readiness{margin-top:22px;padding:15px;border:1px solid var(--dsw-alias-border-l2,#ddd);border-radius:13px}.squad-update-readiness>header{display:flex;align-items:flex-start;justify-content:space-between;gap:12px}.squad-update-readiness>header h3{margin:0 0 4px}.squad-update-readiness>header p{margin:0}.squad-update-readiness ul{display:grid;gap:8px;margin:14px 0 0;padding:0;list-style:none}.squad-update-readiness li{display:flex;align-items:flex-start;gap:9px;padding:9px;border-radius:9px}.squad-update-readiness li>span{display:grid;place-items:center;flex:0 0 20px;width:20px;height:20px;border-radius:50%;font-weight:700}.squad-update-readiness li>div{display:grid;gap:2px}.squad-update-readiness li small{color:inherit;opacity:.82}.squad-update-readiness li.ready{background:#edf8f0;color:#176c35}.squad-update-readiness li.ready>span,.squad-update-ready{background:#d3efdc;color:#176c35}.squad-update-readiness li.blocked{background:#fff8e5;color:#755400}.squad-update-readiness li.blocked>span,.squad-update-not-ready{background:#fff0c7;color:#755400}@media(max-width:700px){.squad-update-readiness>header{display:grid}}
 .squad-trigger{position:relative}.squad-trigger-badge,.squad-tab-count{display:inline-flex;align-items:center;justify-content:center;box-sizing:border-box;min-width:18px;height:18px;padding:0 5px;border-radius:999px;background:#b13c35;color:#fff;font-size:10px;font-weight:700;line-height:1}.squad-trigger:not(.squad-trigger-wide) .squad-trigger-badge{position:absolute;right:0;top:-2px}.squad-tabs button{display:inline-flex;align-items:center;gap:6px}.squad-tabs button.active .squad-tab-count{background:#315ee8}.squad-overview{overflow:auto;padding:24px 28px;flex:1}.squad-overview>header h2{margin:4px 0}.squad-attention-grid{display:grid;grid-template-columns:repeat(4,minmax(0,1fr));gap:10px;margin:20px 0}.squad-attention-grid button{display:grid;gap:5px;text-align:left;border:1px solid var(--dsw-alias-border-l2,#ddd);border-radius:12px;background:transparent;color:inherit;padding:14px;cursor:pointer}.squad-attention-grid button.needs-attention{border-color:#d59b1b;background:#fff8e5;color:#5d470a}.squad-attention-grid strong{font-size:24px}.squad-attention-grid span{font-size:12px;color:var(--dsw-alias-label-secondary,#666)}.squad-next-step{margin-top:18px;padding:18px;border:1px solid var(--dsw-alias-border-l2,#ddd);border-radius:14px}.squad-next-step h3{margin:0 0 7px}.squad-next-step code{display:block;padding:10px;border-radius:9px;background:var(--dsw-alias-interactive-bg-hover,#f4f5f7);overflow-wrap:anywhere}.squad-next-step button,.squad-update-callout{border:0;border-radius:9px;padding:8px 12px;margin-top:12px;background:#315ee8;color:#fff;cursor:pointer}.squad-update-callout{display:block;width:100%;text-align:left;background:#fff0c7;color:#755400}@media(max-width:700px){.squad-attention-grid{grid-template-columns:1fr 1fr}.squad-overview{padding:18px 16px}}
 .squad-tabs{align-items:stretch}.squad-tab-group{display:flex;align-items:center;gap:4px;padding-right:10px;border-right:1px solid var(--dsw-alias-border-l2,#ddd)}.squad-tab-group:last-child{border-right:0}.squad-tab-group-label{align-self:center;color:var(--dsw-alias-label-secondary,#666);font-size:10px;letter-spacing:.08em;text-transform:uppercase;white-space:nowrap}.squad-loading{display:grid;place-items:center;align-content:center;gap:12px;min-height:260px;flex:1;padding:24px;text-align:center}.squad-loading button{border:0;border-radius:9px;padding:8px 12px;background:#315ee8;color:#fff;cursor:pointer}.squad-spinner{width:24px;height:24px;border:3px solid var(--dsw-alias-border-l2,#ddd);border-top-color:#315ee8;border-radius:50%;animation:squad-spin .8s linear infinite}@keyframes squad-spin{to{transform:rotate(360deg)}}@media(max-width:700px){.squad-tab-group-label{display:none}.squad-tab-group{padding-right:4px}}
+@media(prefers-reduced-motion:reduce){.squad-spinner{animation:none}.squad-overlay *{scroll-behavior:auto!important}}
 .squad-diagnostics{overflow:auto;padding:22px 26px;flex:1}.squad-diagnostics>header{display:flex;align-items:flex-start;justify-content:space-between;gap:16px}.squad-diagnostics>header h2{margin:0}.squad-diagnostics button{border:0;border-radius:9px;padding:8px 12px;background:#315ee8;color:#fff;cursor:pointer}.squad-diagnostics button:disabled{opacity:.5}.squad-diagnostic-grid{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:12px;margin-top:18px}.squad-diagnostic-grid article{min-width:0;border:1px solid var(--dsw-alias-border-l2,#ddd);border-radius:13px;padding:14px}.squad-diagnostic-grid article>header{display:flex;align-items:center;justify-content:space-between;gap:10px}.squad-diagnostic-grid h3{margin:0;font-size:14px}.squad-diagnostic-grid code{display:block;margin:10px 0;overflow-wrap:anywhere;font-size:11px}.squad-diagnostic-grid p,.squad-diagnostic-grid dl{font-size:12px}.squad-diagnostic-grid dl div{display:grid;gap:3px}.squad-diagnostic-grid dt{color:var(--dsw-alias-label-secondary,#666)}.squad-diagnostic-grid dd{margin:0}.squad-connection-unreachable{background:#fde4e1;color:#a52a24}.squad-connection-unverified{background:#fff0c7;color:#755400}.squad-connection-connected,.squad-connection-ready,.squad-connection-serving{background:#dff5e6;color:#176c35}@media(max-width:800px){.squad-diagnostic-grid{grid-template-columns:1fr}.squad-diagnostics{padding:16px}}
 .squad-relay-operations{margin-top:22px;padding-top:18px;border-top:1px solid var(--dsw-alias-border-l2,#ddd)}.squad-relay-operations>header{display:flex;align-items:flex-start;justify-content:space-between;gap:12px}.squad-relay-operations>header h3,.squad-relay-operations>header p{margin:0}.squad-relay-operations>header>span{font-size:10px;color:var(--dsw-alias-label-secondary,#666);white-space:nowrap}.squad-relay-ops-grid{display:grid;grid-template-columns:repeat(4,minmax(0,1fr));gap:10px;margin:14px 0}.squad-relay-ops-grid article{min-width:0;padding:12px;border:1px solid var(--dsw-alias-border-l2,#ddd);border-radius:11px}.squad-relay-ops-grid article.pending{border-color:#d59b1b;background:#fff8e5;color:#5d470a}.squad-relay-ops-grid h4{margin:0 0 9px;font-size:12px}.squad-relay-ops-grid dl{display:grid;gap:7px;margin:0}.squad-relay-ops-grid dl>div{display:grid;gap:2px}.squad-relay-ops-grid dt{font-size:10px;color:var(--dsw-alias-label-secondary,#666)}.squad-relay-ops-grid dd{margin:0;font-size:13px;overflow-wrap:anywhere}.squad-relay-remote-hint{margin-top:18px}@media(max-width:900px){.squad-relay-ops-grid{grid-template-columns:repeat(2,minmax(0,1fr))}}@media(max-width:560px){.squad-relay-operations>header{display:grid}.squad-relay-operations>header>span{white-space:normal}.squad-relay-ops-grid{grid-template-columns:1fr}}
 .squad-settings>.squad-peer{display:grid;grid-template-columns:1fr;gap:8px;margin:10px 0;padding:14px;border:1px solid var(--dsw-alias-border-l2,#ddd);border-radius:12px}.squad-peer>header{display:flex;align-items:flex-start;justify-content:space-between;gap:12px}.squad-peer>header span{display:block;margin-top:4px;color:var(--dsw-alias-label-secondary,#666);font-size:12px}.squad-peer-disabled{opacity:.72}.squad-peer details,.squad-advanced-pairing{margin-top:8px}.squad-peer summary,.squad-advanced-pairing summary{cursor:pointer;color:#315ee8;font-size:13px}.squad-settings .squad-secondary{border:1px solid var(--dsw-alias-border-l2,#ccc);background:transparent;color:inherit}.squad-settings button:disabled{opacity:.5;cursor:not-allowed}.squad-pairing{margin-top:24px;padding-top:2px}.squad-pairing-grid{display:grid;grid-template-columns:1fr 1fr;gap:12px}.squad-pairing-grid>div,.squad-pairing-grid>form{min-width:0;border:1px solid var(--dsw-alias-border-l2,#ddd);border-radius:12px;padding:14px}.squad-pairing-grid h4{margin:0 0 7px}.squad-pairing-result{display:grid;gap:8px;margin-top:12px}.squad-pairing-result textarea{font-family:monospace;font-size:11px}.squad-advanced-pairing{margin:20px 0;padding:14px;border:1px dashed var(--dsw-alias-border-l2,#ccc);border-radius:12px}@media(max-width:700px){.squad-pairing-grid{grid-template-columns:1fr}}
