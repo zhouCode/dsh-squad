@@ -1,5 +1,6 @@
 export * from "./canonical.ts";
 export * from "./contracts.ts";
+export * from "./join-package.ts";
 export * from "./organizations.ts";
 export * from "./pairing.ts";
 export * from "./state.ts";

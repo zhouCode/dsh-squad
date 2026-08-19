@@ -9,6 +9,7 @@ import {
   importPairingBundleSchema,
   updatePeerConnectionSchema,
 } from "../shared/pairing.ts";
+import { importJoinPackageSchema } from "../shared/join-package.ts";
 import { nodeSetupInputSchema } from "./config.ts";
 import { RelayClientError } from "./relay-client.ts";
 import { SquadConfigurationError, type SquadService } from "./service.ts";
@@ -317,6 +318,38 @@ export function createHttpHandler(squad: SquadService) {
         const body = (await readJson(req, 8 * 1024)) as Record<string, unknown>;
         await squad.joinOrganization(String(body.invitation ?? ""));
         reply(res, 202, { ok: true });
+        return;
+      }
+      if (
+        req.method === "POST" &&
+        url.pathname === "/squad/v1/local/join-packages/import"
+      ) {
+        const body = await readJson(req, 40 * 1024);
+        reply(
+          res,
+          202,
+          await squad.importJoinPackage(importJoinPackageSchema.parse(body)),
+        );
+        return;
+      }
+      const organizationJoinPackage =
+        /^\/squad\/v1\/local\/organizations\/([0-9a-f-]{36})\/join-packages$/u.exec(
+          url.pathname,
+        );
+      if (req.method === "POST" && organizationJoinPackage?.[1] !== undefined) {
+        const body = (await readJson(req, 8 * 1024)) as Record<string, unknown>;
+        const rawMinutes = Number(body.expiresInMinutes ?? 1_440);
+        if (!Number.isInteger(rawMinutes)) {
+          throw new LocalHttpError(400, "INVALID_INVITATION_EXPIRY");
+        }
+        reply(
+          res,
+          201,
+          await squad.createOrganizationJoinPackage(
+            organizationJoinPackage[1],
+            rawMinutes,
+          ),
+        );
         return;
       }
       const organizationInvitation =

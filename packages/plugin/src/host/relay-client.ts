@@ -265,6 +265,37 @@ export class RelayClient {
     return { invitation: body.invitation, expiresAt: body.expiresAt };
   }
 
+  async createOrganizationJoinPackage(
+    organizationId: string,
+    expiresInMinutes = 1_440,
+  ): Promise<{
+    enrollmentInvitation: string;
+    organizationInvitation: string;
+    expiresAt: string;
+  }> {
+    const body = (await this.request(
+      "POST",
+      `/squad/v1/organizations/${organizationId}/join-packages`,
+      { expiresInMinutes },
+    )) as Record<string, unknown>;
+    if (
+      typeof body.enrollmentInvitation !== "string" ||
+      typeof body.organizationInvitation !== "string" ||
+      typeof body.expiresAt !== "string"
+    ) {
+      throw new RelayClientError(
+        502,
+        "INVALID_RESPONSE",
+        "Relay join package response is invalid",
+      );
+    }
+    return {
+      enrollmentInvitation: body.enrollmentInvitation,
+      organizationInvitation: body.organizationInvitation,
+      expiresAt: body.expiresAt,
+    };
+  }
+
   async joinOrganization(
     invitation: string,
     request: OrganizationJoinRequest,

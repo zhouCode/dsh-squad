@@ -173,7 +173,10 @@ export class RelayServer {
         token_hash TEXT PRIMARY KEY,
         expires_at TEXT NOT NULL,
         used_by_node_id TEXT,
-        used_at TEXT
+        used_at TEXT,
+        created_at TEXT,
+        created_by_node_id TEXT,
+        revoked_at TEXT
       );
       CREATE TABLE IF NOT EXISTS relay_envelopes (
         sequence INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -275,14 +278,43 @@ export class RelayServer {
         FOREIGN KEY(node_id) REFERENCES relay_nodes(node_id)
       );
     `);
-    const version = this.#db
-      .prepare("SELECT version FROM schema_meta WHERE singleton = 1")
-      .get() as SqlRow;
-    if (Number(version.version) === 1) {
+    let version = Number(
+      (
+        this.#db
+          .prepare("SELECT version FROM schema_meta WHERE singleton = 1")
+          .get() as SqlRow
+      ).version,
+    );
+    if (version === 1) {
       this.#db.exec("UPDATE schema_meta SET version = 2 WHERE singleton = 1");
-    } else if (Number(version.version) !== 2) {
+      version = 2;
+    }
+    if (version === 2) {
+      const inviteColumns = this.#db
+        .prepare("PRAGMA table_info(relay_invites)")
+        .all() as SqlRow[];
+      for (const column of [
+        ["created_at", "TEXT"],
+        ["created_by_node_id", "TEXT"],
+        ["revoked_at", "TEXT"],
+      ] as const) {
+        if (!inviteColumns.some((candidate) => candidate.name === column[0])) {
+          this.#db.exec(
+            `ALTER TABLE relay_invites ADD COLUMN ${column[0]} ${column[1]}`,
+          );
+        }
+      }
+      this.#db
+        .prepare(
+          "UPDATE relay_invites SET created_at = coalesce(created_at, ?) WHERE created_at IS NULL",
+        )
+        .run(new Date().toISOString());
+      this.#db.exec("UPDATE schema_meta SET version = 3 WHERE singleton = 1");
+      version = 3;
+    }
+    if (version !== 3) {
       throw new Error(
-        `unsupported Squad Relay database version ${String(version.version)}`,
+        `unsupported Squad Relay database version ${String(version)}`,
       );
     }
   }
@@ -293,9 +325,13 @@ export class RelayServer {
       throw new Error("relay invite has invalid expiresAt");
     this.#db
       .prepare(
-        "INSERT OR IGNORE INTO relay_invites(token_hash, expires_at) VALUES (?, ?)",
+        "INSERT OR IGNORE INTO relay_invites(token_hash, expires_at, created_at) VALUES (?, ?, ?)",
       )
-      .run(inviteHash(invite.token), new Date(expires).toISOString());
+      .run(
+        inviteHash(invite.token),
+        new Date(expires).toISOString(),
+        new Date().toISOString(),
+      );
   }
 
   private cleanupExpired(now = new Date().toISOString()): void {
@@ -452,20 +488,23 @@ export class RelayServer {
     const existing = this.#db
       .prepare("SELECT public_key FROM relay_nodes WHERE node_id = ?")
       .get(input.nodeId) as SqlRow | undefined;
-    if (existing !== undefined) {
-      if (existing.public_key !== input.publicKey) {
-        throw new HttpError(409, "NODE_ID_CONFLICT");
-      }
-      return { nodeId: input.nodeId, enrolled: false };
+    if (existing !== undefined && existing.public_key !== input.publicKey) {
+      throw new HttpError(409, "NODE_ID_CONFLICT");
     }
     const hash = inviteHash(input.invitation);
     const invite = this.#db
       .prepare(
-        "SELECT expires_at, used_by_node_id FROM relay_invites WHERE token_hash = ?",
+        "SELECT expires_at, used_by_node_id, revoked_at FROM relay_invites WHERE token_hash = ?",
       )
       .get(hash) as SqlRow | undefined;
     if (invite === undefined) throw new HttpError(403, "INVALID_INVITATION");
+    if (invite.revoked_at !== null) {
+      throw new HttpError(410, "INVITATION_REVOKED");
+    }
     if (invite.used_by_node_id !== null) {
+      if (existing !== undefined && invite.used_by_node_id === input.nodeId) {
+        return { nodeId: input.nodeId, enrolled: false };
+      }
       throw new HttpError(409, "INVITATION_ALREADY_USED");
     }
     if (Date.parse(String(invite.expires_at)) <= Date.now()) {
@@ -474,22 +513,31 @@ export class RelayServer {
     const now = new Date().toISOString();
     this.#db.exec("BEGIN IMMEDIATE");
     try {
-      this.#db
+      if (existing === undefined) {
+        this.#db
+          .prepare(
+            "INSERT INTO relay_nodes(node_id, display_name, public_key, enrolled_at) VALUES (?, ?, ?, ?)",
+          )
+          .run(input.nodeId, input.displayName, input.publicKey, now);
+      } else {
+        this.#db
+          .prepare("UPDATE relay_nodes SET display_name = ? WHERE node_id = ?")
+          .run(input.displayName, input.nodeId);
+      }
+      const consumed = this.#db
         .prepare(
-          "INSERT INTO relay_nodes(node_id, display_name, public_key, enrolled_at) VALUES (?, ?, ?, ?)",
-        )
-        .run(input.nodeId, input.displayName, input.publicKey, now);
-      this.#db
-        .prepare(
-          "UPDATE relay_invites SET used_by_node_id = ?, used_at = ? WHERE token_hash = ? AND used_by_node_id IS NULL",
+          "UPDATE relay_invites SET used_by_node_id = ?, used_at = ? WHERE token_hash = ? AND used_by_node_id IS NULL AND revoked_at IS NULL",
         )
         .run(input.nodeId, now, hash);
+      if (consumed.changes !== 1) {
+        throw new HttpError(409, "INVITATION_ALREADY_USED");
+      }
       this.#db.exec("COMMIT");
     } catch (error) {
       this.#db.exec("ROLLBACK");
       throw error;
     }
-    return { nodeId: input.nodeId, enrolled: true };
+    return { nodeId: input.nodeId, enrolled: existing === undefined };
   }
 
   private organizationDirectory(organizationId: string): {
@@ -745,11 +793,46 @@ export class RelayServer {
       directory,
       authenticatedNodeId,
     );
-    const secret = randomBytes(32).toString("base64url");
-    const invitation = organizationInvitation(organizationId, secret);
     const expiresAt = new Date(
       Date.now() + input.expiresInMinutes * 60_000,
     ).toISOString();
+    const invitation = this.insertOrganizationInvitation(
+      organizationId,
+      manager.membershipId,
+      expiresAt,
+    );
+    return { invitation, expiresAt };
+  }
+
+  private insertEnrollmentInvitation(
+    expiresAt: string,
+    createdByNodeId: string,
+  ): string {
+    const invitation = `squad-relay-v1.${randomBytes(32).toString("base64url")}`;
+    this.#db
+      .prepare(
+        `
+        INSERT INTO relay_invites(
+          token_hash, expires_at, created_at, created_by_node_id
+        ) VALUES (?, ?, ?, ?)
+      `,
+      )
+      .run(
+        inviteHash(invitation),
+        expiresAt,
+        new Date().toISOString(),
+        createdByNodeId,
+      );
+    return invitation;
+  }
+
+  private insertOrganizationInvitation(
+    organizationId: string,
+    createdByMembershipId: string,
+    expiresAt: string,
+  ): string {
+    const secret = randomBytes(32).toString("base64url");
+    const invitation = organizationInvitation(organizationId, secret);
     this.#db
       .prepare(
         `
@@ -762,11 +845,48 @@ export class RelayServer {
       .run(
         inviteHash(invitation),
         organizationId,
-        manager.membershipId,
+        createdByMembershipId,
         expiresAt,
         new Date().toISOString(),
       );
-    return { invitation, expiresAt };
+    return invitation;
+  }
+
+  private createOrganizationJoinPackage(
+    organizationId: string,
+    value: unknown,
+    authenticatedNodeId: string,
+  ): {
+    enrollmentInvitation: string;
+    organizationInvitation: string;
+    expiresAt: string;
+  } {
+    const input = createOrganizationInvitationSchema.parse(value);
+    const directory = this.organizationDirectory(organizationId);
+    const manager = this.assertOrganizationManager(
+      directory,
+      authenticatedNodeId,
+    );
+    const expiresAt = new Date(
+      Date.now() + input.expiresInMinutes * 60_000,
+    ).toISOString();
+    this.#db.exec("BEGIN IMMEDIATE");
+    try {
+      const enrollmentInvitation = this.insertEnrollmentInvitation(
+        expiresAt,
+        authenticatedNodeId,
+      );
+      const organizationInvitation = this.insertOrganizationInvitation(
+        organizationId,
+        manager.membershipId,
+        expiresAt,
+      );
+      this.#db.exec("COMMIT");
+      return { enrollmentInvitation, organizationInvitation, expiresAt };
+    } catch (error) {
+      this.#db.exec("ROLLBACK");
+      throw error;
+    }
   }
 
   private joinOrganization(
@@ -1273,6 +1393,27 @@ export class RelayServer {
           201,
           this.createOrganizationInvitation(
             organizationInvitationRoute[1],
+            jsonBody(body),
+            auth.nodeId,
+          ),
+        );
+        return true;
+      }
+      const organizationJoinPackageRoute =
+        /^\/squad\/v1\/organizations\/([0-9a-f-]{36})\/join-packages$/u.exec(
+          url.pathname,
+        );
+      if (
+        req.method === "POST" &&
+        organizationJoinPackageRoute?.[1] !== undefined
+      ) {
+        const body = await readBody(req, 8 * 1024);
+        const auth = this.authenticate(req, path, body);
+        reply(
+          res,
+          201,
+          this.createOrganizationJoinPackage(
+            organizationJoinPackageRoute[1],
             jsonBody(body),
             auth.nodeId,
           ),

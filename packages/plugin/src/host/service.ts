@@ -39,6 +39,14 @@ import {
   type UnsignedEnvelope,
 } from "../shared/contracts.ts";
 import {
+  decodeJoinPackage,
+  encodeJoinPackage,
+  unsignedJoinPackage,
+  unsignedJoinPackageSchema,
+  type ImportJoinPackage,
+  type JoinPackage,
+} from "../shared/join-package.ts";
+import {
   organizationIdFromInvitation,
   organizationRoleSchema,
   unsignedOrganizationDocumentSchema,
@@ -1046,6 +1054,123 @@ export class SquadService extends Service {
       organization.organizationId,
       expiresInMinutes,
     );
+  }
+
+  async createOrganizationJoinPackage(
+    organizationSelector: string,
+    expiresInMinutes = 1_440,
+  ): Promise<{ bundle: string; expiresAt: string }> {
+    await this.syncOrganizations();
+    const organization = this.database.findOrganization(
+      organizationSelector,
+      this.identity.nodeId,
+    );
+    if (
+      organization === undefined ||
+      organization.membershipStatus !== "ACTIVE"
+    ) {
+      throw new Error("unknown active organization");
+    }
+    if (!organization.role || !["OWNER", "ADMIN"].includes(organization.role)) {
+      throw new Error(
+        "Owner or Admin role is required to create join packages",
+      );
+    }
+    const relayUrl = this.#nodeSettings.relayUrl;
+    if (relayUrl === undefined) {
+      throw new Error("a Relay connection is required for join packages");
+    }
+    const invitations =
+      await this.requireRelayClient().createOrganizationJoinPackage(
+        organization.organizationId,
+        expiresInMinutes,
+      );
+    const issuedAt = new Date().toISOString();
+    const unsigned = unsignedJoinPackageSchema.parse({
+      version: 1,
+      relayUrl,
+      organizationId: organization.organizationId,
+      organizationName: organization.name,
+      enrollmentInvitation: invitations.enrollmentInvitation,
+      organizationInvitation: invitations.organizationInvitation,
+      issuer: {
+        nodeId: this.identity.nodeId,
+        displayName: this.#nodeSettings.displayName,
+        publicKey: this.identity.publicKey,
+      },
+      issuedAt,
+      expiresAt: invitations.expiresAt,
+    });
+    const signed: JoinPackage = {
+      ...unsigned,
+      signature: this.identity.sign(unsigned),
+    };
+    return {
+      bundle: encodeJoinPackage(signed),
+      expiresAt: invitations.expiresAt,
+    };
+  }
+
+  async importJoinPackage(input: ImportJoinPackage): Promise<{
+    organizationId: string;
+    organizationName: string;
+    status: "PENDING";
+  }> {
+    const bundle = decodeJoinPackage(input.bundle);
+    if (nodeIdFromPublicKey(bundle.issuer.publicKey) !== bundle.issuer.nodeId) {
+      throw new Error("join package issuer identity is invalid");
+    }
+    if (
+      !verifySignature(
+        unsignedJoinPackage(bundle),
+        bundle.signature,
+        bundle.issuer.publicKey,
+      )
+    ) {
+      throw new Error("join package signature is invalid");
+    }
+    const issuedAt = Date.parse(bundle.issuedAt);
+    const expiresAt = Date.parse(bundle.expiresAt);
+    if (issuedAt > Date.now() + 5 * 60_000 || expiresAt <= issuedAt) {
+      throw new Error("join package timestamps are invalid");
+    }
+    if (expiresAt <= Date.now()) throw new Error("join package has expired");
+    if (
+      organizationIdFromInvitation(bundle.organizationInvitation) !==
+      bundle.organizationId
+    ) {
+      throw new Error("join package organization invitation does not match");
+    }
+    const relayUrl = resolveRelayBaseUrl(
+      bundle.relayUrl,
+      "join package Relay URL",
+    );
+    if (relayUrl === undefined)
+      throw new Error("join package Relay URL is invalid");
+    if (
+      this.#nodeSettings.relayUrl !== undefined &&
+      this.#nodeSettings.relayUrl !== relayUrl
+    ) {
+      throw new Error(
+        "this Node is connected to a different Relay; switching Relays requires an explicit settings change",
+      );
+    }
+    await this.configureNode({
+      mode: "RELAY",
+      displayName: input.displayName ?? this.#nodeSettings.displayName,
+      relayUrl,
+      invitation: bundle.enrollmentInvitation,
+      directEnabled: this.#nodeSettings.directEnabled,
+      ...(this.#nodeSettings.directPublicUrl === undefined
+        ? {}
+        : { directPublicUrl: this.#nodeSettings.directPublicUrl }),
+    });
+    await this.joinOrganization(bundle.organizationInvitation);
+    return {
+      organizationId: bundle.organizationId,
+      organizationName: bundle.organizationName,
+      status: "PENDING",
+    };
   }
 
   async joinOrganization(invitationCandidate: string): Promise<void> {
