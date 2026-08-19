@@ -72,6 +72,8 @@ The Agent calls `propose_team_plan`. Only owner approval creates one signed Dele
 
 After dispatch, the original plan rolls up each item's live queued, running, waiting-for-human, completed, failed, or canceled state and collects only the result summary and outputs that the recipient explicitly publishes. The owner can open the full delegation record from any plan item. Private Sessions, HumanTodo details, and local work remain outside the plan projection.
 
+Each delegation detail expands status into a four-stage `Created → Delivery → Acceptance and execution → Result` timeline and names whether the local user, local Agent, Relay, peer Node, or automatic retry acts next. An offline peer therefore reads as locally queued, persisted by Relay, received by the peer, or executing without requiring users to interpret protocol states.
+
 The same local Plan API is available for future connectors such as Feishu/Lark to create drafts or read status projections. This version does not include a Feishu/Lark connector and never executes work merely because an external board was edited.
 
 ## Organizations, roles, and Session isolation

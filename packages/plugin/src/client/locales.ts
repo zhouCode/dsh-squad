@@ -56,6 +56,29 @@ export const zh = {
     "请根据这段会议纪要，为团队生成一份可审核的任务分派草案。",
   "direction.received": "收到",
   "direction.sent": "已发送",
+  "delegationProgress.title": "任务进度",
+  "delegationProgress.nextAction": "下一步",
+  "delegationProgress.stage.CREATED": "已创建",
+  "delegationProgress.stage.DELIVERY": "投递",
+  "delegationProgress.stage.EXECUTION": "接收与执行",
+  "delegationProgress.stage.RESULT": "结果",
+  "delegationProgress.state.DONE": "已完成",
+  "delegationProgress.state.CURRENT": "当前阶段",
+  "delegationProgress.state.PENDING": "尚未开始",
+  "delegationProgress.state.ERROR": "已停止",
+  "delegationProgress.next.LOCAL_DECISION":
+    "需要你在本节点确认、回复或补充信息。",
+  "delegationProgress.next.LOCAL_EXECUTION":
+    "本机 Squad / Agent 正在处理，无需手动转发。",
+  "delegationProgress.next.AUTOMATIC_RETRY":
+    "Squad 会自动重试投递；你也可以立即手动重试。",
+  "delegationProgress.next.PEER_RECEIVE":
+    "Relay 已持久保存任务，等待对方节点上线并接收。",
+  "delegationProgress.next.PEER_EXECUTION":
+    "任务已到达对方节点，下一步由对方用户或 Agent 处理。",
+  "delegationProgress.next.COMPLETE": "任务已结束，结果已同步。",
+  "delegationProgress.next.STOPPED":
+    "任务已停止；查看错误或摘要后决定是否新建委派。",
   "field.peer": "对等方",
   "field.delivery": "投递",
   "field.deliveryAttempts": "失败重试次数",
@@ -693,6 +716,30 @@ export const en = {
     "Use these meeting notes to create a reviewable delegation plan for the team.",
   "direction.received": "Received",
   "direction.sent": "Sent",
+  "delegationProgress.title": "Task progress",
+  "delegationProgress.nextAction": "What happens next",
+  "delegationProgress.stage.CREATED": "Created",
+  "delegationProgress.stage.DELIVERY": "Delivery",
+  "delegationProgress.stage.EXECUTION": "Acceptance and execution",
+  "delegationProgress.stage.RESULT": "Result",
+  "delegationProgress.state.DONE": "Done",
+  "delegationProgress.state.CURRENT": "Current",
+  "delegationProgress.state.PENDING": "Not started",
+  "delegationProgress.state.ERROR": "Stopped",
+  "delegationProgress.next.LOCAL_DECISION":
+    "You need to approve, reply, or provide input on this Node.",
+  "delegationProgress.next.LOCAL_EXECUTION":
+    "The local Squad / Agent is processing it; no manual forwarding is needed.",
+  "delegationProgress.next.AUTOMATIC_RETRY":
+    "Squad will retry delivery automatically; you can also retry it now.",
+  "delegationProgress.next.PEER_RECEIVE":
+    "Relay has persisted the task and is waiting for the peer Node to come online and receive it.",
+  "delegationProgress.next.PEER_EXECUTION":
+    "The task reached the peer Node; the peer user or Agent acts next.",
+  "delegationProgress.next.COMPLETE":
+    "The task has ended and its result is synchronized.",
+  "delegationProgress.next.STOPPED":
+    "The task stopped; review the error or summary before creating a new delegation.",
   "field.peer": "Peer",
   "field.delivery": "Delivery",
   "field.deliveryAttempts": "Failed delivery attempts",
