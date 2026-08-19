@@ -1193,12 +1193,13 @@ function DelegationDetail({
                     rows={4}
                     maxLength={50_000}
                     placeholder={t("humanTodo.responsePlaceholder")}
-                    onChange={(event) =>
+                    onChange={(event) => {
+                      const value = event.currentTarget.value;
                       setTodoResponses((current) => ({
                         ...current,
-                        [todo.id]: event.currentTarget.value,
-                      }))
-                    }
+                        [todo.id]: value,
+                      }));
+                    }}
                   />
                 </label>
                 <AttachmentDraftEditor
@@ -1446,12 +1447,13 @@ function TeamPlanDraftEditor({
           required
           maxLength={240}
           value={draft.title}
-          onChange={(event) =>
+          onChange={(event) => {
+            const value = event.currentTarget.value;
             setDraft((current) => ({
               ...current,
-              title: event.currentTarget.value,
-            }))
-          }
+              title: value,
+            }));
+          }}
         />
       </label>
       <label>
@@ -1460,12 +1462,13 @@ function TeamPlanDraftEditor({
           rows={4}
           maxLength={50_000}
           value={draft.sourceSummary}
-          onChange={(event) =>
+          onChange={(event) => {
+            const value = event.currentTarget.value;
             setDraft((current) => ({
               ...current,
-              sourceSummary: event.currentTarget.value,
-            }))
-          }
+              sourceSummary: value,
+            }));
+          }}
         />
       </label>
       <div className="squad-plan-editor-items">
@@ -1518,12 +1521,13 @@ function TeamPlanDraftEditor({
                 <select
                   required
                   value={item.to}
-                  onChange={(event) =>
+                  onChange={(event) => {
+                    const value = event.currentTarget.value;
                     updateItem(item.key, (current) => ({
                       ...current,
-                      to: event.currentTarget.value,
-                    }))
-                  }
+                      to: value,
+                    }));
+                  }}
                 >
                   {currentRecipient ? (
                     <option value={item.to}>
@@ -1546,12 +1550,13 @@ function TeamPlanDraftEditor({
                   rows={3}
                   maxLength={20_000}
                   value={item.objective}
-                  onChange={(event) =>
+                  onChange={(event) => {
+                    const value = event.currentTarget.value;
                     updateItem(item.key, (current) => ({
                       ...current,
-                      objective: event.currentTarget.value,
-                    }))
-                  }
+                      objective: value,
+                    }));
+                  }}
                 />
               </label>
               <label>
@@ -1560,12 +1565,13 @@ function TeamPlanDraftEditor({
                   rows={4}
                   maxLength={100_000}
                   value={item.context}
-                  onChange={(event) =>
+                  onChange={(event) => {
+                    const value = event.currentTarget.value;
                     updateItem(item.key, (current) => ({
                       ...current,
-                      context: event.currentTarget.value,
-                    }))
-                  }
+                      context: value,
+                    }));
+                  }}
                 />
               </label>
               <label>
@@ -1574,12 +1580,13 @@ function TeamPlanDraftEditor({
                   rows={4}
                   value={item.acceptanceCriteria}
                   placeholder={t("plan.criteriaHint")}
-                  onChange={(event) =>
+                  onChange={(event) => {
+                    const value = event.currentTarget.value;
                     updateItem(item.key, (current) => ({
                       ...current,
-                      acceptanceCriteria: event.currentTarget.value,
-                    }))
-                  }
+                      acceptanceCriteria: value,
+                    }));
+                  }}
                 />
               </label>
               <AttachmentDraftEditor
@@ -5204,7 +5211,7 @@ function SquadPanel({
             type="button"
             className="squad-close"
             onClick={() => setPanelOpen(false)}
-            aria-label={t("close")}
+            aria-label={t("inbox.close")}
           >
             ×
           </button>
