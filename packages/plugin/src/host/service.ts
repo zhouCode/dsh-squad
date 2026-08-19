@@ -1324,6 +1324,27 @@ export class SquadService extends Service {
     await this.syncOrganizations();
   }
 
+  async rejectOrganizationJoin(
+    organizationId: string,
+    requestId: string,
+  ): Promise<void> {
+    await this.syncOrganizations();
+    const directory = this.database.organizationDirectory(organizationId);
+    if (directory === undefined) throw new Error("unknown organization");
+    if (
+      !directory.pendingJoinRequests.some(
+        (candidate) => candidate.requestId === requestId,
+      )
+    ) {
+      throw new Error("unknown pending join request");
+    }
+    await this.requireRelayClient().rejectOrganizationJoin(
+      organizationId,
+      requestId,
+    );
+    await this.syncOrganizations();
+  }
+
   private async changeOrganizationMember(
     organizationId: string,
     membershipId: string,

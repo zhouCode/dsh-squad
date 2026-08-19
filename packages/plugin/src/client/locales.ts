@@ -114,6 +114,7 @@ export const zh = {
   "action.createInvitation": "创建一次性邀请",
   "action.createJoinPackage": "为新节点创建加入包",
   "action.approveJoin": "批准加入",
+  "action.rejectJoin": "拒绝加入",
   "action.enableMember": "启用成员",
   "action.disableMember": "禁用成员",
   "action.copyPrompt": "复制示例",
@@ -151,6 +152,9 @@ export const zh = {
   "confirm.approveJoinTitle": "批准成员加入？",
   "confirm.approveJoin":
     "“{name}”将加入“{organization}”，并可查看成员目录和接收组织任务。",
+  "confirm.rejectJoinTitle": "拒绝此加入申请？",
+  "confirm.rejectJoin":
+    "“{name}”对“{organization}”的申请会被关闭；对方需要新的邀请才能再次申请。",
   "confirm.changeRoleTitle": "更改组织角色？",
   "confirm.changeRole":
     "将“{name}”在“{organization}”中的角色改为“{role}”。管理员可以邀请、批准和管理普通成员。",
@@ -669,6 +673,7 @@ export const en = {
   "action.createInvitation": "Create one-time invitation",
   "action.createJoinPackage": "Create join package for a new Node",
   "action.approveJoin": "Approve join",
+  "action.rejectJoin": "Reject join",
   "action.enableMember": "Enable member",
   "action.disableMember": "Disable member",
   "action.copyPrompt": "Copy example",
@@ -706,6 +711,9 @@ export const en = {
   "confirm.approveJoinTitle": "Approve this member?",
   "confirm.approveJoin":
     "“{name}” will join “{organization}” and can see its member directory and receive organization tasks.",
+  "confirm.rejectJoinTitle": "Reject this join request?",
+  "confirm.rejectJoin":
+    "“{name}”'s request for “{organization}” will be closed. They need a new invitation to request access again.",
   "confirm.changeRoleTitle": "Change organization role?",
   "confirm.changeRole":
     "Change “{name}” in “{organization}” to “{role}”. Admins can invite, approve, and manage regular members.",

@@ -1052,6 +1052,30 @@ export class RelayServer {
     return { organizationId, revision: certificate.organizationRevision };
   }
 
+  private rejectOrganizationJoin(
+    organizationId: string,
+    requestId: string,
+    authenticatedNodeId: string,
+  ): { organizationId: string; requestId: string; status: "REJECTED" } {
+    const directory = this.organizationDirectory(organizationId);
+    this.assertOrganizationManager(directory, authenticatedNodeId);
+    const row = this.#db
+      .prepare(
+        "SELECT status FROM relay_organization_join_requests WHERE organization_id = ? AND request_id = ?",
+      )
+      .get(organizationId, requestId) as SqlRow | undefined;
+    if (row === undefined) throw new HttpError(404, "JOIN_REQUEST_NOT_FOUND");
+    if (row.status !== "PENDING") {
+      throw new HttpError(409, "JOIN_REQUEST_ALREADY_RESOLVED");
+    }
+    this.#db
+      .prepare(
+        "UPDATE relay_organization_join_requests SET status = 'REJECTED', resolved_at = ? WHERE organization_id = ? AND request_id = ? AND status = 'PENDING'",
+      )
+      .run(new Date().toISOString(), organizationId, requestId);
+    return { organizationId, requestId, status: "REJECTED" };
+  }
+
   private updateOrganizationMember(
     organizationId: string,
     membershipId: string,
@@ -1438,6 +1462,28 @@ export class RelayServer {
             approveOrganizationJoinRoute[1],
             approveOrganizationJoinRoute[2],
             jsonBody(body),
+            auth.nodeId,
+          ),
+        );
+        return true;
+      }
+      const rejectOrganizationJoinRoute =
+        /^\/squad\/v1\/organizations\/([0-9a-f-]{36})\/join-requests\/([0-9a-f-]{36})\/reject$/u.exec(
+          url.pathname,
+        );
+      if (
+        req.method === "POST" &&
+        rejectOrganizationJoinRoute?.[1] !== undefined &&
+        rejectOrganizationJoinRoute[2] !== undefined
+      ) {
+        const body = await readBody(req, 1_024);
+        const auth = this.authenticate(req, path, body);
+        reply(
+          res,
+          200,
+          this.rejectOrganizationJoin(
+            rejectOrganizationJoinRoute[1],
+            rejectOrganizationJoinRoute[2],
             auth.nodeId,
           ),
         );

@@ -76,7 +76,7 @@ Agent 会调用 `propose_team_plan`。负责人确认后，Squad 才为每个计
 
 ## 组织、角色与 Session 隔离
 
-创建组织的节点是唯一 `Owner`。Owner 可以指定零个或多个 `Admin`；其他参与者加入后都是 `Member`。Owner 和 Admin 可以创建一次性邀请并批准加入申请，Admin 只能管理普通 Member，只有 Owner 能任命或撤销 Admin。目录 v1 暂不支持 Owner 转让，避免在尚未定义恢复流程时产生双 Owner 或无 Owner 状态。
+创建组织的节点是唯一 `Owner`。Owner 可以指定零个或多个 `Admin`；其他参与者加入后都是 `Member`。Owner 和 Admin 可以创建一次性邀请并批准或拒绝加入申请，Admin 只能管理普通 Member，只有 Owner 能任命或撤销 Admin。被拒绝的申请会立即从双方待处理列表消失，申请者需要新邀请才能再次申请。目录 v1 暂不支持 Owner 转让，避免在尚未定义恢复流程时产生双 Owner 或无 Owner 状态。
 
 组织根由独立 Authority 密钥签名，后续成员事件由当时有权限的 Owner/Admin 节点签名。Relay 和每个节点都会验证完整的追加式事件链、公钥身份、连续修订、签发者角色以及唯一活动 Owner；被禁用的成员不能继续发送组织委派。
 

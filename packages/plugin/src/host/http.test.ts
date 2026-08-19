@@ -200,6 +200,29 @@ describe("Squad host health", () => {
     expect(checkConnections).toHaveBeenCalledOnce();
   });
 
+  it("routes organization join rejection through the local API", async () => {
+    const organizationId = "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa";
+    const requestId = "bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb";
+    const rejectOrganizationJoin = vi.fn(async () => undefined);
+    const squad = { rejectOrganizationJoin } as unknown as SquadService;
+    const server = createServer(createHttpHandler(squad));
+    servers.push(server);
+    await new Promise<void>((resolve) =>
+      server.listen(0, "127.0.0.1", resolve),
+    );
+    const address = server.address() as AddressInfo;
+    const response = await fetch(
+      `http://127.0.0.1:${address.port}/squad/v1/local/organizations/${organizationId}/join-requests/${requestId}/reject`,
+      { method: "POST", body: "{}" },
+    );
+    expect(response.status).toBe(200);
+    expect(await response.json()).toEqual({ ok: true });
+    expect(rejectOrganizationJoin).toHaveBeenCalledWith(
+      organizationId,
+      requestId,
+    );
+  });
+
   it("validates and manages local automation rules", async () => {
     const created = {
       id: "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa",

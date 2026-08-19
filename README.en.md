@@ -76,7 +76,7 @@ The same local Plan API is available for future connectors such as Feishu/Lark t
 
 ## Organizations, roles, and Session isolation
 
-The Node that creates an organization is its sole `Owner`. The Owner may appoint zero or more `Admin` members; every other participant joins as a `Member`. Owner and Admin can create one-time invitations and approve join requests. Admins can manage ordinary Members, while only the Owner can appoint or demote Admins. Directory v1 deliberately omits Owner transfer until a safe recovery flow can prevent dual-Owner or ownerless states.
+The Node that creates an organization is its sole `Owner`. The Owner may appoint zero or more `Admin` members; every other participant joins as a `Member`. Owner and Admin can create one-time invitations and approve or reject join requests. A rejected request disappears from both pending views immediately, and its applicant needs a new invitation before trying again. Admins can manage ordinary Members, while only the Owner can appoint or demote Admins. Directory v1 deliberately omits Owner transfer until a safe recovery flow can prevent dual-Owner or ownerless states.
 
 A dedicated Authority key signs the organization root, and authorized Owner/Admin Nodes sign later member events. Relay and every Node verify the complete append-only chain, pinned public-key identity, continuous revisions, issuer role, and exactly one active Owner. A disabled member can no longer send organization-scoped Delegations.
 

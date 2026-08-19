@@ -7,6 +7,7 @@ All notable changes to this project are documented in this file. The format is b
 ### Added
 
 - Team Planner now rolls up live execution state, result summaries, and published outputs for every dispatched item, with direct navigation to its full delegation record.
+- Organization Owners and Admins can explicitly reject pending join requests; rejected applicants require a new one-time invitation before reapplying.
 
 ## [0.7.0] - 2026-08-19
 

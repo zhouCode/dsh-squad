@@ -27,7 +27,7 @@ describe("Relay organization directory", () => {
     const expiresAt = new Date(Date.now() + 60_000).toISOString();
     const relay = new RelayServer({
       databasePath: join(root, "relay.sqlite"),
-      invites: ["alice", "bob", "carol"].map((name) => ({
+      invites: ["alice", "bob", "carol", "dave"].map((name) => ({
         token: `relay-invite-${name}-000000000000`,
         expiresAt,
       })),
@@ -60,12 +60,15 @@ describe("Relay organization directory", () => {
     const aliceIdentity = NodeIdentity.load(join(root, "alice.json"));
     const bobIdentity = NodeIdentity.load(join(root, "bob.json"));
     const carolIdentity = NodeIdentity.load(join(root, "carol.json"));
+    const daveIdentity = NodeIdentity.load(join(root, "dave.json"));
     const alice = new RelayClient(base, aliceIdentity);
     const bob = new RelayClient(base, bobIdentity);
     const carol = new RelayClient(base, carolIdentity);
+    const dave = new RelayClient(base, daveIdentity);
     await alice.enroll("relay-invite-alice-000000000000", "Alice");
     await bob.enroll("relay-invite-bob-000000000000", "Bob");
     await carol.enroll("relay-invite-carol-000000000000", "Carol");
+    await dave.enroll("relay-invite-dave-000000000000", "Dave");
     expect((await alice.nodes()).map(({ displayName }) => displayName)).toEqual(
       ["Alice"],
     );
@@ -241,6 +244,35 @@ describe("Relay organization directory", () => {
     await expect(
       carol.createOrganizationInvitation(organizationId, 60),
     ).rejects.toMatchObject({ code: "ORGANIZATION_MANAGER_REQUIRED" });
+
+    const daveInvitation = await alice.createOrganizationInvitation(
+      organizationId,
+      60,
+    );
+    const daveRequestUnsigned = unsignedOrganizationJoinRequestSchema.parse({
+      version: 1,
+      requestId: randomUUID(),
+      organizationId,
+      membershipId: randomUUID(),
+      nodeId: daveIdentity.nodeId,
+      publicKey: daveIdentity.publicKey,
+      displayName: "Dave",
+      requestedAt: new Date().toISOString(),
+    });
+    const daveRequest = {
+      ...daveRequestUnsigned,
+      signature: daveIdentity.sign(daveRequestUnsigned),
+    };
+    await dave.joinOrganization(daveInvitation.invitation, daveRequest);
+    await expect(
+      carol.rejectOrganizationJoin(organizationId, daveRequest.requestId),
+    ).rejects.toMatchObject({ code: "ORGANIZATION_MANAGER_REQUIRED" });
+    await alice.rejectOrganizationJoin(organizationId, daveRequest.requestId);
+    expect(await dave.organizations()).toEqual([]);
+    expect((await alice.organizations())[0]?.pendingJoinRequests).toEqual([]);
+    await expect(
+      alice.rejectOrganizationJoin(organizationId, daveRequest.requestId),
+    ).rejects.toMatchObject({ code: "JOIN_REQUEST_ALREADY_RESOLVED" });
 
     const disableBobUnsigned =
       unsignedOrganizationMembershipCertificateSchema.parse({

@@ -60,7 +60,7 @@ For Direct mode, both Nodes pin each other's Node ID/public key and Direct URL. 
 
 Direct has no NAT traversal or third-party offline mailbox: the sender keeps the task until both Peers are online and reachable. Production endpoints require HTTPS. Signed organization directories remain Relay-backed in v0.6.
 
-The native WebUI exposes `Agent Inbox` / `智能体收件箱` for real-time Node and Session organization identity, signed membership, invitations and approvals, per-member policy, Team Planner review, inbox/outbox state, HumanTodo input, and native Session links. Agents also receive organization listing/selection tools. A Team Planner proposal stays local until its owner approves it; recipient policy and approval remain independent.
+The native WebUI exposes `Agent Inbox` / `智能体收件箱` for real-time Node and Session organization identity, signed membership, invitation approval or rejection, per-member policy, Team Planner review, inbox/outbox state, HumanTodo input, and native Session links. Agents also receive organization listing/selection tools. A Team Planner proposal stays local until its owner approves it; recipient policy and approval remain independent.
 
 After dispatch, the plan rolls up live execution progress and collects only the result summaries and outputs explicitly published by recipients; each item links to its full delegation record.
 

@@ -442,6 +442,23 @@ export function createHttpHandler(squad: SquadService) {
         reply(res, 200, { ok: true });
         return;
       }
+      const rejectOrganizationJoin =
+        /^\/squad\/v1\/local\/organizations\/([0-9a-f-]{36})\/join-requests\/([0-9a-f-]{36})\/reject$/u.exec(
+          url.pathname,
+        );
+      if (
+        req.method === "POST" &&
+        rejectOrganizationJoin?.[1] !== undefined &&
+        rejectOrganizationJoin[2] !== undefined
+      ) {
+        await readJson(req, 1_024);
+        await squad.rejectOrganizationJoin(
+          rejectOrganizationJoin[1],
+          rejectOrganizationJoin[2],
+        );
+        reply(res, 200, { ok: true });
+        return;
+      }
       const organizationMemberAction =
         /^\/squad\/v1\/local\/organizations\/([0-9a-f-]{36})\/members\/([0-9a-f-]{36})\/(role|status|policy)$/u.exec(
           url.pathname,

@@ -318,6 +318,17 @@ export class RelayClient {
     );
   }
 
+  async rejectOrganizationJoin(
+    organizationId: string,
+    requestId: string,
+  ): Promise<void> {
+    await this.request(
+      "POST",
+      `/squad/v1/organizations/${organizationId}/join-requests/${requestId}/reject`,
+      {},
+    );
+  }
+
   async updateOrganizationMember(
     organizationId: string,
     membershipId: string,
