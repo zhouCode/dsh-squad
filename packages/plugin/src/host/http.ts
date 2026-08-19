@@ -127,6 +127,13 @@ export function createHttpHandler(squad: SquadService) {
         reply(res, 200, squad.localState());
         return;
       }
+      if (
+        req.method === "GET" &&
+        url.pathname === "/squad/v1/local/attention"
+      ) {
+        reply(res, 200, squad.localAttentionSummary());
+        return;
+      }
       if (req.method === "GET" && url.pathname === "/squad/v1/local/events") {
         streamLocalState(req, res, squad);
         return;

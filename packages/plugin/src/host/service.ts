@@ -51,7 +51,11 @@ import {
   type OrganizationRole,
   type OrganizationView,
 } from "../shared/organizations.ts";
-import { isTerminalStatus } from "../shared/state.ts";
+import {
+  isTerminalStatus,
+  summarizeAttention,
+  type SquadAttentionSummary,
+} from "../shared/state.ts";
 import type { UpdateMode, UpdateSnapshot } from "../shared/updates.ts";
 import { SQUAD_VERSION } from "../shared/version.ts";
 import {
@@ -2043,6 +2047,18 @@ export class SquadService extends Service {
       delegations: this.database.listDelegations(),
       updates: this.updates.snapshot(),
     };
+  }
+
+  localAttentionSummary(): SquadAttentionSummary {
+    const state = this.localState();
+    return summarizeAttention({
+      revision: state.revision,
+      setupRequired: state.setup.required,
+      delegations: state.delegations,
+      plans: state.plans,
+      organizations: state.organizations,
+      updateAvailable: state.updates.status.available === true,
+    });
   }
 
   version(): string {

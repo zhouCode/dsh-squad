@@ -2,6 +2,7 @@ import {
   useCallback,
   useEffect,
   useMemo,
+  useRef,
   useState,
   useSyncExternalStore,
   type FormEvent,
@@ -15,7 +16,11 @@ import type { PropsLocale } from "@deepseek-ai/dsh-client-ui-slots";
 import type { SidebarFooterActionOwnerProps } from "@deepseek-ai/dsh-client-ui-sidebar/client";
 import type { TeamPlan, TeamPlanStatus } from "../shared/contracts.ts";
 import type { OrganizationView } from "../shared/organizations.ts";
-import type { DelegationStatus } from "../shared/state.ts";
+import {
+  summarizeAttention,
+  type DelegationStatus,
+  type SquadAttentionSummary,
+} from "../shared/state.ts";
 import type { UpdateMode, UpdateSnapshot } from "../shared/updates.ts";
 import {
   SQUAD_LOCALE_NS,
@@ -169,6 +174,64 @@ async function api<T>(path: string, init?: RequestInit): Promise<T> {
   return body;
 }
 
+let attentionSnapshot: SquadAttentionSummary | undefined;
+let attentionEvents: EventSource | undefined;
+let attentionRefresh: Promise<void> | undefined;
+let attentionRefreshQueued = false;
+const attentionListeners = new Set<() => void>();
+
+function emitAttention(): void {
+  for (const listener of attentionListeners) listener();
+}
+
+async function refreshAttention(): Promise<void> {
+  if (attentionRefresh !== undefined) {
+    attentionRefreshQueued = true;
+    return attentionRefresh;
+  }
+  attentionRefresh = (async () => {
+    do {
+      attentionRefreshQueued = false;
+      try {
+        const next = await api<SquadAttentionSummary>("/attention");
+        if (
+          attentionSnapshot === undefined ||
+          next.revision >= attentionSnapshot.revision
+        ) {
+          attentionSnapshot = next;
+          emitAttention();
+        }
+      } catch {
+        // The open panel surfaces connection errors; keep the last badge here.
+      }
+    } while (attentionRefreshQueued);
+  })().finally(() => {
+    attentionRefresh = undefined;
+  });
+  return attentionRefresh;
+}
+
+function startAttentionEvents(): void {
+  if (attentionEvents !== undefined) return;
+  void refreshAttention();
+  attentionEvents = new EventSource("/squad/v1/local/events");
+  attentionEvents.addEventListener("state", () => void refreshAttention());
+}
+
+function subscribeAttention(listener: () => void): () => void {
+  attentionListeners.add(listener);
+  startAttentionEvents();
+  return () => attentionListeners.delete(listener);
+}
+
+function useAttentionSummary(): SquadAttentionSummary | undefined {
+  return useSyncExternalStore(
+    subscribeAttention,
+    () => attentionSnapshot,
+    () => undefined,
+  );
+}
+
 function describeError(
   cause: unknown,
   t: SquadTranslate,
@@ -188,11 +251,17 @@ function SquadTrigger({
   t,
 }: SidebarFooterActionOwnerProps & PropsLocale<typeof SQUAD_LOCALE_NS>) {
   const open = usePanelOpen();
+  const attention = useAttentionSummary();
+  const badge = attention?.setupRequired ? "!" : attention?.total;
+  const label =
+    typeof badge === "number" && badge > 0
+      ? t("inbox.attentionLabel", { count: badge })
+      : t("inbox.title");
   return (
     <button
       className={`squad-trigger ${wide ? "squad-trigger-wide" : ""}`}
       type="button"
-      aria-label={t("inbox.title")}
+      aria-label={label}
       aria-expanded={open}
       title={t("inbox.title")}
       lang={t("html.lang")}
@@ -202,11 +271,17 @@ function SquadTrigger({
         ⇄
       </span>
       {wide ? <span>{t("inbox.title")}</span> : null}
+      {badge === "!" || (typeof badge === "number" && badge > 0) ? (
+        <span className="squad-trigger-badge" aria-hidden="true">
+          {typeof badge === "number" && badge > 99 ? "99+" : badge}
+        </span>
+      ) : null}
     </button>
   );
 }
 
 type Tab =
+  | "overview"
   | "plans"
   | "waiting"
   | "running"
@@ -217,6 +292,7 @@ type Tab =
   | "settings";
 
 const tabKeys = {
+  overview: "tab.overview",
   plans: "tab.plans",
   waiting: "tab.waiting",
   running: "tab.running",
@@ -226,6 +302,139 @@ const tabKeys = {
   updates: "tab.updates",
   settings: "tab.settings",
 } as const satisfies Record<Tab, SquadLocaleKey>;
+
+function localAttention(state: LocalState): SquadAttentionSummary {
+  return summarizeAttention({
+    revision: state.revision,
+    setupRequired: state.setup.required,
+    delegations: state.delegations,
+    plans: state.plans,
+    organizations: state.organizations,
+    updateAvailable: state.updates.status.available === true,
+  });
+}
+
+function Overview({
+  state,
+  navigate,
+  t,
+}: {
+  state: LocalState;
+  navigate: (tab: Tab) => void;
+  t: SquadTranslate;
+}) {
+  const summary = localAttention(state);
+  const hasActiveOrganization = state.organizations.some(
+    (organization) => organization.membershipStatus === "ACTIVE",
+  );
+  const hasRecipient =
+    state.peers.some((peer) => peer.enabled) ||
+    state.organizations.some((organization) =>
+      organization.members.some(
+        (member) => !member.isSelf && member.status === "ACTIVE",
+      ),
+    );
+  const prompt = t("overview.examplePrompt");
+  const nextStep = !hasRecipient
+    ? state.relay.configured && !hasActiveOrganization
+      ? {
+          title: t("overview.nextOrganization"),
+          detail: t("overview.nextOrganizationHint"),
+          action: t("overview.openOrganizations"),
+          tab: "organizations" as const,
+        }
+      : {
+          title: t("overview.nextPeer"),
+          detail: t("overview.nextPeerHint"),
+          action: t("overview.openPeers"),
+          tab: "settings" as const,
+        }
+    : undefined;
+  const cards: Array<{
+    key: string;
+    value: number;
+    label: SquadLocaleKey;
+    tab: Tab;
+  }> = [
+    {
+      key: "waiting",
+      value: summary.waitingHuman,
+      label: "overview.waitingHuman",
+      tab: "waiting",
+    },
+    {
+      key: "failed",
+      value: summary.failedOutgoing,
+      label: "overview.failedOutgoing",
+      tab: "completed",
+    },
+    {
+      key: "joins",
+      value: summary.pendingJoinRequests,
+      label: "overview.pendingJoins",
+      tab: "organizations",
+    },
+    {
+      key: "plans",
+      value: summary.draftPlans,
+      label: "overview.draftPlans",
+      tab: "plans",
+    },
+  ];
+  return (
+    <main className="squad-overview">
+      <header>
+        <span className="squad-eyebrow">DSH Squad</span>
+        <h2>{t("overview.title")}</h2>
+        <p className="squad-muted">{t("overview.intro")}</p>
+      </header>
+      <section
+        className="squad-attention-grid"
+        aria-label={t("overview.attention")}
+      >
+        {cards.map((card) => (
+          <button
+            key={card.key}
+            className={card.value > 0 ? "needs-attention" : ""}
+            onClick={() => navigate(card.tab)}
+          >
+            <strong>{card.value}</strong>
+            <span>{t(card.label)}</span>
+          </button>
+        ))}
+      </section>
+      {summary.total === 0 ? (
+        <p className="squad-notice">{t("overview.allClear")}</p>
+      ) : null}
+      {summary.updateAvailable ? (
+        <button
+          className="squad-update-callout"
+          onClick={() => navigate("updates")}
+        >
+          {t("overview.updateAvailable")}
+        </button>
+      ) : null}
+      {nextStep ? (
+        <section className="squad-next-step">
+          <h3>{nextStep.title}</h3>
+          <p>{nextStep.detail}</p>
+          <button onClick={() => navigate(nextStep.tab)}>
+            {nextStep.action}
+          </button>
+        </section>
+      ) : (
+        <section className="squad-next-step">
+          <h3>{t("overview.tryDelegation")}</h3>
+          <p>{t("overview.tryDelegationHint")}</p>
+          <code>{prompt}</code>
+          <button onClick={() => void navigator.clipboard?.writeText(prompt)}>
+            {t("action.copyPrompt")}
+          </button>
+        </section>
+      )}
+    </main>
+  );
+}
 
 function belongs(tab: Tab, item: DelegationView): boolean {
   if (tab === "waiting") {
@@ -1707,10 +1916,11 @@ function SquadPanel({
     sessionSource.getSnapshot,
     () => undefined,
   );
-  const [tab, setTab] = useState<Tab>("waiting");
+  const [tab, setTab] = useState<Tab>("overview");
   const [state, setState] = useState<LocalState>();
   const [selectedId, setSelectedId] = useState<string>();
   const [error, setError] = useState<string>();
+  const lastFocused = useRef<HTMLElement | null>(null);
 
   const refresh = useCallback(async () => {
     try {
@@ -1723,6 +1933,7 @@ function SquadPanel({
 
   useEffect(() => {
     if (!open) return;
+    lastFocused.current = document.activeElement as HTMLElement | null;
     void refresh();
     const events = new EventSource("/squad/v1/local/events");
     const stateChanged = () => void refresh();
@@ -1730,6 +1941,7 @@ function SquadPanel({
     return () => {
       events.removeEventListener("state", stateChanged);
       events.close();
+      lastFocused.current?.focus();
     };
   }, [open, refresh]);
 
@@ -1741,8 +1953,7 @@ function SquadPanel({
     () => (state?.delegations ?? []).filter((item) => belongs(tab, item)),
     [state, tab],
   );
-  const selected =
-    state?.delegations.find((item) => item.id === selectedId) ?? items[0];
+  const selected = items.find((item) => item.id === selectedId) ?? items[0];
   const plans = state?.plans ?? [];
   const selectedPlan = plans.find((plan) => plan.id === selectedId) ?? plans[0];
   const locale = getLocale() === "zh" ? "zh-CN" : "en";
@@ -1791,9 +2002,10 @@ function SquadPanel({
           />
         ) : null}
         {!state?.setup.required ? (
-          <nav className="squad-tabs">
+          <nav className="squad-tabs" role="tablist">
             {(
               [
+                "overview",
                 "plans",
                 "waiting",
                 "running",
@@ -1811,14 +2023,39 @@ function SquadPanel({
                   setTab(value);
                   setSelectedId(undefined);
                 }}
+                role="tab"
+                aria-selected={tab === value}
               >
                 {t(tabKeys[value])}
+                {state &&
+                value === "waiting" &&
+                localAttention(state).waitingHuman > 0 ? (
+                  <span className="squad-tab-count">
+                    {localAttention(state).waitingHuman}
+                  </span>
+                ) : null}
+                {state &&
+                value === "organizations" &&
+                localAttention(state).pendingJoinRequests > 0 ? (
+                  <span className="squad-tab-count">
+                    {localAttention(state).pendingJoinRequests}
+                  </span>
+                ) : null}
               </button>
             ))}
           </nav>
         ) : null}
         {error ? <p className="squad-error squad-load-error">{error}</p> : null}
-        {state?.setup.required ? null : tab === "organizations" && state ? (
+        {state?.setup.required ? null : tab === "overview" && state ? (
+          <Overview
+            state={state}
+            navigate={(next) => {
+              setTab(next);
+              setSelectedId(undefined);
+            }}
+            t={t}
+          />
+        ) : tab === "organizations" && state ? (
           <OrganizationCenter state={state} refresh={refresh} t={t} />
         ) : tab === "updates" && state ? (
           <UpdateCenter state={state} refresh={refresh} t={t} />
@@ -1859,7 +2096,13 @@ function SquadPanel({
           <div className="squad-content">
             <aside className="squad-list">
               {items.length === 0 ? (
-                <p className="squad-empty">{t("empty.list")}</p>
+                <p className="squad-empty">
+                  {tab === "sent"
+                    ? t("empty.sent")
+                    : tab === "completed"
+                      ? t("empty.completed")
+                      : t("empty.list")}
+                </p>
               ) : null}
               {items.map((item) => (
                 <button
@@ -1902,6 +2145,7 @@ const css = `
 .squad-node-setup{box-sizing:border-box;overflow:auto;width:100%;max-width:720px;padding:4px 0 20px}.squad-onboarding{align-self:center;flex:1;padding:18px 30px 34px}.squad-node-setup>header{margin-bottom:18px}.squad-node-setup>header h2{font-size:26px;margin:7px 0}.squad-node-setup>header p{color:var(--dsw-alias-label-secondary,#666);line-height:1.55;max-width:620px}.squad-step{font-size:11px;letter-spacing:.12em;text-transform:uppercase;color:#315ee8}.squad-node-setup label{display:grid;gap:6px;margin:13px 0;font-size:13px}.squad-node-setup input{box-sizing:border-box;width:100%;border:1px solid var(--dsw-alias-border-l2,#ccc);border-radius:9px;background:transparent;color:inherit;padding:9px;font:inherit}.squad-node-setup input:disabled{opacity:.55}.squad-node-setup small{color:var(--dsw-alias-label-secondary,#666);line-height:1.45}.squad-mode-picker{display:grid;grid-template-columns:1fr 1fr;gap:10px;border:0;margin:18px 0;padding:0}.squad-mode-picker legend{grid-column:1/-1;padding:0 0 8px;font-size:13px;font-weight:600}.squad-node-setup .squad-mode-picker button{display:grid;gap:6px;border:1px solid var(--dsw-alias-border-l2,#ccc);border-radius:12px;background:transparent;color:inherit;padding:14px;text-align:left;cursor:pointer}.squad-node-setup .squad-mode-picker button.active{border-color:#315ee8;background:rgba(49,94,232,.08);box-shadow:inset 0 0 0 1px #315ee8}.squad-mode-picker button span{color:var(--dsw-alias-label-secondary,#666);font-size:12px;line-height:1.4}.squad-setup-fields{padding:2px 14px;border-radius:12px;background:var(--dsw-alias-interactive-bg-hover,#f6f7f9)}.squad-node-setup .squad-check{display:flex;align-items:center;gap:9px}.squad-node-setup .squad-check input{width:auto}.squad-node-setup button[type=submit]{border:0;border-radius:9px;padding:9px 14px;background:#315ee8;color:#fff;cursor:pointer}.squad-node-setup button:disabled{opacity:.55;cursor:not-allowed}.squad-node-setup .squad-secondary{border:1px solid var(--dsw-alias-border-l2,#ccc);border-radius:9px;padding:8px 13px;background:transparent;color:inherit;cursor:pointer}.squad-settings .squad-node-setup{border-bottom:1px solid var(--dsw-alias-border-l2,#ddd);margin-bottom:22px}.squad-settings .squad-node-setup>h2{margin-top:0}
 @media(max-width:700px){.squad-onboarding{padding:10px 16px 24px}.squad-mode-picker{grid-template-columns:1fr}.squad-node-setup>header h2{font-size:22px}}
 .squad-updates{overflow:auto;padding:22px 26px;max-width:760px}.squad-updates>header{display:flex;align-items:flex-start;justify-content:space-between;gap:16px}.squad-updates h2{margin:0}.squad-updates h3{font-size:14px;margin:24px 0 8px}.squad-updates label{display:grid;gap:6px;margin:12px 0;font-size:13px}.squad-updates select{box-sizing:border-box;width:100%;max-width:360px;border:1px solid var(--dsw-alias-border-l2,#ccc);border-radius:9px;background:var(--dsw-specific-dialog-fill,#fff);color:inherit;padding:9px;font:inherit}.squad-updates button{border:0;border-radius:9px;padding:8px 12px;background:#315ee8;color:#fff;cursor:pointer}.squad-updates button:disabled{opacity:.5;cursor:not-allowed}.squad-updates a{color:#315ee8}.squad-update-summary{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:10px;margin:18px 0}.squad-update-summary>div{display:grid;gap:5px;padding:13px;border:1px solid var(--dsw-alias-border-l2,#ddd);border-radius:11px}.squad-update-summary span{font-size:11px;color:var(--dsw-alias-label-secondary,#666)}.squad-update-summary strong{overflow-wrap:anywhere}.squad-update-status-failed,.squad-update-status-rolled_back{background:#fde4e1;color:#a52a24}.squad-update-status-available,.squad-update-status-requested,.squad-update-status-blocked{background:#fff0c7;color:#755400}.squad-update-status-installed,.squad-update-status-up_to_date{background:#dff5e6;color:#176c35}@media(max-width:700px){.squad-updates{padding:16px}.squad-update-summary{grid-template-columns:1fr}}
+.squad-trigger{position:relative}.squad-trigger-badge,.squad-tab-count{display:inline-flex;align-items:center;justify-content:center;box-sizing:border-box;min-width:18px;height:18px;padding:0 5px;border-radius:999px;background:#b13c35;color:#fff;font-size:10px;font-weight:700;line-height:1}.squad-trigger:not(.squad-trigger-wide) .squad-trigger-badge{position:absolute;right:0;top:-2px}.squad-tabs button{display:inline-flex;align-items:center;gap:6px}.squad-tabs button.active .squad-tab-count{background:#315ee8}.squad-overview{overflow:auto;padding:24px 28px;flex:1}.squad-overview>header h2{margin:4px 0}.squad-attention-grid{display:grid;grid-template-columns:repeat(4,minmax(0,1fr));gap:10px;margin:20px 0}.squad-attention-grid button{display:grid;gap:5px;text-align:left;border:1px solid var(--dsw-alias-border-l2,#ddd);border-radius:12px;background:transparent;color:inherit;padding:14px;cursor:pointer}.squad-attention-grid button.needs-attention{border-color:#d59b1b;background:#fff8e5;color:#5d470a}.squad-attention-grid strong{font-size:24px}.squad-attention-grid span{font-size:12px;color:var(--dsw-alias-label-secondary,#666)}.squad-next-step{margin-top:18px;padding:18px;border:1px solid var(--dsw-alias-border-l2,#ddd);border-radius:14px}.squad-next-step h3{margin:0 0 7px}.squad-next-step code{display:block;padding:10px;border-radius:9px;background:var(--dsw-alias-interactive-bg-hover,#f4f5f7);overflow-wrap:anywhere}.squad-next-step button,.squad-update-callout{border:0;border-radius:9px;padding:8px 12px;margin-top:12px;background:#315ee8;color:#fff;cursor:pointer}.squad-update-callout{display:block;width:100%;text-align:left;background:#fff0c7;color:#755400}@media(max-width:700px){.squad-attention-grid{grid-template-columns:1fr 1fr}.squad-overview{padding:18px 16px}}
 `;
 
 function installStyles(): () => void {
@@ -1960,6 +2204,10 @@ export function apply(ctx: ClientContext): void {
     () => () => {
       panelOpen = false;
       panelListeners.clear();
+      attentionEvents?.close();
+      attentionEvents = undefined;
+      attentionSnapshot = undefined;
+      attentionListeners.clear();
     },
     "dsh-squad client state",
   );

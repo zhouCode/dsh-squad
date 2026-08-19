@@ -9,6 +9,7 @@ import {
   envelopeSchema,
   humanInputSchema,
 } from "./contracts.ts";
+import { summarizeAttention } from "./state.ts";
 import { canonicalJson } from "./canonical.ts";
 import { assertTransition, canTransition, isTerminalStatus } from "./state.ts";
 
@@ -206,5 +207,61 @@ describe("delegation state machine", () => {
     expect(() => assertTransition("COMPLETED", "RUNNING")).toThrow(
       /invalid delegation transition/u,
     );
+  });
+});
+
+describe("Squad attention summary", () => {
+  it("counts only actionable work and manager-visible join requests", () => {
+    expect(
+      summarizeAttention({
+        revision: 9,
+        setupRequired: false,
+        delegations: [
+          {
+            direction: "INCOMING",
+            status: "WAITING_HUMAN",
+            deliveryStatus: "RECEIVED_LOCAL",
+          },
+          {
+            direction: "OUTGOING",
+            status: "FAILED",
+            deliveryStatus: "RECEIVED_BY_NODE",
+          },
+          {
+            direction: "OUTGOING",
+            status: "QUEUED",
+            deliveryStatus: "DELIVERY_EXPIRED",
+          },
+          {
+            direction: "INCOMING",
+            status: "COMPLETED",
+            deliveryStatus: "RECEIVED_LOCAL",
+          },
+        ],
+        plans: [{ status: "DRAFT" }, { status: "DISPATCHED" }],
+        organizations: [
+          {
+            role: "OWNER",
+            membershipStatus: "ACTIVE",
+            pendingJoinRequests: [{}, {}],
+          },
+          {
+            role: "MEMBER",
+            membershipStatus: "ACTIVE",
+            pendingJoinRequests: [{}],
+          },
+        ],
+        updateAvailable: true,
+      }),
+    ).toEqual({
+      revision: 9,
+      setupRequired: false,
+      waitingHuman: 1,
+      failedOutgoing: 2,
+      pendingJoinRequests: 2,
+      draftPlans: 1,
+      updateAvailable: true,
+      total: 7,
+    });
   });
 });

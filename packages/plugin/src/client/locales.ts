@@ -16,6 +16,8 @@ export const zh = {
   "html.lang": "zh-CN",
   "inbox.title": "智能体收件箱",
   "inbox.close": "关闭智能体收件箱",
+  "inbox.attentionLabel": "智能体收件箱，有 {count} 项需要处理",
+  "tab.overview": "概览",
   "tab.plans": "分派计划",
   "tab.waiting": "待我处理",
   "tab.running": "运行中",
@@ -24,6 +26,28 @@ export const zh = {
   "tab.organizations": "组织",
   "tab.updates": "更新",
   "tab.settings": "设置",
+  "overview.title": "团队行动中心",
+  "overview.intro": "集中查看需要你确认、处理或关注的团队协作事项。",
+  "overview.attention": "需要关注的事项",
+  "overview.waitingHuman": "等待我处理",
+  "overview.failedOutgoing": "发送失败",
+  "overview.pendingJoins": "加入审批",
+  "overview.draftPlans": "待确认计划",
+  "overview.allClear": "目前没有需要你处理的事项。",
+  "overview.updateAvailable": "Squad 有可用更新，打开更新中心",
+  "overview.nextOrganization": "创建或加入一个组织",
+  "overview.nextOrganizationHint":
+    "Relay 已连接。建立组织后，成员只需加入一次即可出现在团队目录中。",
+  "overview.openOrganizations": "打开组织",
+  "overview.nextPeer": "添加第一个对等方",
+  "overview.nextPeerHint":
+    "建立可信配对后，才可以向另一台 Personal Agent 委派任务。",
+  "overview.openPeers": "打开对等方设置",
+  "overview.tryDelegation": "尝试第一次团队分派",
+  "overview.tryDelegationHint":
+    "在任意 DSH 会话中直接使用自然语言描述团队任务。",
+  "overview.examplePrompt":
+    "请根据这段会议纪要，为团队生成一份可审核的任务分派草案。",
   "direction.received": "收到",
   "direction.sent": "已发送",
   "field.peer": "对等方",
@@ -57,6 +81,7 @@ export const zh = {
   "action.approveJoin": "批准加入",
   "action.enableMember": "启用成员",
   "action.disableMember": "禁用成员",
+  "action.copyPrompt": "复制示例",
   "plan.approvalHint":
     "确认后，每个计划项会通过现有签名委派发送；接收方仍按自己的 Peer 策略决定是否执行。",
   "plan.itemCount": "共 {count} 个计划项",
@@ -198,8 +223,11 @@ export const zh = {
   "empty.list": "这里暂时没有内容。",
   "empty.selection": "请选择一个委派。",
   "empty.plans":
-    "还没有分派计划。可以让 Agent 使用 propose_team_plan 创建草案。",
+    "还没有分派计划。你可以直接告诉 Agent：根据会议纪要为团队生成一份可审核的分派草案。",
   "empty.planSelection": "请选择一个分派计划。",
+  "empty.sent":
+    "还没有发出的委派。可以直接在 DSH 会话中告诉 Agent 要委派给谁、完成什么。",
+  "empty.completed": "尚无已结束的委派。",
   "status.QUEUED": "已排队",
   "status.RECEIVED": "已接收",
   "status.TRIAGING": "评估中",
@@ -297,6 +325,8 @@ export const en = {
   "html.lang": "en",
   "inbox.title": "Agent Inbox",
   "inbox.close": "Close Agent Inbox",
+  "inbox.attentionLabel": "Agent Inbox, {count} items need attention",
+  "tab.overview": "Overview",
   "tab.plans": "Plans",
   "tab.waiting": "Waiting for me",
   "tab.running": "Running",
@@ -305,6 +335,30 @@ export const en = {
   "tab.organizations": "Organizations",
   "tab.updates": "Updates",
   "tab.settings": "Settings",
+  "overview.title": "Team action center",
+  "overview.intro":
+    "See the collaboration items that need your decision, input, or attention.",
+  "overview.attention": "Items needing attention",
+  "overview.waitingHuman": "Waiting for me",
+  "overview.failedOutgoing": "Delivery failures",
+  "overview.pendingJoins": "Join approvals",
+  "overview.draftPlans": "Draft plans",
+  "overview.allClear": "Nothing needs your attention right now.",
+  "overview.updateAvailable":
+    "A Squad update is available; open the update center",
+  "overview.nextOrganization": "Create or join an organization",
+  "overview.nextOrganizationHint":
+    "The Relay is connected. An organization gives every member a shared, signed team directory.",
+  "overview.openOrganizations": "Open organizations",
+  "overview.nextPeer": "Add your first peer",
+  "overview.nextPeerHint":
+    "Create a trusted pairing before delegating to another Personal Agent.",
+  "overview.openPeers": "Open peer settings",
+  "overview.tryDelegation": "Try your first team delegation",
+  "overview.tryDelegationHint":
+    "Describe the team task naturally in any DSH session.",
+  "overview.examplePrompt":
+    "Use these meeting notes to create a reviewable delegation plan for the team.",
   "direction.received": "Received",
   "direction.sent": "Sent",
   "field.peer": "Peer",
@@ -338,6 +392,7 @@ export const en = {
   "action.approveJoin": "Approve join",
   "action.enableMember": "Enable member",
   "action.disableMember": "Disable member",
+  "action.copyPrompt": "Copy example",
   "plan.approvalHint":
     "Approval creates one existing signed delegation per item; each recipient still decides execution through their own Peer policy.",
   "plan.itemCount": "{count} plan items",
@@ -484,8 +539,11 @@ export const en = {
   "empty.list": "Nothing here.",
   "empty.selection": "Select a delegation.",
   "empty.plans":
-    "No delegation plans yet. Ask the Agent to create a draft with propose_team_plan.",
+    "No delegation plans yet. Ask the Agent to use meeting notes to create a reviewable team delegation draft.",
   "empty.planSelection": "Select a delegation plan.",
+  "empty.sent":
+    "No outgoing delegations yet. Tell the Agent who should receive a task and what should be completed.",
+  "empty.completed": "No finished delegations yet.",
   "status.QUEUED": "Queued",
   "status.RECEIVED": "Received",
   "status.TRIAGING": "Triaging",

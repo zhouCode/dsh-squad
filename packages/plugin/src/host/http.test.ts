@@ -78,4 +78,39 @@ describe("Squad host health", () => {
     });
     expect(configureNode).toHaveBeenCalledOnce();
   });
+
+  it("exposes a lightweight actionable-work summary", async () => {
+    const squad = {
+      relayServer: undefined,
+      localAttentionSummary: () => ({
+        revision: 3,
+        setupRequired: false,
+        waitingHuman: 2,
+        failedOutgoing: 1,
+        pendingJoinRequests: 0,
+        draftPlans: 1,
+        updateAvailable: false,
+        total: 4,
+      }),
+    } as unknown as SquadService;
+    const server = createServer(createHttpHandler(squad));
+    await new Promise<void>((resolve) =>
+      server.listen(0, "127.0.0.1", resolve),
+    );
+    const address = server.address();
+    if (address === null || typeof address === "string") {
+      throw new Error("test server did not bind");
+    }
+    try {
+      const response = await fetch(
+        `http://127.0.0.1:${address.port}/squad/v1/local/attention`,
+      );
+      expect(response.status).toBe(200);
+      expect(await response.json()).toMatchObject({ total: 4, revision: 3 });
+    } finally {
+      await new Promise<void>((resolve, reject) =>
+        server.close((error) => (error ? reject(error) : resolve())),
+      );
+    }
+  });
 });
