@@ -19,7 +19,7 @@ export type TerminalDelegationStatus = Extract<
 const transitions: Readonly<
   Record<DelegationStatus, readonly DelegationStatus[]>
 > = {
-  QUEUED: ["RECEIVED", "CANCELED"],
+  QUEUED: ["RECEIVED", "FAILED", "CANCELED"],
   RECEIVED: ["TRIAGING", "CANCELED"],
   TRIAGING: ["RUNNING", "WAITING_HUMAN", "REJECTED", "CANCELED"],
   RUNNING: ["COMPLETED", "WAITING_HUMAN", "FAILED", "CANCELED"],

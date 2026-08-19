@@ -67,6 +67,31 @@ describe("Relay mailbox", () => {
       code: "INVITATION_ALREADY_USED",
     });
 
+    const eventController = new AbortController();
+    let notificationCount = 0;
+    let resolveReady!: () => void;
+    let resolveMailboxEvent!: () => void;
+    const ready = new Promise<void>((resolve) => {
+      resolveReady = resolve;
+    });
+    const mailboxEvent = new Promise<void>((resolve) => {
+      resolveMailboxEvent = resolve;
+    });
+    const watching = bob
+      .watchMailbox(eventController.signal, () => {
+        notificationCount += 1;
+        if (notificationCount === 1) resolveReady();
+        if (notificationCount === 2) resolveMailboxEvent();
+      })
+      .catch((error: unknown) => {
+        if (!eventController.signal.aborted) throw error;
+      });
+    cleanups.push(async () => {
+      eventController.abort();
+      await watching;
+    });
+    await ready;
+
     const delegationId = randomUUID();
     const now = new Date();
     const envelope = aliceIdentity.signEnvelope({
@@ -87,6 +112,9 @@ describe("Relay mailbox", () => {
       },
     });
     await alice.submit(envelope);
+    await mailboxEvent;
+    eventController.abort();
+    await watching;
     await alice.submit(envelope);
     await expect(bob.submit(envelope)).rejects.toMatchObject({
       status: 403,

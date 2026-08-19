@@ -789,7 +789,7 @@ async function main() {
         const items = matching(state, "AUTO_SKILL_FIXTURE", "OUTGOING");
         if (
           items.length !== 1 ||
-          items[0].deliveryStatus !== "DELIVERED_TO_RELAY"
+          items[0].deliveryStatus !== "STORED_BY_RELAY"
         ) {
           return undefined;
         }

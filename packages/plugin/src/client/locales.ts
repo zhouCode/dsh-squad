@@ -28,6 +28,9 @@ export const zh = {
   "direction.sent": "已发送",
   "field.peer": "对等方",
   "field.delivery": "投递",
+  "field.deliveryAttempts": "失败重试次数",
+  "field.nextDeliveryAttempt": "下次尝试",
+  "field.lastDeliveryError": "最近投递错误",
   "field.context": "上下文",
   "field.acceptanceCriteria": "验收条件",
   "field.shareableSummary": "可共享摘要",
@@ -63,13 +66,22 @@ export const zh = {
   "settings.relayServing": "中继服务运行中",
   "settings.relayConfigured": "已配置中继连接",
   "settings.relayNotConfigured": "未配置",
+  "settings.direct": "点对点直连",
+  "settings.directServing": "直连接收已启用",
+  "settings.directNotServing": "直连接收未启用",
   "settings.peers": "对等方",
   "settings.peerDisabled": "已禁用",
   "settings.pairPeer": "添加固定公钥的对等方",
   "settings.displayName": "显示名称",
   "settings.nodeId": "节点 ID",
   "settings.publicKey": "Ed25519 公钥",
+  "settings.transport": "任务传输方式",
+  "settings.directUrl": "对方直连地址",
+  "settings.directUrlHint":
+    "Direct 模式必填。生产环境必须使用 HTTPS；只有本机开发可以使用 loopback HTTP。",
   "settings.autoExecute": "自动执行",
+  "transport.RELAY": "Relay 中继",
+  "transport.DIRECT": "Direct 点对点",
   "settings.trustedWarning":
     "“受信目标”会跳过人工确认并在本机运行；仅对你充分信任的成员启用。",
   "settings.languageHint":
@@ -176,7 +188,10 @@ export const zh = {
   "planItemStatus.FAILED": "发送失败",
   "planItemStatus.CANCELED": "已取消",
   "delivery.QUEUED_LOCAL": "本地待投递",
-  "delivery.DELIVERED_TO_RELAY": "已投递至中继",
+  "delivery.WAITING_FOR_PEER": "等待对方可达",
+  "delivery.STORED_BY_RELAY": "中继已持久保存",
+  "delivery.RECEIVED_BY_NODE": "对方节点已接收",
+  "delivery.DELIVERY_EXPIRED": "投递已过期",
   "delivery.RECEIVED_LOCAL": "已接收到本地",
   "policy.NEVER": "从不",
   "policy.SAFE": "仅安全目标",
@@ -205,6 +220,7 @@ export const zh = {
   "errorCode.CONCURRENCY_LIMIT": "并发数已达上限",
   "errorCode.UNSUPPORTED": "接收方不支持此任务",
   "errorCode.POLICY_REJECTED": "本地策略已拒绝",
+  "errorCode.DELIVERY_EXPIRED": "投递在对方接收前已过期",
   "errorCode.UPDATE_CHECK_FAILED": "更新检查失败",
   "errorCode.REQUEST_VERSION_CHANGED": "待安装版本已变化",
   "errorCode.ROLLED_BACK_VERSION_SUPPRESSED": "已阻止自动重试回滚版本",
@@ -220,7 +236,7 @@ export const zh = {
   "summary.executionInterrupted":
     "接收方 DSH 在执行期间停止。可能已经发生的外部副作用不会自动重放。",
   "summary.rejectedByOwner": "接收方已拒绝。",
-  "summary.canceledBeforeDelivery": "已在投递到中继前取消。",
+  "summary.canceledBeforeDelivery": "已在接收方节点确认投递前取消。",
   "summary.cancellationConfirmed":
     "已在本地确认取消；可能已经发生的外部副作用不会回滚。",
   "summary.running": "正在接收方的个人智能体上运行。",
@@ -248,6 +264,9 @@ export const en = {
   "direction.sent": "Sent",
   "field.peer": "Peer",
   "field.delivery": "Delivery",
+  "field.deliveryAttempts": "Failed delivery attempts",
+  "field.nextDeliveryAttempt": "Next attempt",
+  "field.lastDeliveryError": "Latest delivery error",
   "field.context": "Context",
   "field.acceptanceCriteria": "Acceptance criteria",
   "field.shareableSummary": "Shareable summary",
@@ -283,13 +302,22 @@ export const en = {
   "settings.relayServing": "relay service is running",
   "settings.relayConfigured": "relay connection configured",
   "settings.relayNotConfigured": "not configured",
+  "settings.direct": "Peer-to-peer Direct",
+  "settings.directServing": "direct receiving enabled",
+  "settings.directNotServing": "direct receiving disabled",
   "settings.peers": "Peers",
   "settings.peerDisabled": "Disabled",
   "settings.pairPeer": "Pair a pinned peer",
   "settings.displayName": "Display name",
   "settings.nodeId": "Node ID",
   "settings.publicKey": "Ed25519 public key",
+  "settings.transport": "Task transport",
+  "settings.directUrl": "Peer Direct URL",
+  "settings.directUrlHint":
+    "Required for Direct mode. Production endpoints require HTTPS; loopback HTTP is only for local development.",
   "settings.autoExecute": "Automatic execution",
+  "transport.RELAY": "Relay",
+  "transport.DIRECT": "Direct peer-to-peer",
   "settings.trustedWarning":
     "Trusted objectives skip human approval and run on this computer. Enable this only for members you fully trust.",
   "settings.languageHint":
@@ -401,7 +429,10 @@ export const en = {
   "planItemStatus.FAILED": "Dispatch failed",
   "planItemStatus.CANCELED": "Canceled",
   "delivery.QUEUED_LOCAL": "Queued locally",
-  "delivery.DELIVERED_TO_RELAY": "Delivered to Relay",
+  "delivery.WAITING_FOR_PEER": "Waiting for peer reachability",
+  "delivery.STORED_BY_RELAY": "Persisted by Relay",
+  "delivery.RECEIVED_BY_NODE": "Received by peer Node",
+  "delivery.DELIVERY_EXPIRED": "Delivery expired",
   "delivery.RECEIVED_LOCAL": "Received locally",
   "policy.NEVER": "Never",
   "policy.SAFE": "Safe objectives only",
@@ -430,6 +461,7 @@ export const en = {
   "errorCode.CONCURRENCY_LIMIT": "Concurrency limit reached",
   "errorCode.UNSUPPORTED": "Task unsupported by receiver",
   "errorCode.POLICY_REJECTED": "Rejected by local policy",
+  "errorCode.DELIVERY_EXPIRED": "Delivery expired before peer receipt",
   "errorCode.UPDATE_CHECK_FAILED": "Update check failed",
   "errorCode.REQUEST_VERSION_CHANGED": "Approved update version changed",
   "errorCode.ROLLED_BACK_VERSION_SUPPRESSED":
@@ -448,7 +480,8 @@ export const en = {
   "summary.executionInterrupted":
     "The receiving DSH process stopped while execution was active. Potential external side effects were not replayed.",
   "summary.rejectedByOwner": "Rejected by the receiving owner.",
-  "summary.canceledBeforeDelivery": "Canceled before Relay delivery.",
+  "summary.canceledBeforeDelivery":
+    "Canceled before the receiving Node acknowledged delivery.",
   "summary.cancellationConfirmed":
     "Cancellation was confirmed locally. External side effects, if any, were not rolled back.",
   "summary.running": "Running on the receiving Personal Agent.",
@@ -482,7 +515,10 @@ const statusKeys = {
 
 const deliveryKeys = {
   QUEUED_LOCAL: "delivery.QUEUED_LOCAL",
-  DELIVERED_TO_RELAY: "delivery.DELIVERED_TO_RELAY",
+  WAITING_FOR_PEER: "delivery.WAITING_FOR_PEER",
+  STORED_BY_RELAY: "delivery.STORED_BY_RELAY",
+  RECEIVED_BY_NODE: "delivery.RECEIVED_BY_NODE",
+  DELIVERY_EXPIRED: "delivery.DELIVERY_EXPIRED",
   RECEIVED_LOCAL: "delivery.RECEIVED_LOCAL",
 } as const satisfies Record<string, SquadLocaleKey>;
 
@@ -577,6 +613,8 @@ const summaryKeys = {
   "Rejected by owner.": "summary.rejectedByOwner",
   "Rejected by the receiving owner.": "summary.rejectedByOwner",
   "Canceled before Relay delivery.": "summary.canceledBeforeDelivery",
+  "Canceled before the receiving Node acknowledged delivery.":
+    "summary.canceledBeforeDelivery",
   "Cancellation was confirmed locally. External side effects, if any, were not rolled back.":
     "summary.cancellationConfirmed",
   "Running on the receiving Personal Agent.": "summary.running",

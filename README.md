@@ -4,19 +4,31 @@
 
 > 让个人 Agent 组成团队，而不交出工作区、凭据与控制权。
 
-DSH Squad 把运行在不同电脑、网络和地点上的个人 Agent，组成一个可以互相委派任务、离线接收并持续协作的团队，同时让每个人继续拥有和控制自己的 Agent。成员无需开放个人节点端口，也无需共享账号、API Key、工作区访问权或工具权限；Agent 只通过 Relay 交换经过签名的任务和明确发布的结果，实际执行始终发生在接收方自己的 DSH、原生 Session、Skill、凭据与审批边界内。
+DSH Squad 把运行在不同电脑、网络和地点上的个人 Agent，组成一个可以互相委派任务并持续协作的团队，同时让每个人继续拥有和控制自己的 Agent。它既支持带持久邮箱和组织目录的中心化 **Relay 模式**，也支持无需 Relay 的 **Direct 点对点模式**。两种模式都只交换经过签名的任务和明确发布的结果；账号、API Key、工作区访问权、工具权限以及实际执行始终留在接收方自己的 DSH、原生 Session、Skill、凭据与审批边界内。
 
 ## 核心亮点
 
-- **组织一次加入，不再两两配对**：节点通过一次性邀请和人工审批加入带签名的组织成员目录，无论团队规模如何，都不需要每两个人分别交换 Peer 配置；一个节点可以同时属于多个组织。
+- **两种组队方式，按网络条件选择**：Relay 模式适合跨地域、成员经常离线或不方便开放入站端口的团队；Direct 模式适合局域网、VPN 或已有可达 HTTPS 地址的小团队，无需部署中心中继。
+- **组织一次加入，不再两两配对**：在 Relay 模式中，节点通过一次性邀请和人工审批加入带签名的组织成员目录，无论团队规模如何，都不需要每两个人分别交换 Peer 配置；一个节点可以同时属于多个组织。
 - **本地规划，权力仍属于个人**：Team Planner 可以把会议或团队目标整理成多人分派草案，但它不是持有全员权限的共享超级 Agent；负责人确认后才会发送，每位接收方仍由自己的策略和审批边界决定是否执行。
 - **跨地域，无需节点直连**：个人节点只需主动连接一个持续在线的 Relay，因此可以位于 NAT、家庭网络、公司内网或不同国家和地区，无需公网 IP 或开放入站端口。
-- **成员离线，任务不丢**：Relay 提供经过认证的持久邮箱；接收方恢复在线后继续拉取，重复投递不会重复创建 Session 或执行任务。
+- **离线状态有明确语义**：Relay 模式由中继持久保存任务；Direct 模式由发送方本地 SQLite 保存并自动重试，界面会显示等待、重试时间、失败次数和最近错误。重复投递不会重复创建 Session 或执行任务。
+- **投递状态可实时观察**：Relay 用认证事件流即时唤醒收件节点并保留轮询兜底；Direct 返回接收节点签名的持久化回执。发送方可以区分“本地排队”“等待对方可达”“中继已保存”和“对方节点已接收”。
 - **Relay 可安全自维护**：独立更新器验证签名 Release，在节点空闲时备份、安装、重启并做版本健康检查；默认只通知，失败自动回滚。
 - **信任可以逐人配置**：每个直接 Peer 或组织成员都有独立的本机 `NEVER`、`SAFE`、`TRUSTED` 自动执行策略，可直接在界面下拉修改。
 - **原生融入 DSH**：任务在接收方已有的 Agent、Session、Skill、工具和 Permission/Approval 中运行，没有第二套 Runtime 或独立管理平台。
 
-## 工作方式
+## 两种组队模式
+
+| 能力     | Relay 模式                            | Direct 点对点模式                                  |
+| -------- | ------------------------------------- | -------------------------------------------------- |
+| 拓扑     | 所有节点主动连接一个持续在线的 Relay  | 每个 Peer 配置对方可达的 HTTPS 地址                |
+| 成员管理 | 签名组织目录，支持 Owner/Admin/Member | 显式交换并固定 Node ID、公钥和地址                 |
+| 对方离线 | Relay 独立持久保存，发送方可以下线    | 任务保存在发送方本地；双方再次同时在线且可达时重投 |
+| 网络要求 | 个人节点无需公网 IP 或开放入站端口    | 至少任务方向必须可达；双向状态协作需要双方可达     |
+| 典型场景 | 跨地域、较大团队、异步协作            | 局域网、VPN、已有组网、小型团队                    |
+
+Relay 模式：
 
 ```text
 Alice Agent --签名 Delegation--> Relay 持久邮箱 --> Bob 的 DSH
@@ -27,10 +39,21 @@ Alice Agent --签名 Delegation--> Relay 持久邮箱 --> Bob 的 DSH
                          需要本人 --> HumanTodo --> 恢复同一 Session
 ```
 
+Direct 模式：
+
+```text
+Alice Agent --签名 Delegation--> Bob 的 Direct HTTPS 入口
+      |                                  |
+      +-- 本地持久 Outbox <--离线重试 --+
+      <--------- Bob 签名 Node Receipt --+
+```
+
+Direct 模式不提供 NAT 穿透、分布式代存或去中心化组织共识。Bob 离线时，Alice 会显示`等待对方可达`并按配置重试；如果 Alice 与 Bob 此后从未同时在线且网络可达，就无法完成投递。重试受 `envelopeTtlMinutes` 限制（默认 60 分钟）；到期后状态变为`投递已过期`，需要创建一项新委派。v0.6 的签名组织目录仍使用 Relay；Direct 团队使用显式配对的 Peer，Team Planner 可以照常为这些 Peer 创建分派草案。
+
 - 发送方只提交目标、上下文、完成条件和经过校验的 HTTPS 附件引用。
 - 接收方的 PeerPolicy 决定拒绝、等待本人接受或自动执行。
 - 接收方 Agent 自己选择本地 Skill 和工具；协议没有远程 Skill、Shell、MCP 或 Credential 字段。
-- Relay 只提供受认证的 at-least-once 邮箱。Receiver 使用本地 SQLite、Envelope ID 和 Delegation ID 保证重复投递不重复执行。
+- Relay 只提供受认证的 at-least-once 邮箱；Direct 只提供经过固定公钥验证的点对点投递。Receiver 使用本地 SQLite、Envelope ID 和 Delegation ID 保证重复投递不重复执行。
 - HumanTodo、原生 Session ID、人工回复、凭据和工作区始终只保存在接收方。
 - 发送方只能看到接收方明确发布的状态、摘要和 Outcome。
 
@@ -58,7 +81,7 @@ Agent 会调用 `propose_team_plan`。负责人确认后，Squad 才为每个计
 
 当前已经提供的是 **Team Planner**，它只是本地草案能力。未来若加入 **Organization Coordinator Agent**，它会是组织中的一个可选服务成员，而不是凌驾于成员之上的超级 Agent：只接收明确发布的会议材料和状态投影，只生成摘要、建议或待审草案，不继承成员工作区、凭据、私有 Session 或工具权限，也不默认代替任何人批准或执行任务。
 
-## 典型部署：异地组成团队
+## 典型 Relay 部署：异地组成团队
 
 ```text
 北京：Alice 的电脑 ──出站 HTTPS──┐
@@ -68,7 +91,7 @@ Agent 会调用 `propose_team_plan`。负责人确认后，Squad 才为每个计
 海外：Carol 的电脑 ─出站 HTTPS──┘
 ```
 
-这是一种应用层 Agent 协作网络，而不是 VPN：它不会把成员电脑接入同一个虚拟局域网，也不要求节点之间能够通过 IP 互访。个人节点的 WebUI 应只监听 `127.0.0.1`；对外只部署 Relay，并通过 HTTPS、精确路由放行和防火墙保护公共入口。
+这是一种应用层 Agent 协作网络，而不是 VPN：它不会把成员电脑接入同一个虚拟局域网。Relay 模式不要求节点之间能够通过 IP 互访；个人节点的 WebUI 应只监听 `127.0.0.1`，对外只部署 Relay，并通过 HTTPS、精确路由放行和防火墙保护公共入口。Direct 模式则依赖局域网、VPN、端口映射或已有反向代理提供节点间可达性，Squad 本身不会建立底层网络隧道。
 
 ## 安装
 
@@ -81,7 +104,7 @@ Agent 会调用 `propose_team_plan`。负责人确认后，Squad 才为每个计
 ```bash
 pnpm install --frozen-lockfile
 pnpm run pack
-dsh plugin --profile web add ./artifacts/dsh-squad-plugin-0.5.0.tgz --offline
+dsh plugin --profile web add ./artifacts/dsh-squad-plugin-0.6.0.tgz --offline
 dsh web
 ```
 
@@ -108,7 +131,7 @@ dsh web
       invitation: replace-with-one-time-invitation
 ```
 
-推荐在`智能体收件箱 → 组织`中通过一次性邀请加入组织；这样无需为每一对成员分别配置。直接 Peer 仍可在`智能体收件箱 → 设置`中添加，也可以在配置中声明；其 `nodeId` 必须与 Ed25519 公钥指纹匹配。
+推荐在`智能体收件箱 → 组织`中通过一次性邀请加入 Relay 组织；这样无需为每一对成员分别配置。Direct Peer 可在`智能体收件箱 → 设置`中选择`Direct 点对点`后添加，也可以在配置中声明。双方都必须固定对方的 `nodeId`、Ed25519 公钥和可达地址；`nodeId` 必须与公钥指纹匹配。
 
 ```yaml
 - id: dsh-squad
@@ -120,6 +143,9 @@ dsh web
           -----BEGIN PUBLIC KEY-----
           REPLACE_ME
           -----END PUBLIC KEY-----
+        # 省略时默认为 RELAY；Direct 模式需要双方都配置对方。
+        transport: DIRECT
+        directUrl: https://bob-agent.example.com
         policy:
           canMessage: true
           canDelegate: true
@@ -128,6 +154,19 @@ dsh web
           maxDelegationDepth: 1
           maxRuntimeMinutes: 30
 ```
+
+接收 Direct 任务的节点还需要启用入口。`publicUrl` 是展示和配对用的规范地址，不会自动创建 DNS、TLS、端口映射或反向代理；实际请求仍由 DSH Host WebServer 承载。
+
+```yaml
+- id: dsh-squad
+  config:
+    direct:
+      enabled: true
+      publicUrl: https://alice-agent.example.com
+      retryIntervalMs: 5000
+```
+
+生产 Direct URL 必须使用 HTTPS；只有 `localhost` / loopback 开发环境可以使用 HTTP。反向代理只需精确放行 `POST /squad/v1/direct/envelopes`，并应配置请求大小、连接数和速率限制，不要暴露 `/squad/v1/local/*` 或整个个人 WebUI。
 
 ## 承载 Relay
 
@@ -147,7 +186,7 @@ dsh web
           expiresAt: 2030-01-01T00:00:00.000Z
 ```
 
-Relay API 注册在宿主 WebServer 的 `/squad/v1` 下；它验证 enrollment、请求签名、nonce、时效、组织成员路由、收发双方、邮箱容量和速率限制，并保存签名组织目录与持久邮箱，但不运行 Agent，也不持有私人 Session、HumanTodo、工作区或成员凭据。
+Relay API 注册在宿主 WebServer 的 `/squad/v1` 下；它验证 enrollment、请求签名、nonce、时效、组织成员路由、收发双方、邮箱容量和速率限制，并保存签名组织目录与持久邮箱，但不运行 Agent，也不持有私人 Session、HumanTodo、工作区或成员凭据。认证事件流只发送“邮箱有变化”的唤醒通知，不发送任务正文；断流时节点继续使用轮询，因此事件流不是可靠性单点。若反向代理使用精确路由白名单，v0.6 需要额外放行 `GET /squad/v1/mailbox/events` 才能即时唤醒；未放行时功能仍可通过轮询工作。
 
 ## 持久在线 Relay 的安全更新
 
@@ -223,6 +262,7 @@ v0.5 的安全更新器只接受 `--scope user`，Relay service 也必须位于�
 - Envelope 使用严格 Zod schema、canonical bytes 和 Ed25519 签名；相同 ID 不同 payload 视为冲突。
 - 组织根和追加式成员目录经过签名并在每个节点本地固定验证；协议 v2 将 Organization、发送者 membership 和接收者 membership 同时绑定进 Envelope。
 - Relay 邮箱请求使用短时签名、nonce 防重放和 recipient 隔离。
+- Direct 入口只接受已启用 Peer 的签名协议 v1 Envelope；发送方只有在校验接收节点使用固定公钥签发的 Node Receipt 后，才会标记`对方节点已接收`。它不使用共享密码，也不会仅凭 IP/端口授予信任。
 - `/squad/v1/local/*` 管理接口只接受 loopback 客户端并拒绝转发请求；公网反向代理只应放行 Relay 所需的非 `local` 精确路由。
 - 更新清单使用仓库内固定的 Ed25519 发布公钥验证；下载包必须与签名清单中的文件名、大小和 SHA-256 全部一致，插件本身没有替换正在运行代码的权限。
 - 附件仅接受 HTTPS，拒绝私网/loopback/重绑定地址，并校验声明大小与 SHA-256。
@@ -268,9 +308,9 @@ DSH_SQUAD_RELEASE_SIGNING_KEY=/secure/path/release-signing-key.pem \
   pnpm release:prepare
 ```
 
-发布 `v0.5.0` 时需要把 `artifacts/` 中的 `dsh-squad-plugin-0.5.0.tgz`、同名 `.sha256`、`dsh-squad-update-manifest-0.5.0.json` 和 `.sig` 四个文件全部作为 GitHub Release assets 上传。缺少任意一个、签名不符或 Release tag 不一致时，客户端都会拒绝更新。
+发布 `v0.6.0` 时需要把 `artifacts/` 中的 `dsh-squad-plugin-0.6.0.tgz`、同名 `.sha256`、`dsh-squad-update-manifest-0.6.0.json` 和 `.sig` 四个文件全部作为 GitHub Release assets 上传。缺少任意一个、签名不符或 Release tag 不一致时，客户端都会拒绝更新。
 
-`smoke:delegation` 会构建真实 tarball，安装到 Alice、Bob、Relay 三套隔离 DSH Home，并用真实 Chromium 验证：WebUI 配对、Team Planner 草案审批与幂等分派、Bob 离线投递、Relay/Node 重启、接收端专属 Skill、HumanTodo 部分完成、相同 Session 恢复、Outcome 隐私边界和插件可逆禁用；组织协议另由签名目录、Relay 权限与本地持久化集成测试覆盖。
+`smoke:delegation` 会构建真实 tarball，安装到 Alice、Bob、Relay 三套隔离 DSH Home，并用真实 Chromium 验证：WebUI 配对、Team Planner 草案审批与幂等分派、Bob 离线投递、Relay/Node 重启、接收端专属 Skill、HumanTodo 部分完成、相同 Session 恢复、Outcome 隐私边界和插件可逆禁用；组织协议另由签名目录、Relay 权限与本地持久化集成测试覆盖。Direct 的签名回执、伪造回执拒绝、离线排队、恢复在线自动重投和幂等接收由独立端到端测试覆盖。
 
 ## 许可证
 

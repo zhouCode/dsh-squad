@@ -135,6 +135,7 @@ describe("Squad slash commands", () => {
         displayName: "Bob",
         publicKey: "public-key",
         enabled: true,
+        transport: "RELAY",
         policy: {
           canMessage: false,
           canDelegate: true,

@@ -1,6 +1,12 @@
 import { resolve } from "node:path";
+import { isIP } from "node:net";
 import { dshHomePath } from "@deepseek-ai/dsh-home-paths";
-import { peerPolicySchema, type PeerPolicy } from "../shared/contracts.ts";
+import {
+  peerPolicySchema,
+  peerTransportSchema,
+  type PeerPolicy,
+  type PeerTransport,
+} from "../shared/contracts.ts";
 import { updateModeSchema, type UpdateMode } from "../shared/updates.ts";
 
 export interface PeerConfig {
@@ -8,6 +14,8 @@ export interface PeerConfig {
   displayName: string;
   publicKey: string;
   enabled?: boolean;
+  transport?: PeerTransport;
+  directUrl?: string;
   policy?: Partial<PeerPolicy>;
 }
 
@@ -36,6 +44,11 @@ export interface SquadConfig {
     maxMailboxItems?: number;
     maxRequestsPerMinute?: number;
   };
+  direct?: {
+    enabled?: boolean;
+    publicUrl?: string;
+    retryIntervalMs?: number;
+  };
   updates?: {
     repository?: string;
     stateDir?: string;
@@ -51,6 +64,8 @@ export interface ResolvedSquadConfig {
   peers: Array<
     Omit<PeerConfig, "enabled" | "policy"> & {
       enabled: boolean;
+      transport: PeerTransport;
+      directUrl?: string;
       policy: PeerPolicy;
     }
   >;
@@ -68,6 +83,11 @@ export interface ResolvedSquadConfig {
     maxMailboxItems: number;
     maxRequestsPerMinute: number;
   };
+  direct: {
+    enabled: boolean;
+    publicUrl?: string;
+    retryIntervalMs: number;
+  };
   updates: {
     repository: string;
     stateDir: string;
@@ -80,11 +100,51 @@ function optionalNonEmpty(value: string | undefined): string | undefined {
   return trimmed ? trimmed : undefined;
 }
 
+export function resolveDirectBaseUrl(
+  candidate: string | undefined,
+  label: string,
+): string | undefined {
+  const value = optionalNonEmpty(candidate);
+  if (value === undefined) return undefined;
+  let url: URL;
+  try {
+    url = new URL(value);
+  } catch {
+    throw new Error(`${label} must be an absolute URL`);
+  }
+  const hostname = url.hostname.replace(/^\[|\]$/gu, "");
+  const loopback =
+    hostname === "localhost" ||
+    hostname === "::1" ||
+    (isIP(hostname) === 4 && hostname.split(".")[0] === "127");
+  if (url.protocol !== "https:" && !(url.protocol === "http:" && loopback)) {
+    throw new Error(
+      `${label} must use HTTPS (loopback HTTP is allowed for local development)`,
+    );
+  }
+  if (
+    url.username !== "" ||
+    url.password !== "" ||
+    url.search !== "" ||
+    url.hash !== "" ||
+    !["", "/"].includes(url.pathname)
+  ) {
+    throw new Error(
+      `${label} must contain only an origin without credentials or a path`,
+    );
+  }
+  return url.origin;
+}
+
 export function resolveConfig(config: SquadConfig = {}): ResolvedSquadConfig {
   const dataDir = resolve(config.dataDir ?? dshHomePath("squad"));
   const relayUrl = optionalNonEmpty(config.relay?.url);
   const preset = optionalNonEmpty(config.execution?.preset);
   const invitation = optionalNonEmpty(config.relay?.invitation);
+  const directPublicUrl = resolveDirectBaseUrl(
+    config.direct?.publicUrl,
+    "squad direct.publicUrl",
+  );
   const repository =
     optionalNonEmpty(config.updates?.repository) ?? "zhouCode/dsh-squad";
   if (!/^[A-Za-z0-9_.-]+\/[A-Za-z0-9_.-]+$/u.test(repository)) {
@@ -109,13 +169,27 @@ export function resolveConfig(config: SquadConfig = {}): ResolvedSquadConfig {
       24 * 60,
       Math.max(1, config.envelopeTtlMinutes ?? 60),
     ),
-    peers: (config.peers ?? []).map((peer) => ({
-      nodeId: peer.nodeId,
-      displayName: peer.displayName,
-      publicKey: peer.publicKey,
-      enabled: peer.enabled ?? true,
-      policy: peerPolicySchema.parse(peer.policy ?? {}),
-    })),
+    peers: (config.peers ?? []).map((peer) => {
+      const transport = peerTransportSchema.parse(peer.transport ?? "RELAY");
+      const directUrl = resolveDirectBaseUrl(
+        peer.directUrl,
+        `squad peer ${peer.displayName} directUrl`,
+      );
+      if (transport === "DIRECT" && directUrl === undefined) {
+        throw new Error(
+          `squad peer ${peer.displayName} requires directUrl for DIRECT transport`,
+        );
+      }
+      return {
+        nodeId: peer.nodeId,
+        displayName: peer.displayName,
+        publicKey: peer.publicKey,
+        enabled: peer.enabled ?? true,
+        transport,
+        ...(directUrl === undefined ? {} : { directUrl }),
+        policy: peerPolicySchema.parse(peer.policy ?? {}),
+      };
+    }),
     execution: {
       cwd: resolve(config.execution?.cwd ?? process.cwd()),
       ...(preset === undefined ? {} : { preset }),
@@ -138,6 +212,14 @@ export function resolveConfig(config: SquadConfig = {}): ResolvedSquadConfig {
       maxRequestsPerMinute: Math.min(
         10_000,
         Math.max(10, config.relay?.maxRequestsPerMinute ?? 300),
+      ),
+    },
+    direct: {
+      enabled: config.direct?.enabled ?? false,
+      ...(directPublicUrl === undefined ? {} : { publicUrl: directPublicUrl }),
+      retryIntervalMs: Math.min(
+        5 * 60_000,
+        Math.max(1_000, config.direct?.retryIntervalMs ?? 5_000),
       ),
     },
     updates: {

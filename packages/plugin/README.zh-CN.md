@@ -4,12 +4,13 @@
 
 > 让个人 Agent 组成团队，而不交出工作区、凭据与控制权。
 
-DSH Squad 把运行在不同电脑、网络和地点上的个人 Agent，组成一个支持成员离线的任务委派团队，同时让每个人继续拥有和控制自己的 Agent。个人节点不需要公网 IP 或开放入站端口，成员之间也无需共享账号、API Key、工作区访问权或工具权限。Agent 通过 Relay 交换经过签名的任务和明确发布的结果；执行始终发生在接收方自己的 DSH、原生 Session、Skill、凭据与审批边界内。
+DSH Squad 把运行在不同电脑、网络和地点上的个人 Agent 组成任务委派团队，同时让每个人继续拥有和控制自己的 Agent。它既支持带持久邮箱和签名组织的持续在线 Relay，也支持无需 Relay、固定公钥的 Direct 点对点投递。成员无需共享账号、API Key、工作区访问权或工具权限；执行始终发生在接收方自己的 DSH、原生 Session、Skill、凭据与审批边界内。
 
 ## 为什么使用 Squad
 
-- 通过一个持续在线的 Relay 实现跨地域协作，无需节点直连。
-- 团队成员的电脑暂时离线时，由持久邮箱保存待投递任务。
+- Relay 模式适合无需节点直连的跨地域协作；Direct 模式适合局域网、VPN 或已有可达地址的小团队。
+- Relay 持久保存离线任务；Direct 由发送方本地 Outbox 保存并自动重试，明确显示`等待对方可达`。
+- 通过认证 Relay 唤醒事件或接收节点签名的 Direct Node Receipt 实时观察投递状态。
 - 可选的外部更新器为持久在线 Relay 验证签名 Release、备份、重启、健康检查并在失败时回滚；默认只通知。
 - 带签名的多组织成员目录、Owner/Admin/Member 角色、一次性邀请、审批和禁用，不再要求成员两两配置 Peer。
 - 一个节点可以加入多个组织；每个 DSH Session 独立选择一个组织成员目录或兼容的直接 Peer。
@@ -23,7 +24,7 @@ DSH Squad 把运行在不同电脑、网络和地点上的个人 Agent，组成�
 ## 安装
 
 ```bash
-dsh plugin --profile web add ./dsh-squad-plugin-0.5.0.tgz --offline
+dsh plugin --profile web add ./dsh-squad-plugin-0.6.0.tgz --offline
 dsh web
 ```
 
@@ -37,6 +38,25 @@ dsh web
       url: https://relay.example.com
       invitation: replace-with-one-time-invitation
 ```
+
+Direct 模式需要双方固定对方的 Node ID、公钥和 Direct URL，并在接收节点启用 Direct 入口：
+
+```yaml
+- id: dsh-squad
+  config:
+    direct:
+      enabled: true
+      publicUrl: https://alice-agent.example.com
+      retryIntervalMs: 5000
+    peers:
+      - nodeId: node_REPLACE_ME
+        displayName: Bob
+        publicKey: REPLACE_WITH_BOB_ED25519_PUBLIC_KEY
+        transport: DIRECT
+        directUrl: https://bob-agent.example.com
+```
+
+Direct 不提供 NAT 穿透或第三方离线邮箱：任务保存在发送方，直到双方同时在线且可达。生产入口必须使用 HTTPS；v0.6 的签名组织目录仍由 Relay 承载。
 
 原生 WebUI 提供`智能体收件箱` / `Agent Inbox`，实时显示节点和当前 Session 组织，并管理签名成员目录、邀请审批、逐成员策略、Team Planner 草案、收发箱、HumanTodo 和原生 Session 链接。Agent 还获得组织列表与切换工具。计划草案会一直保留在本地，直到负责人确认；接收方自己的策略和审批仍然独立生效。
 
@@ -54,7 +74,7 @@ v0.5.0 需要手动安装，之后的版本才能使用这套自更新。服务�
 
 ## 安全边界
 
-生产 Relay URL 必须使用 HTTPS。每个 Node 在本地保存独立的 Ed25519 身份；组织根和追加式成员事件经过签名并在本机固定，协议 v2 同时绑定双方 membership。个人 DSH WebUI 应只监听 `127.0.0.1`；对外只通过经过加固的 HTTPS 反向代理开放 Relay API。当前 Relay 是受信任内容中转方，不提供端到端加密。
+生产 Relay 和 Direct URL 必须使用 HTTPS。每个 Node 在本地保存独立的 Ed25519 身份；组织根和追加式成员事件经过签名并在本机固定，协议 v2 同时绑定双方 membership。Direct 只接受已启用且固定公钥的 Peer 所签名的协议 v1 Envelope，并返回接收节点签名的回执；IP 和端口本身不会产生信任。个人 DSH WebUI 应只监听 `127.0.0.1`；对外只通过经过加固的 HTTPS 反向代理放行必需的精确路由。当前 Relay 是受信任内容中转方，不提供端到端加密。
 
 更新 API 同样只允许 loopback；Release 必须来自配置的 GitHub 仓库，并同时匹配包内固定发布公钥、签名清单、文件名、大小、SHA-256 和最低 DSH 版本。默认不会无人确认就安装。
 

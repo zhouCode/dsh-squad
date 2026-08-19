@@ -76,6 +76,11 @@ const createOrganizationInvitationSchema = z.strictObject({
 
 type SqlRow = Record<string, unknown>;
 
+interface MailboxStream {
+  response: ServerResponse;
+  heartbeat: ReturnType<typeof setInterval>;
+}
+
 function inviteHash(token: string): string {
   return createHash("sha256").update(token, "utf8").digest("hex");
 }
@@ -136,6 +141,7 @@ export class RelayServer {
   readonly #maxMailboxItems: number;
   readonly #maxRequestsPerMinute: number;
   readonly #rate = new Map<string, { minute: number; count: number }>();
+  readonly #mailboxStreams = new Map<string, Set<MailboxStream>>();
 
   constructor(options: RelayServerOptions) {
     mkdirSync(dirname(options.databasePath), { recursive: true, mode: 0o700 });
@@ -300,7 +306,73 @@ export class RelayServer {
   }
 
   close(): void {
+    for (const streams of this.#mailboxStreams.values()) {
+      for (const stream of streams) {
+        clearInterval(stream.heartbeat);
+        stream.response.end();
+      }
+    }
+    this.#mailboxStreams.clear();
     this.#db.close();
+  }
+
+  private streamMailbox(
+    req: IncomingMessage,
+    res: ServerResponse,
+    nodeId: string,
+  ): void {
+    res.writeHead(200, {
+      "content-type": "text/event-stream; charset=utf-8",
+      "cache-control": "no-cache, no-store",
+      connection: "keep-alive",
+      "x-accel-buffering": "no",
+      "x-content-type-options": "nosniff",
+    });
+    res.flushHeaders();
+    res.write("event: ready\ndata: {}\n\n");
+
+    const stream: MailboxStream = {
+      response: res,
+      heartbeat: setInterval(() => {
+        if (!res.destroyed && !res.writableEnded) {
+          res.write(`: heartbeat ${Date.now()}\n\n`);
+        }
+      }, 15_000),
+    };
+    stream.heartbeat.unref?.();
+    const streams = this.#mailboxStreams.get(nodeId) ?? new Set();
+    streams.add(stream);
+    this.#mailboxStreams.set(nodeId, streams);
+
+    let closed = false;
+    const cleanup = (): void => {
+      if (closed) return;
+      closed = true;
+      clearInterval(stream.heartbeat);
+      streams.delete(stream);
+      if (streams.size === 0) this.#mailboxStreams.delete(nodeId);
+    };
+    req.once("close", cleanup);
+    res.once("close", cleanup);
+    res.once("finish", cleanup);
+  }
+
+  private notifyMailbox(nodeId: string, envelopeId: string): void {
+    const streams = this.#mailboxStreams.get(nodeId);
+    if (streams === undefined) return;
+    const event = `event: mailbox\ndata: ${JSON.stringify({ envelopeId })}\n\n`;
+    for (const stream of streams) {
+      if (!stream.response.destroyed && !stream.response.writableEnded) {
+        try {
+          stream.response.write(event);
+        } catch {
+          clearInterval(stream.heartbeat);
+          streams.delete(stream);
+          stream.response.destroy();
+        }
+      }
+    }
+    if (streams.size === 0) this.#mailboxStreams.delete(nodeId);
   }
 
   private rateLimit(nodeId: string): void {
@@ -1022,6 +1094,7 @@ export class RelayServer {
       this.#db.exec("ROLLBACK");
       throw error;
     }
+    this.notifyMailbox(envelope.recipientNodeId, envelope.envelopeId);
     return { envelopeId: envelope.envelopeId, accepted: true };
   }
 
@@ -1143,6 +1216,11 @@ export class RelayServer {
       if (req.method === "GET" && url.pathname === "/squad/v1/mailbox") {
         const auth = this.authenticate(req, path, Buffer.alloc(0));
         reply(res, 200, this.mailbox(auth.nodeId, url));
+        return true;
+      }
+      if (req.method === "GET" && url.pathname === "/squad/v1/mailbox/events") {
+        const auth = this.authenticate(req, path, Buffer.alloc(0));
+        this.streamMailbox(req, res, auth.nodeId);
         return true;
       }
       if (req.method === "GET" && url.pathname === "/squad/v1/nodes") {

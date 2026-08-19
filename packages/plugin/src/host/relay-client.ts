@@ -123,6 +123,66 @@ export class RelayClient {
     };
   }
 
+  async watchMailbox(
+    signal: AbortSignal,
+    onNotification: () => void,
+  ): Promise<void> {
+    const path = "/squad/v1/mailbox/events";
+    const signed = signedRequest(this.identity, "GET", path);
+    const response = await fetch(`${this.baseUrl}${path}`, {
+      headers: { ...signed.headers, accept: "text/event-stream" },
+      signal,
+    });
+    if (!response.ok) {
+      await parseResponse(response);
+      return;
+    }
+    if (
+      !response.headers.get("content-type")?.startsWith("text/event-stream")
+    ) {
+      throw new RelayClientError(
+        502,
+        "INVALID_RESPONSE",
+        "Relay mailbox event stream has an invalid content type",
+      );
+    }
+    if (response.body === null) {
+      throw new RelayClientError(
+        502,
+        "INVALID_RESPONSE",
+        "Relay mailbox event stream has no body",
+      );
+    }
+
+    const reader = response.body.getReader();
+    const decoder = new TextDecoder();
+    let buffered = "";
+    while (!signal.aborted) {
+      const chunk = await reader.read();
+      buffered += decoder.decode(chunk.value, { stream: !chunk.done });
+      if (buffered.length > 64 * 1024) {
+        throw new RelayClientError(
+          502,
+          "INVALID_RESPONSE",
+          "Relay mailbox event stream exceeded its buffer limit",
+        );
+      }
+      let separator = /\r?\n\r?\n/u.exec(buffered);
+      while (separator?.index !== undefined) {
+        const block = buffered.slice(0, separator.index);
+        buffered = buffered.slice(separator.index + separator[0].length);
+        const event = block
+          .split(/\r?\n/u)
+          .find((line) => line.startsWith("event:"))
+          ?.slice("event:".length)
+          .trim();
+        if (event === "ready" || event === "mailbox") onNotification();
+        separator = /\r?\n\r?\n/u.exec(buffered);
+      }
+      if (chunk.done) return;
+    }
+  }
+
   async acknowledge(envelopeId: string): Promise<void> {
     await this.request("POST", `/squad/v1/envelopes/${envelopeId}/ack`, {});
   }

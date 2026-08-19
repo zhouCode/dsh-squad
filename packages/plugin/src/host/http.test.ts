@@ -22,7 +22,7 @@ afterEach(async () => {
 describe("Squad host health", () => {
   it("reports the running plugin version even when Relay also handles health", async () => {
     const squad = {
-      version: () => "0.5.0",
+      version: () => "0.6.0",
       relayServer: {
         handle: async () => {
           throw new Error("Relay handler must not shadow host health");
@@ -41,7 +41,7 @@ describe("Squad host health", () => {
     );
     expect(await response.json()).toEqual({
       ok: true,
-      version: "0.5.0",
+      version: "0.6.0",
       protocolVersions: [1, 2],
     });
   });

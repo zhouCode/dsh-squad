@@ -19,6 +19,7 @@ import { updaterConfigSchema, updaterProfileDir } from "./config.ts";
 import { executeUpdater, type UpdaterDependencies } from "./executor.ts";
 
 const temporaryDirectories: string[] = [];
+const TARGET_VERSION = "0.6.1";
 
 afterEach(async () => {
   await Promise.all(
@@ -35,12 +36,12 @@ async function fixture() {
   const manifest: ReleaseManifest = {
     schemaVersion: 1,
     package: "@dsh-squad/plugin",
-    version: "0.6.0",
-    tag: "v0.6.0",
+    version: TARGET_VERSION,
+    tag: `v${TARGET_VERSION}`,
     keyId: "1".repeat(64),
     publishedAt: "2026-08-19T00:00:00.000Z",
     asset: {
-      name: "dsh-squad-plugin-0.6.0.tgz",
+      name: `dsh-squad-plugin-${TARGET_VERSION}.tgz`,
       size: packageBytes.byteLength,
       sha256: sha256Hex(packageBytes),
     },
@@ -48,9 +49,8 @@ async function fixture() {
   };
   const release: VerifiedRelease = {
     manifest,
-    releaseUrl: "https://github.com/zhouCode/dsh-squad/releases/tag/v0.6.0",
-    assetUrl:
-      "https://github.com/zhouCode/dsh-squad/releases/download/v0.6.0/dsh-squad-plugin-0.6.0.tgz",
+    releaseUrl: `https://github.com/zhouCode/dsh-squad/releases/tag/v${TARGET_VERSION}`,
+    assetUrl: `https://github.com/zhouCode/dsh-squad/releases/download/v${TARGET_VERSION}/dsh-squad-plugin-${TARGET_VERSION}.tgz`,
   };
   const config = updaterConfigSchema.parse({
     schemaVersion: 1,
@@ -139,10 +139,12 @@ describe("external updater execution", () => {
       dependencies(value.profile, value.release, value.packageBytes, false),
     );
     expect(await readFile(join(value.profile, "version.txt"), "utf8")).toBe(
-      "0.6.0",
+      TARGET_VERSION,
     );
     expect((await value.store.readStatus())?.phase).toBe("INSTALLED");
-    expect((await value.store.readStatus())?.currentVersion).toBe("0.6.0");
+    expect((await value.store.readStatus())?.currentVersion).toBe(
+      TARGET_VERSION,
+    );
     expect((await readdir(join(value.config.stateDir, "backups"))).length).toBe(
       1,
     );

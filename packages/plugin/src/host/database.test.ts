@@ -79,7 +79,7 @@ describe("SquadDatabase", () => {
     const schema = migrated
       .prepare("SELECT version FROM schema_meta WHERE singleton = 1")
       .get();
-    expect(schema?.version).toBe(5);
+    expect(schema?.version).toBe(6);
     migrated.close();
   });
 
@@ -431,6 +431,7 @@ describe("SquadDatabase", () => {
           displayName: organizationMember.displayName,
           publicKey: organizationMember.publicKey,
           enabled: true,
+          transport: "RELAY",
           policy: organizationMember.policy,
           organizationId,
           membershipId: memberMembershipId,

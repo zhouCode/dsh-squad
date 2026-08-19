@@ -14,6 +14,9 @@ export const signatureSchema = z
   .string()
   .regex(/^[A-Za-z0-9_-]{86}$/, "invalid Ed25519 signature");
 
+export const peerTransportSchema = z.enum(["RELAY", "DIRECT"]);
+export type PeerTransport = z.infer<typeof peerTransportSchema>;
+
 export const attachmentRefSchema = z.strictObject({
   url: z
     .string()
@@ -144,6 +147,21 @@ type DistributiveOmit<T, K extends PropertyKey> = T extends unknown
   ? Omit<T, K>
   : never;
 export type UnsignedEnvelope = DistributiveOmit<Envelope, "signature">;
+
+export const unsignedNodeReceiptSchema = z.strictObject({
+  version: z.literal(1),
+  envelopeId: idSchema,
+  senderNodeId: nodeIdSchema,
+  recipientNodeId: nodeIdSchema,
+  receivedAt: timestampSchema,
+});
+export type UnsignedNodeReceipt = z.infer<typeof unsignedNodeReceiptSchema>;
+
+export const nodeReceiptSchema = z.strictObject({
+  ...unsignedNodeReceiptSchema.shape,
+  signature: signatureSchema,
+});
+export type NodeReceipt = z.infer<typeof nodeReceiptSchema>;
 
 export const peerPolicySchema = z.strictObject({
   canMessage: z.boolean().default(false),

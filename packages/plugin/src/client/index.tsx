@@ -66,6 +66,9 @@ interface DelegationView {
   status: Status;
   revision: number;
   deliveryStatus: string;
+  deliveryAttempts: number;
+  lastDeliveryError?: string;
+  nextDeliveryAttemptAt?: string;
   sessionId?: string;
   summary?: string;
   outputs: Array<
@@ -82,6 +85,8 @@ interface PeerView {
   displayName: string;
   publicKey: string;
   enabled: boolean;
+  transport: "RELAY" | "DIRECT";
+  directUrl?: string;
   policy: {
     canMessage: boolean;
     canDelegate: boolean;
@@ -96,6 +101,7 @@ interface PeerView {
 interface LocalState {
   identity: { nodeId: string; displayName: string; publicKey: string };
   relay: { configured: boolean; serving: boolean };
+  direct: { serving: boolean; publicUrl?: string };
   peers: PeerView[];
   organizations: OrganizationView[];
   sessionOrganizations: Record<string, string>;
@@ -346,7 +352,26 @@ function DelegationDetail({
           <dt>{t("field.delivery")}</dt>
           <dd>{formatDelivery(t, item.deliveryStatus)}</dd>
         </div>
+        {item.deliveryAttempts > 0 ? (
+          <div>
+            <dt>{t("field.deliveryAttempts")}</dt>
+            <dd>{item.deliveryAttempts}</dd>
+          </div>
+        ) : null}
+        {item.nextDeliveryAttemptAt &&
+        ["QUEUED_LOCAL", "WAITING_FOR_PEER"].includes(item.deliveryStatus) ? (
+          <div>
+            <dt>{t("field.nextDeliveryAttempt")}</dt>
+            <dd>{new Date(item.nextDeliveryAttemptAt).toLocaleString()}</dd>
+          </div>
+        ) : null}
       </dl>
+      {item.lastDeliveryError &&
+      ["QUEUED_LOCAL", "WAITING_FOR_PEER"].includes(item.deliveryStatus) ? (
+        <p className="squad-muted">
+          {t("field.lastDeliveryError")}: {item.lastDeliveryError}
+        </p>
+      ) : null}
       {item.context ? (
         <section>
           <h3>{t("field.context")}</h3>
@@ -449,7 +474,7 @@ function DelegationDetail({
         </div>
       ) : null}
       {item.direction === "OUTGOING" &&
-      item.deliveryStatus === "QUEUED_LOCAL" ? (
+      ["QUEUED_LOCAL", "WAITING_FOR_PEER"].includes(item.deliveryStatus) ? (
         <button disabled={busy} onClick={() => act("retry")}>
           {t("action.retryDelivery")}
         </button>
@@ -1039,6 +1064,8 @@ function Settings({
           nodeId: form.get("nodeId"),
           displayName: form.get("displayName"),
           publicKey: form.get("publicKey"),
+          transport: form.get("transport"),
+          directUrl: form.get("directUrl"),
           policy: {
             canMessage: true,
             canDelegate: true,
@@ -1083,6 +1110,13 @@ function Settings({
       <p>
         {t("settings.relay")}: {relayState}
       </p>
+      <p>
+        {t("settings.direct")}:{" "}
+        {state.direct.serving
+          ? t("settings.directServing")
+          : t("settings.directNotServing")}
+      </p>
+      {state.direct.publicUrl ? <code>{state.direct.publicUrl}</code> : null}
       <p className="squad-muted">{t("settings.languageHint")}</p>
       <h2>{t("settings.peers")}</h2>
       {state.peers.map((peer) => (
@@ -1090,6 +1124,12 @@ function Settings({
           <div>
             <strong>{peer.displayName}</strong>
             <code>{peer.nodeId}</code>
+            <span>
+              {peer.transport === "DIRECT"
+                ? t("transport.DIRECT")
+                : t("transport.RELAY")}
+            </span>
+            {peer.directUrl ? <code>{peer.directUrl}</code> : null}
           </div>
           {peer.enabled ? (
             <PolicySelect
@@ -1123,6 +1163,22 @@ function Settings({
         <label>
           {t("settings.publicKey")}
           <textarea name="publicKey" required rows={5} />
+        </label>
+        <label>
+          {t("settings.transport")}
+          <select name="transport" defaultValue="RELAY">
+            <option value="RELAY">{t("transport.RELAY")}</option>
+            <option value="DIRECT">{t("transport.DIRECT")}</option>
+          </select>
+        </label>
+        <label>
+          {t("settings.directUrl")}
+          <input
+            name="directUrl"
+            type="url"
+            placeholder="https://bob.example.com"
+          />
+          <small>{t("settings.directUrlHint")}</small>
         </label>
         <label>
           {t("settings.autoExecute")}

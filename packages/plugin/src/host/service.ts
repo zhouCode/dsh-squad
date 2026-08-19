@@ -25,12 +25,14 @@ import {
   idSchema,
   nodeIdSchema,
   peerPolicySchema,
+  unsignedNodeReceiptSchema,
   type CreateDelegationInput,
   type CreateTeamPlanInput,
   type DelegationResult,
   type Envelope,
   type HumanInput as HumanInputValue,
   type PeerPolicy,
+  type PeerTransport,
   type ResultOutput,
   type StructuredOutcome,
   type TeamPlan,
@@ -52,7 +54,7 @@ import {
 import { isTerminalStatus } from "../shared/state.ts";
 import type { UpdateMode, UpdateSnapshot } from "../shared/updates.ts";
 import { SQUAD_VERSION } from "../shared/version.ts";
-import type { ResolvedSquadConfig } from "./config.ts";
+import { resolveDirectBaseUrl, type ResolvedSquadConfig } from "./config.ts";
 import {
   SquadDatabase,
   type DelegationRecord,
@@ -71,10 +73,16 @@ import {
   NativeDelegationExecutor,
   makeTodos,
 } from "./native-executor.ts";
-import { RelayClient } from "./relay-client.ts";
+import { RelayClient, RelayClientError } from "./relay-client.ts";
 import { RelayServer } from "./relay.ts";
 import { OrganizationAuthority } from "./organization.ts";
 import { UpdateController } from "./update-controller.ts";
+import {
+  DirectEnvelopeTransport,
+  DirectTransportError,
+  RelayEnvelopeTransport,
+  type EnvelopeTransport,
+} from "./transport.ts";
 
 declare module "@deepseek-ai/cordis" {
   interface Context {
@@ -113,12 +121,31 @@ function shareableOutputs(outputs: ResultOutput[]): ResultOutput[] {
   );
 }
 
+function abortableDelay(
+  milliseconds: number,
+  signal: AbortSignal,
+): Promise<void> {
+  if (signal.aborted) return Promise.resolve();
+  return new Promise((resolve) => {
+    const complete = (): void => {
+      clearTimeout(timer);
+      signal.removeEventListener("abort", complete);
+      resolve();
+    };
+    const timer = setTimeout(complete, milliseconds);
+    timer.unref?.();
+    signal.addEventListener("abort", complete, { once: true });
+  });
+}
+
 export class SquadService extends Service {
   readonly config: ResolvedSquadConfig;
   readonly database: SquadDatabase;
   readonly identity: NodeIdentity;
   readonly relayServer?: RelayServer;
   readonly relayClient?: RelayClient;
+  readonly relayTransport?: RelayEnvelopeTransport;
+  readonly directTransport: DirectEnvelopeTransport;
   readonly executor: NativeDelegationExecutor;
   readonly attachments: AttachmentVerifier;
   readonly updates: UpdateController;
@@ -128,6 +155,10 @@ export class SquadService extends Service {
   #stateRevision = 1;
   #timer?: ReturnType<typeof setInterval>;
   #pumping = false;
+  #pumpRequested = false;
+  #flushing: Promise<void> | undefined;
+  #relayEventsAbort?: AbortController;
+  #relayEventsTask?: Promise<void>;
   #closed = false;
 
   constructor(ctx: Context, config: ResolvedSquadConfig) {
@@ -162,7 +193,12 @@ export class SquadService extends Service {
     }
     if (config.relay.url !== undefined) {
       this.relayClient = new RelayClient(config.relay.url, this.identity);
+      this.relayTransport = new RelayEnvelopeTransport(this.relayClient);
     }
+    this.directTransport = new DirectEnvelopeTransport(
+      this.identity,
+      (nodeId) => this.database.findPeer(nodeId),
+    );
     this.executor = new NativeDelegationExecutor(ctx, config.execution);
     this.attachments = new AttachmentVerifier(
       join(config.dataDir, "attachments"),
@@ -191,6 +227,7 @@ export class SquadService extends Service {
       this.enqueueResult(failed);
     }
     await this.pump();
+    this.startRelayEvents();
     this.#timer = setInterval(() => {
       void this.pump();
     }, this.config.pollIntervalMs);
@@ -201,6 +238,12 @@ export class SquadService extends Service {
     if (this.#closed) return;
     this.#closed = true;
     if (this.#timer !== undefined) clearInterval(this.#timer);
+    this.#relayEventsAbort?.abort();
+    await this.#relayEventsTask;
+    while (this.#pumping) {
+      await new Promise<void>((resolve) => setImmediate(resolve));
+    }
+    await this.#flushing?.catch(() => undefined);
     this.#stateListeners.clear();
     await this.executor.dispose();
     this.relayServer?.close();
@@ -229,17 +272,29 @@ export class SquadService extends Service {
     displayName: string;
     publicKey: string;
     enabled?: boolean;
+    transport?: PeerTransport;
+    directUrl?: string;
     policy?: Partial<PeerPolicy>;
   }): Promise<PeerRecord> {
     nodeIdSchema.parse(input.nodeId);
     if (nodeIdFromPublicKey(input.publicKey) !== input.nodeId) {
       throw new Error("peer public key fingerprint does not match nodeId");
     }
+    const transport = input.transport ?? "RELAY";
+    const directUrl = resolveDirectBaseUrl(
+      input.directUrl,
+      `squad peer ${input.displayName} directUrl`,
+    );
+    if (transport === "DIRECT" && directUrl === undefined) {
+      throw new Error("DIRECT peer requires a direct URL");
+    }
     this.database.upsertPeer({
       nodeId: input.nodeId,
       displayName: input.displayName,
       publicKey: input.publicKey,
       enabled: input.enabled ?? true,
+      transport,
+      ...(directUrl === undefined ? {} : { directUrl }),
       policy: peerPolicySchema.parse(input.policy ?? {}),
     });
     const peer = this.database.findPeer(input.nodeId);
@@ -292,6 +347,7 @@ export class SquadService extends Service {
           displayName: member.displayName,
           publicKey: member.publicKey,
           enabled: true,
+          transport: "RELAY",
           policy: member.policy,
           organizationId: organization.organizationId,
           membershipId: member.membershipId,
@@ -796,6 +852,7 @@ export class SquadService extends Service {
       publicKey: member.publicKey,
       enabled: true,
       policy: member.policy,
+      transport: "RELAY",
       organizationId: organization.organizationId,
       membershipId: member.membershipId,
       senderMembershipId: organization.selfMembershipId,
@@ -984,11 +1041,11 @@ export class SquadService extends Service {
     if (isTerminalStatus(delegation.status)) return;
     if (
       delegation.direction === "OUTGOING" &&
-      delegation.deliveryStatus === "QUEUED_LOCAL"
+      ["QUEUED_LOCAL", "WAITING_FOR_PEER"].includes(delegation.deliveryStatus)
     ) {
       this.database.discardPendingEnvelope(delegation.requestEnvelopeId);
       this.database.transition(id, "CANCELED", {
-        summary: "Canceled before Relay delivery.",
+        summary: "Canceled before the receiving Node acknowledged delivery.",
         completedAt: new Date().toISOString(),
       });
       return;
@@ -1315,6 +1372,7 @@ export class SquadService extends Service {
         displayName: sender.displayName,
         publicKey: sender.publicKey,
         enabled: true,
+        transport: "RELAY",
         policy: sender.policy,
         organizationId,
         membershipId: sender.membershipId,
@@ -1455,20 +1513,119 @@ export class SquadService extends Service {
     }
   }
 
+  async receiveDirectEnvelope(candidate: unknown): Promise<{
+    version: 1;
+    envelopeId: string;
+    senderNodeId: string;
+    recipientNodeId: string;
+    receivedAt: string;
+    signature: string;
+  }> {
+    if (this.#closed) {
+      throw new Error("Squad service is closed");
+    }
+    if (!this.config.direct.enabled) {
+      throw new Error("Direct transport is not enabled on this Node");
+    }
+    const envelope = envelopeSchema.parse(candidate);
+    if (envelope.protocolVersion !== 1) {
+      throw new Error(
+        "Direct transport currently accepts only direct Peer envelopes",
+      );
+    }
+    await this.processEnvelope(envelope);
+    const unsigned = unsignedNodeReceiptSchema.parse({
+      version: 1,
+      envelopeId: envelope.envelopeId,
+      senderNodeId: this.identity.nodeId,
+      recipientNodeId: envelope.senderNodeId,
+      receivedAt: new Date().toISOString(),
+    });
+    const receipt = { ...unsigned, signature: this.identity.sign(unsigned) };
+    this.touchLocalState();
+    void this.flushOutbox().catch((error: unknown) => {
+      if (this.#closed) return;
+      this.database.diagnostic(
+        "DIRECT_RESPONSE_DELIVERY_FAILED",
+        "delegationId" in envelope.payload
+          ? envelope.payload.delegationId
+          : undefined,
+        error instanceof Error ? error.message : String(error),
+      );
+    });
+    return receipt;
+  }
+
+  private transportFor(envelope: Envelope): EnvelopeTransport {
+    if (envelope.organizationId !== undefined) {
+      if (this.relayTransport === undefined) {
+        throw new Error(
+          "Relay transport is required for organization envelopes",
+        );
+      }
+      return this.relayTransport;
+    }
+    const peer = this.database.findPeer(envelope.recipientNodeId);
+    if (peer?.transport === "DIRECT") return this.directTransport;
+    if (this.relayTransport === undefined) {
+      throw new Error(
+        `Relay transport is not configured for ${envelope.recipientNodeId}`,
+      );
+    }
+    return this.relayTransport;
+  }
+
   async flushOutbox(): Promise<void> {
-    if (this.relayClient === undefined) return;
+    if (this.#flushing !== undefined) return this.#flushing;
+    const flushing = this.flushOutboxNow().finally(() => {
+      if (this.#flushing === flushing) this.#flushing = undefined;
+    });
+    this.#flushing = flushing;
+    return flushing;
+  }
+
+  private async flushOutboxNow(): Promise<void> {
     let changed = false;
     for (const pending of this.database.pendingEnvelopes()) {
+      if (Date.parse(pending.envelope.expiresAt) <= Date.now()) {
+        this.database.expireEnvelope(pending.envelope.envelopeId);
+        changed = true;
+        continue;
+      }
+      const directPeer =
+        pending.envelope.organizationId === undefined
+          ? this.database.findPeer(pending.envelope.recipientNodeId)
+          : undefined;
+      const expectsDirect = directPeer?.transport === "DIRECT";
       try {
-        await this.relayClient.submit(pending.envelope);
-        this.database.markEnvelopeDelivered(pending.envelope.envelopeId);
+        const transport = this.transportFor(pending.envelope);
+        const deliveryStatus = await transport.submit(pending.envelope);
+        this.database.markEnvelopeDelivered(
+          pending.envelope.envelopeId,
+          deliveryStatus,
+        );
         changed = true;
       } catch (error) {
         this.database.markEnvelopeAttemptFailed(
           pending.envelope.envelopeId,
           error,
+          expectsDirect
+            ? {
+                deliveryStatus: "WAITING_FOR_PEER",
+                retryAfterMs: this.config.direct.retryIntervalMs,
+              }
+            : { deliveryStatus: "QUEUED_LOCAL" },
         );
-        break;
+        if (error instanceof DirectTransportError) {
+          this.database.diagnostic(
+            error.code,
+            "delegationId" in pending.envelope.payload
+              ? pending.envelope.payload.delegationId
+              : undefined,
+            error.message,
+          );
+        }
+        changed = true;
       }
     }
     if (changed) this.touchLocalState();
@@ -1503,21 +1660,67 @@ export class SquadService extends Service {
     if (mailbox.items.length > 0) this.touchLocalState();
   }
 
+  private startRelayEvents(): void {
+    if (this.relayClient === undefined) return;
+    const controller = new AbortController();
+    this.#relayEventsAbort = controller;
+    this.#relayEventsTask = this.watchRelayEvents(controller.signal);
+  }
+
+  private async watchRelayEvents(signal: AbortSignal): Promise<void> {
+    if (this.relayClient === undefined) return;
+    let retryAfterMs = 1_000;
+    let reportedFailure = false;
+    while (!signal.aborted && !this.#closed) {
+      try {
+        await this.relayClient.watchMailbox(signal, () => {
+          void this.pump();
+        });
+        retryAfterMs = 1_000;
+      } catch (error) {
+        if (signal.aborted || this.#closed) return;
+        if (error instanceof RelayClientError && error.status === 404) {
+          return;
+        }
+        if (!reportedFailure) {
+          reportedFailure = true;
+          this.database.diagnostic(
+            "RELAY_EVENT_STREAM_FAILED",
+            undefined,
+            error instanceof Error ? error.message : String(error),
+          );
+        }
+      }
+      await abortableDelay(retryAfterMs, signal);
+      retryAfterMs = Math.min(retryAfterMs * 2, 30_000);
+    }
+  }
+
   async pump(): Promise<void> {
-    if (this.#pumping || this.#closed) return;
+    if (this.#closed) return;
+    if (this.#pumping) {
+      this.#pumpRequested = true;
+      return;
+    }
     this.#pumping = true;
     try {
-      await this.syncOrganizations();
-      await this.flushOutbox();
-      await this.pollMailbox();
-      await this.flushOutbox();
-      if (await this.updates.refresh()) this.touchLocalState();
-    } catch (error) {
-      this.database.diagnostic(
-        "RELAY_PUMP_FAILED",
-        undefined,
-        error instanceof Error ? error.message : String(error),
-      );
+      while (!this.#closed) {
+        this.#pumpRequested = false;
+        try {
+          await this.syncOrganizations();
+          await this.flushOutbox();
+          await this.pollMailbox();
+          await this.flushOutbox();
+          if (await this.updates.refresh()) this.touchLocalState();
+        } catch (error) {
+          this.database.diagnostic(
+            "TRANSPORT_PUMP_FAILED",
+            undefined,
+            error instanceof Error ? error.message : String(error),
+          );
+        }
+        if (!this.#pumpRequested) break;
+      }
     } finally {
       this.#pumping = false;
     }
@@ -1526,6 +1729,7 @@ export class SquadService extends Service {
   localState(): {
     identity: { nodeId: string; displayName: string; publicKey: string };
     relay: { configured: boolean; serving: boolean };
+    direct: { serving: boolean; publicUrl?: string };
     peers: PeerRecord[];
     organizations: OrganizationView[];
     sessionOrganizations: Record<string, string>;
@@ -1543,6 +1747,12 @@ export class SquadService extends Service {
       relay: {
         configured: this.relayClient !== undefined,
         serving: this.relayServer !== undefined,
+      },
+      direct: {
+        serving: this.config.direct.enabled,
+        ...(this.config.direct.publicUrl === undefined
+          ? {}
+          : { publicUrl: this.config.direct.publicUrl }),
       },
       peers: this.database.listPeers(),
       organizations: this.database.listOrganizations(this.identity.nodeId),

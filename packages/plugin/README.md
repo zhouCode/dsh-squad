@@ -4,12 +4,13 @@
 
 > Let personal Agents become a team without giving up workspaces, credentials, or control.
 
-DSH Squad turns personal Agents on different computers, networks, and locations into an offline-capable delegation team while every person remains the owner and operator of their own Agent. Personal nodes need no public IP address or inbound port, and members share no accounts, API keys, workspace access, or tool permissions. Agents exchange signed tasks and deliberately published outcomes through a Relay; execution stays inside the recipient's own DSH, native Session, Skills, credentials, and approval boundary.
+DSH Squad turns personal Agents on different computers, networks, and locations into a delegation team while every person remains the owner and operator of their own Agent. It supports an always-on Relay with durable mailboxes and signed organizations, or pinned-key Direct peer-to-peer delivery without a Relay. Members share no accounts, API keys, workspace access, or tool permissions; execution stays inside the recipient's own DSH, native Session, Skills, credentials, and approval boundary.
 
 ## Why Squad
 
-- Cross-location collaboration through one always-on Relay, without direct node connectivity.
-- Durable mailbox delivery when a teammate's computer is temporarily offline.
+- Relay mode for cross-location collaboration without direct node connectivity; Direct mode for reachable LAN/VPN/small-team Peers.
+- Relay-persisted offline delivery, or a sender-local Direct outbox with automatic retry and explicit `Waiting for peer reachability` state.
+- Observable delivery through authenticated Relay wakeups or a recipient-signed Direct Node Receipt.
 - Optional safe maintenance for an always-on Relay: signed-release verification, backup, restart, health check, and rollback, with notify-only as the default.
 - Signed multi-organization membership with Owner/Admin/Member roles, one-time invitations, approval, and revocation—without pairwise Peer setup.
 - One Node may join multiple organizations; each DSH Session selects one organization-scoped recipient directory or compatible direct Peers.
@@ -23,7 +24,7 @@ The package contains one Cordis Host plugin, six native Agent tools, a DSH Web C
 ## Install
 
 ```bash
-dsh plugin --profile web add ./dsh-squad-plugin-0.5.0.tgz --offline
+dsh plugin --profile web add ./dsh-squad-plugin-0.6.0.tgz --offline
 dsh web
 ```
 
@@ -37,6 +38,25 @@ The bundled `cordis.patch.yml` inserts the `dsh-squad` entry. Override it in `$D
       url: https://relay.example.com
       invitation: replace-with-one-time-invitation
 ```
+
+For Direct mode, both Nodes pin each other's Node ID/public key and Direct URL. The receiving Node enables the Direct endpoint:
+
+```yaml
+- id: dsh-squad
+  config:
+    direct:
+      enabled: true
+      publicUrl: https://alice-agent.example.com
+      retryIntervalMs: 5000
+    peers:
+      - nodeId: node_REPLACE_ME
+        displayName: Bob
+        publicKey: REPLACE_WITH_BOB_ED25519_PUBLIC_KEY
+        transport: DIRECT
+        directUrl: https://bob-agent.example.com
+```
+
+Direct has no NAT traversal or third-party offline mailbox: the sender keeps the task until both Peers are online and reachable. Production endpoints require HTTPS. Signed organization directories remain Relay-backed in v0.6.
 
 The native WebUI exposes `Agent Inbox` / `智能体收件箱` for real-time Node and Session organization identity, signed membership, invitations and approvals, per-member policy, Team Planner review, inbox/outbox state, HumanTodo input, and native Session links. Agents also receive organization listing/selection tools. A Team Planner proposal stays local until its owner approves it; recipient policy and approval remain independent.
 
@@ -54,7 +74,7 @@ Simplified Chinese and English are complete, type-checked dictionaries owned by 
 
 ## Security boundary
 
-Production Relay URLs require HTTPS. Each Node keeps a local Ed25519 identity; organization roots and append-only member events are signed and pinned locally, and protocol-v2 Delegations bind both membership IDs. Personal DSH WebUIs should listen only on `127.0.0.1`; expose only the Relay API through a hardened HTTPS reverse proxy. The current Relay is a trusted content intermediary, not an end-to-end-encrypted service.
+Production Relay and Direct URLs require HTTPS. Each Node keeps a local Ed25519 identity; organization roots and append-only member events are signed and pinned locally, and protocol-v2 Delegations bind both membership IDs. Direct accepts signed protocol-v1 Envelopes only from enabled pinned Peers and returns a receipt signed by the receiving Node—an IP address and port never grant trust. Personal DSH WebUIs should listen only on `127.0.0.1`; expose only exact required routes through a hardened HTTPS reverse proxy. The current Relay is a trusted content intermediary, not an end-to-end-encrypted service.
 
 Update APIs are also loopback-only. Releases must come from the configured GitHub repository and match the package-pinned release public key, signed manifest, filename, size, SHA-256, and minimum DSH version. Unattended installation is never the default.
 

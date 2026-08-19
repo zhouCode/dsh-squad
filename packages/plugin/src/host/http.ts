@@ -132,6 +132,14 @@ export function createHttpHandler(squad: SquadService) {
       if (req.method === "POST") assertSameOrigin(req);
       if (
         req.method === "POST" &&
+        url.pathname === "/squad/v1/direct/envelopes"
+      ) {
+        const envelope = await readJson(req, 256 * 1024);
+        reply(res, 200, await squad.receiveDirectEnvelope(envelope));
+        return;
+      }
+      if (
+        req.method === "POST" &&
         url.pathname === "/squad/v1/local/updates/check"
       ) {
         await readJson(req, 1_024);
@@ -183,6 +191,13 @@ export function createHttpHandler(squad: SquadService) {
           displayName: String(body.displayName ?? ""),
           publicKey: String(body.publicKey ?? ""),
           enabled: body.enabled === undefined ? true : body.enabled === true,
+          transport:
+            body.transport === "DIRECT" || body.transport === "RELAY"
+              ? body.transport
+              : "RELAY",
+          ...(typeof body.directUrl === "string"
+            ? { directUrl: body.directUrl }
+            : {}),
           policy: peerPolicySchema.parse(body.policy ?? {}),
         });
         reply(res, 201, peer);

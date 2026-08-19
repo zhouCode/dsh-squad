@@ -9,6 +9,7 @@ import {
   envelopeSchema,
   humanTodoSchema,
   peerPolicySchema,
+  peerTransportSchema,
   resultOutputSchema,
   type AttachmentRef,
   type CreateTeamPlanInput,
@@ -19,6 +20,7 @@ import {
   type HumanTodo,
   type HumanInput,
   type PeerPolicy,
+  type PeerTransport,
   type ResultOutput,
   type TeamPlan,
   type TeamPlanItem,
@@ -49,7 +51,10 @@ import { verifyOrganizationDirectory } from "./organization.ts";
 export type DelegationDirection = "INCOMING" | "OUTGOING";
 export type DeliveryStatus =
   | "QUEUED_LOCAL"
-  | "DELIVERED_TO_RELAY"
+  | "WAITING_FOR_PEER"
+  | "STORED_BY_RELAY"
+  | "RECEIVED_BY_NODE"
+  | "DELIVERY_EXPIRED"
   | "RECEIVED_LOCAL";
 
 export interface PeerRecord {
@@ -57,6 +62,8 @@ export interface PeerRecord {
   displayName: string;
   publicKey: string;
   enabled: boolean;
+  transport: PeerTransport;
+  directUrl?: string;
   policy: PeerPolicy;
   createdAt: string;
   updatedAt: string;
@@ -78,6 +85,9 @@ export interface DelegationRecord {
   status: DelegationStatus;
   revision: number;
   deliveryStatus: DeliveryStatus;
+  deliveryAttempts: number;
+  lastDeliveryError?: string;
+  nextDeliveryAttemptAt?: string;
   requestEnvelopeId: string;
   sessionId?: string;
   summary?: string;
@@ -109,6 +119,8 @@ export interface ResolvedDelegationRecipient {
   displayName: string;
   publicKey: string;
   enabled: boolean;
+  transport: PeerTransport;
+  directUrl?: string;
   policy: PeerPolicy;
   organizationId?: string;
   membershipId?: string;
@@ -173,6 +185,8 @@ export class SquadDatabase {
         public_key TEXT NOT NULL,
         directory_only INTEGER NOT NULL DEFAULT 0 CHECK (directory_only IN (0, 1)),
         enabled INTEGER NOT NULL CHECK (enabled IN (0, 1)),
+        transport TEXT NOT NULL DEFAULT 'RELAY' CHECK (transport IN ('RELAY', 'DIRECT')),
+        direct_url TEXT,
         can_message INTEGER NOT NULL CHECK (can_message IN (0, 1)),
         can_delegate INTEGER NOT NULL CHECK (can_delegate IN (0, 1)),
         auto_execute TEXT NOT NULL CHECK (auto_execute IN ('NEVER', 'SAFE', 'TRUSTED')),
@@ -453,7 +467,25 @@ export class SquadDatabase {
       this.#db.exec("UPDATE schema_meta SET version = 5 WHERE singleton = 1");
       currentVersion = 5;
     }
-    if (currentVersion !== 5) {
+    if (currentVersion === 5) {
+      const peerColumns = this.#db
+        .prepare("PRAGMA table_info(peer_policies)")
+        .all() as SqlRow[];
+      if (!peerColumns.some((column) => column.name === "transport")) {
+        this.#db.exec(
+          "ALTER TABLE peer_policies ADD COLUMN transport TEXT NOT NULL DEFAULT 'RELAY' CHECK (transport IN ('RELAY', 'DIRECT'))",
+        );
+      }
+      if (!peerColumns.some((column) => column.name === "direct_url")) {
+        this.#db.exec("ALTER TABLE peer_policies ADD COLUMN direct_url TEXT");
+      }
+      this.#db.exec(
+        "UPDATE local_delegations SET delivery_status = 'STORED_BY_RELAY' WHERE delivery_status = 'DELIVERED_TO_RELAY'",
+      );
+      this.#db.exec("UPDATE schema_meta SET version = 6 WHERE singleton = 1");
+      currentVersion = 6;
+    }
+    if (currentVersion !== 6) {
       throw new Error(
         `unsupported Squad database version ${String(currentVersion)}`,
       );
@@ -507,9 +539,15 @@ export class SquadDatabase {
     displayName: string;
     publicKey: string;
     enabled: boolean;
+    transport?: PeerTransport;
+    directUrl?: string;
     policy: PeerPolicy;
   }): void {
     const policy = peerPolicySchema.parse(input.policy);
+    const transport = peerTransportSchema.parse(input.transport ?? "RELAY");
+    if (transport === "DIRECT" && input.directUrl === undefined) {
+      throw new Error("DIRECT peer requires a direct URL");
+    }
     const now = new Date().toISOString();
     const existing = this.#db
       .prepare(
@@ -525,14 +563,17 @@ export class SquadDatabase {
       .prepare(
         `
         INSERT INTO peer_policies(
-          node_id, display_name, public_key, directory_only, enabled,
+          node_id, display_name, public_key, directory_only, enabled, transport,
+          direct_url,
           can_message, can_delegate, auto_execute, max_concurrent, max_delegation_depth,
           max_runtime_minutes, max_tokens, created_at, updated_at
-        ) VALUES (?, ?, ?, 0, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+        ) VALUES (?, ?, ?, 0, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
         ON CONFLICT(node_id) DO UPDATE SET
           display_name = excluded.display_name,
           directory_only = 0,
           enabled = excluded.enabled,
+          transport = excluded.transport,
+          direct_url = excluded.direct_url,
           can_message = excluded.can_message,
           can_delegate = excluded.can_delegate,
           auto_execute = excluded.auto_execute,
@@ -548,6 +589,8 @@ export class SquadDatabase {
         input.displayName,
         input.publicKey,
         input.enabled ? 1 : 0,
+        transport,
+        input.directUrl ?? null,
         policy.canMessage ? 1 : 0,
         policy.canDelegate ? 1 : 0,
         policy.autoExecute,
@@ -566,6 +609,10 @@ export class SquadDatabase {
       displayName: String(row.display_name),
       publicKey: String(row.public_key),
       enabled: asBoolean(row.enabled),
+      transport: peerTransportSchema.parse(row.transport ?? "RELAY"),
+      ...(optionalString(row.direct_url) === undefined
+        ? {}
+        : { directUrl: String(row.direct_url) }),
       policy: this.policyFromRow(row),
       createdAt: String(row.created_at),
       updatedAt: String(row.updated_at),
@@ -616,6 +663,8 @@ export class SquadDatabase {
       displayName: peer.displayName,
       publicKey: peer.publicKey,
       enabled: peer.enabled,
+      transport: peer.transport,
+      ...(peer.directUrl === undefined ? {} : { directUrl: peer.directUrl }),
       policy: peerPolicySchema.parse({ ...peer.policy, ...candidate }),
     });
     const updated = this.findPeer(nodeId);
@@ -639,11 +688,12 @@ export class SquadDatabase {
       .prepare(
         `
         INSERT OR IGNORE INTO peer_policies(
-          node_id, display_name, public_key, directory_only, enabled,
+          node_id, display_name, public_key, directory_only, enabled, transport,
+          direct_url,
           can_message, can_delegate, auto_execute, max_concurrent,
           max_delegation_depth, max_runtime_minutes, max_tokens,
           created_at, updated_at
-        ) VALUES (?, ?, ?, 1, 0, 0, 0, 'NEVER', 1, 1, 30, NULL, ?, ?)
+        ) VALUES (?, ?, ?, 1, 0, 'RELAY', NULL, 0, 0, 'NEVER', 1, 1, 30, NULL, ?, ?)
       `,
       )
       .run(member.nodeId, member.displayName, member.publicKey, now, now);
@@ -1616,6 +1666,13 @@ export class SquadDatabase {
     const summary = optionalString(row.summary);
     const errorCode = optionalString(row.error_code);
     const completedAt = optionalString(row.completed_at);
+    const outbox = this.#db
+      .prepare(
+        "SELECT attempts, last_error, next_attempt_at FROM local_outbox WHERE envelope_id = ?",
+      )
+      .get(String(row.request_envelope_id)) as SqlRow | undefined;
+    const lastDeliveryError = optionalString(outbox?.last_error);
+    const nextDeliveryAttemptAt = optionalString(outbox?.next_attempt_at);
     return {
       id: String(row.id),
       direction: row.direction as DelegationDirection,
@@ -1636,6 +1693,9 @@ export class SquadDatabase {
       status: row.status as DelegationStatus,
       revision: Number(row.revision),
       deliveryStatus: row.delivery_status as DeliveryStatus,
+      deliveryAttempts: Number(outbox?.attempts ?? 0),
+      ...(lastDeliveryError === undefined ? {} : { lastDeliveryError }),
+      ...(nextDeliveryAttemptAt === undefined ? {} : { nextDeliveryAttemptAt }),
       requestEnvelopeId: String(row.request_envelope_id),
       ...(sessionId === undefined ? {} : { sessionId }),
       ...(summary === undefined ? {} : { summary }),
@@ -2030,7 +2090,13 @@ export class SquadDatabase {
     });
   }
 
-  markEnvelopeDelivered(envelopeId: string): void {
+  markEnvelopeDelivered(
+    envelopeId: string,
+    deliveryStatus: Extract<
+      DeliveryStatus,
+      "STORED_BY_RELAY" | "RECEIVED_BY_NODE"
+    >,
+  ): void {
     const now = new Date().toISOString();
     this.transaction(() => {
       this.#db
@@ -2040,32 +2106,73 @@ export class SquadDatabase {
         .run(now, envelopeId);
       this.#db
         .prepare(
-          "UPDATE local_delegations SET delivery_status = 'DELIVERED_TO_RELAY', updated_at = ? WHERE request_envelope_id = ?",
+          "UPDATE local_delegations SET delivery_status = ?, updated_at = ? WHERE request_envelope_id = ?",
         )
-        .run(now, envelopeId);
+        .run(deliveryStatus, now, envelopeId);
     });
   }
 
-  markEnvelopeAttemptFailed(envelopeId: string, error: unknown): void {
+  markEnvelopeAttemptFailed(
+    envelopeId: string,
+    error: unknown,
+    options: {
+      retryAfterMs?: number;
+      deliveryStatus?: Extract<
+        DeliveryStatus,
+        "QUEUED_LOCAL" | "WAITING_FOR_PEER"
+      >;
+    } = {},
+  ): void {
     const row = this.#db
       .prepare(
         "SELECT attempts FROM local_outbox WHERE envelope_id = ? AND delivered_at IS NULL",
       )
       .get(envelopeId) as SqlRow | undefined;
     if (row === undefined) return;
-    const delayMs = Math.min(
-      5 * 60_000,
-      1_000 * 2 ** Math.min(8, Number(row.attempts)),
-    );
-    this.#db
-      .prepare(
-        "UPDATE local_outbox SET attempts = attempts + 1, last_error = ?, next_attempt_at = ? WHERE envelope_id = ?",
-      )
-      .run(
-        redactError(error),
-        new Date(Date.now() + delayMs).toISOString(),
-        envelopeId,
-      );
+    const delayMs =
+      options.retryAfterMs ??
+      Math.min(5 * 60_000, 1_000 * 2 ** Math.min(8, Number(row.attempts)));
+    const now = new Date();
+    this.transaction(() => {
+      this.#db
+        .prepare(
+          "UPDATE local_outbox SET attempts = attempts + 1, last_error = ?, next_attempt_at = ? WHERE envelope_id = ?",
+        )
+        .run(
+          redactError(error),
+          new Date(now.getTime() + delayMs).toISOString(),
+          envelopeId,
+        );
+      if (options.deliveryStatus !== undefined) {
+        this.#db
+          .prepare(
+            "UPDATE local_delegations SET delivery_status = ?, updated_at = ? WHERE request_envelope_id = ? AND direction = 'OUTGOING' AND status = 'QUEUED'",
+          )
+          .run(options.deliveryStatus, now.toISOString(), envelopeId);
+      }
+    });
+  }
+
+  expireEnvelope(envelopeId: string): void {
+    const now = new Date().toISOString();
+    this.transaction(() => {
+      this.#db
+        .prepare(
+          "UPDATE local_outbox SET delivered_at = ?, last_error = 'delivery envelope expired' WHERE envelope_id = ? AND delivered_at IS NULL",
+        )
+        .run(now, envelopeId);
+      this.#db
+        .prepare(
+          `
+          UPDATE local_delegations SET
+            status = 'FAILED', delivery_status = 'DELIVERY_EXPIRED',
+            revision = revision + 1, summary = 'Delivery expired before the receiving Node acknowledged the task.',
+            error_code = 'DELIVERY_EXPIRED', updated_at = ?, completed_at = ?
+          WHERE request_envelope_id = ? AND direction = 'OUTGOING' AND status = 'QUEUED'
+        `,
+        )
+        .run(now, now, envelopeId);
+    });
   }
 
   retryEnvelopeNow(envelopeId: string): void {

@@ -4,19 +4,31 @@
 
 > Let personal Agents become a team without giving up workspaces, credentials, or control.
 
-DSH Squad turns personal Agents running on different computers, networks, and locations into a durable team that can delegate work, receive tasks while offline, and continue collaborating—while every person remains the owner and operator of their own Agent. Members expose no personal-node ports and share no accounts, API keys, workspace access, or tool permissions. Agents exchange signed tasks and deliberately published outcomes through a Relay, while execution stays inside the recipient's own DSH, native Session, Skills, credentials, and approval boundary.
+DSH Squad turns personal Agents running on different computers, networks, and locations into a durable delegation team while every person remains the owner and operator of their own Agent. It supports both a centralized **Relay mode** with durable mailboxes and organization directories, and a **Direct peer-to-peer mode** that needs no Relay. Both modes exchange only signed tasks and deliberately published outcomes. Accounts, API keys, workspace access, tool permissions, and execution remain inside the recipient's own DSH, native Session, Skills, credentials, and approval boundary.
 
 ## Highlights
 
-- **Join an organization once, not every pair**: Nodes enter a signed organization directory through one-time invitations and human approval. Team growth no longer requires every pair of people to exchange Peer configuration, and one Node may belong to multiple organizations.
+- **Two team modes for different networks**: Relay mode fits cross-location teams, intermittently offline members, and nodes that cannot expose inbound ports. Direct mode fits a LAN, VPN, or small team whose nodes already have reachable HTTPS endpoints, without operating a central intermediary.
+- **Join an organization once, not every pair**: in Relay mode, Nodes enter a signed organization directory through one-time invitations and human approval. Team growth no longer requires every pair of people to exchange Peer configuration, and one Node may belong to multiple organizations.
 - **Locally planned, individually controlled**: Team Planner can turn a meeting or team objective into a multi-person delegation draft, but it is not a shared super-Agent holding everyone's authority. The planner's owner must approve dispatch, and every recipient still decides execution through their own policy and approval boundary.
 - **Cross-location without direct node connectivity**: personal nodes only need an outbound connection to an always-on Relay, so they can sit behind NAT, home networks, corporate networks, or national borders without public IP addresses or inbound ports.
-- **Offline members do not lose work**: the Relay provides an authenticated, durable mailbox. A recipient resumes pulling after reconnecting, and duplicate delivery cannot create duplicate Sessions or executions.
+- **Offline behavior has explicit semantics**: Relay mode persists work independently at the intermediary. Direct mode persists it in the sender's local SQLite outbox and retries automatically, while the WebUI shows waiting state, next retry, failed attempts, and the latest error. Duplicate delivery cannot create duplicate Sessions or executions.
+- **Delivery is observable in real time**: an authenticated Relay event stream wakes recipients immediately with polling as fallback, while Direct returns a signed durable-receipt from the receiving Node. Senders can distinguish local queueing, waiting for peer reachability, Relay persistence, and receipt by the peer Node.
 - **A Relay can maintain itself safely**: a separate updater verifies signed releases and, while the Node is idle, backs up, installs, restarts, and checks the reported version. Notify-only is the default and failures roll back.
 - **Trust is configured per person**: every direct Peer or organization member has an independent local `NEVER`, `SAFE`, or `TRUSTED` automatic-execution policy, editable from a dropdown in the WebUI.
 - **Native to DSH**: work runs in the recipient's existing Agent, Session, Skill catalog, tools, and Permission/Approval flow, without a second runtime or standalone management platform.
 
-## How it works
+## Two team modes
+
+| Capability        | Relay mode                                            | Direct peer-to-peer mode                                                                  |
+| ----------------- | ----------------------------------------------------- | ----------------------------------------------------------------------------------------- |
+| Topology          | Every Node connects outward to one always-on Relay    | Every Peer stores the other's reachable HTTPS endpoint                                    |
+| Membership        | Signed organization directory with Owner/Admin/Member | Explicitly exchange and pin Node ID, public key, and endpoint                             |
+| Recipient offline | Relay persists independently; sender may go offline   | Sender retains the task; both must later be online and reachable together                 |
+| Network           | No public IP or personal-node inbound port required   | At least the task direction must be reachable; bidirectional status needs both directions |
+| Best fit          | Cross-location, larger, asynchronous teams            | LAN, VPN, existing mesh, or a small team                                                  |
+
+Relay mode:
 
 ```text
 Alice Agent --signed Delegation--> durable Relay mailbox --> Bob's DSH
@@ -27,10 +39,21 @@ Alice Agent --signed Delegation--> durable Relay mailbox --> Bob's DSH
                                   owner needed     --> HumanTodo --> resume same Session
 ```
 
+Direct mode:
+
+```text
+Alice Agent --signed Delegation--> Bob's Direct HTTPS endpoint
+      |                                      |
+      +-- durable local outbox <-- retry ----+
+      <---------- Bob-signed Node Receipt ---+
+```
+
+Direct mode does not provide NAT traversal, distributed store-and-forward, or decentralized organization consensus. While Bob is offline, Alice shows `Waiting for peer reachability` and retries on the configured interval. Delivery cannot complete if Alice and Bob are never online and mutually reachable at the same time. Retries are bounded by `envelopeTtlMinutes` (60 minutes by default); expiry changes the task to `Delivery expired`, after which a new delegation is required. In v0.6, signed organization directories still use Relay; a Direct team uses explicitly paired Peers, which Team Planner can target normally.
+
 - The sender submits only an objective, context, acceptance criteria, and validated HTTPS attachment references.
 - The recipient's PeerPolicy decides whether to reject, wait for owner acceptance, or execute automatically.
 - The recipient Agent chooses its own local Skills and tools. The protocol has no remote Skill, Shell, MCP, or Credential field.
-- The Relay is only an authenticated, at-least-once mailbox. Receiver-side SQLite, Envelope IDs, and Delegation IDs prevent duplicate delivery from causing duplicate execution.
+- Relay is only an authenticated, at-least-once mailbox; Direct is only pinned-key peer delivery. Receiver-side SQLite, Envelope IDs, and Delegation IDs prevent duplicate delivery from causing duplicate execution.
 - HumanTodo details, native Session IDs, human responses, credentials, and workspaces remain on the recipient node.
 - The sender sees only the status, summary, and Outcome that the recipient explicitly publishes.
 
@@ -58,7 +81,7 @@ One Node may join multiple organizations, but each DSH Session selects at most o
 
 The implemented capability is **Team Planner**, a local draft mechanism. A future **Organization Coordinator Agent**, if added, will be an optional service member rather than a sovereign super-Agent: it may receive deliberately published meeting material and status projections and create summaries, recommendations, or reviewable drafts, but it will inherit no member workspace, credentials, private Sessions, or tool authority and will not approve or execute work for people by default.
 
-## Typical deployment: a cross-location team
+## Typical Relay deployment: a cross-location team
 
 ```text
 Beijing: Alice's computer ──outbound HTTPS──┐
@@ -68,7 +91,7 @@ Shanghai: Bob's computer   ──outbound HTTPS──┼── public or corpora
 Overseas: Carol's computer ─outbound HTTPS──┘
 ```
 
-This is an application-layer Agent collaboration network, not a VPN: it does not place member computers on one virtual LAN or require nodes to reach one another by IP. A personal node's WebUI should listen only on `127.0.0.1`. Expose only the Relay, protected by HTTPS, an exact route allowlist, and firewall rules.
+This is an application-layer Agent collaboration network, not a VPN: it does not place member computers on one virtual LAN. Relay mode does not require nodes to reach one another by IP. A personal node's WebUI should listen only on `127.0.0.1`; expose only the Relay behind HTTPS, an exact route allowlist, and firewall rules. Direct mode instead depends on a LAN, VPN, port mapping, or existing reverse proxy for peer reachability; Squad does not establish an underlying network tunnel.
 
 ## Installation
 
@@ -81,7 +104,7 @@ Build and install the tarball from this repository:
 ```bash
 pnpm install --frozen-lockfile
 pnpm run pack
-dsh plugin --profile web add ./artifacts/dsh-squad-plugin-0.5.0.tgz --offline
+dsh plugin --profile web add ./artifacts/dsh-squad-plugin-0.6.0.tgz --offline
 dsh web
 ```
 
@@ -109,7 +132,7 @@ Override the `dsh-squad` configuration in `$DSH_HOME/profiles/web/cordis.patch.y
       invitation: replace-with-one-time-invitation
 ```
 
-Prefer joining an organization through a one-time invitation under `Agent Inbox → Organizations`; this avoids pairwise setup. Direct Peers remain available under `Agent Inbox → Settings` or in configuration, and each `nodeId` must match its Ed25519 public-key fingerprint.
+Prefer joining a Relay organization through a one-time invitation under `Agent Inbox → Organizations`; this avoids pairwise setup. Add a Direct Peer by selecting `Direct peer-to-peer` under `Agent Inbox → Settings`, or declare it in configuration. Both sides must pin the other's `nodeId`, Ed25519 public key, and reachable endpoint; each `nodeId` must match its public-key fingerprint.
 
 ```yaml
 - id: dsh-squad
@@ -121,6 +144,9 @@ Prefer joining an organization through a one-time invitation under `Agent Inbox 
           -----BEGIN PUBLIC KEY-----
           REPLACE_ME
           -----END PUBLIC KEY-----
+        # RELAY is the default. Direct mode requires both sides to add the other.
+        transport: DIRECT
+        directUrl: https://bob-agent.example.com
         policy:
           canMessage: true
           canDelegate: true
@@ -129,6 +155,19 @@ Prefer joining an organization through a one-time invitation under `Agent Inbox 
           maxDelegationDepth: 1
           maxRuntimeMinutes: 30
 ```
+
+A Node that receives Direct tasks must also enable its endpoint. `publicUrl` is canonical display and pairing metadata; it does not create DNS, TLS, port mapping, or a reverse proxy. The DSH Host WebServer still handles the actual request.
+
+```yaml
+- id: dsh-squad
+  config:
+    direct:
+      enabled: true
+      publicUrl: https://alice-agent.example.com
+      retryIntervalMs: 5000
+```
+
+Production Direct URLs require HTTPS; HTTP is accepted only for `localhost` / loopback development. A reverse proxy needs to allowlist only `POST /squad/v1/direct/envelopes` and should enforce request-size, connection, and rate limits. Do not expose `/squad/v1/local/*` or the entire personal WebUI.
 
 ## Host a Relay
 
@@ -148,7 +187,7 @@ The same package can enable a Relay Server in any always-on DSH Node. Invitation
           expiresAt: 2030-01-01T00:00:00.000Z
 ```
 
-The Relay API is registered under `/squad/v1` on the Host WebServer. It validates enrollment, request signatures, nonces, freshness, organization membership routes, sender and recipient identities, mailbox capacity, and rate limits. It stores the signed organization directory and durable mailbox, but neither runs an Agent nor holds private Sessions, HumanTodo details, workspaces, or member credentials.
+The Relay API is registered under `/squad/v1` on the Host WebServer. It validates enrollment, request signatures, nonces, freshness, organization membership routes, sender and recipient identities, mailbox capacity, and rate limits. It stores the signed organization directory and durable mailbox, but neither runs an Agent nor holds private Sessions, HumanTodo details, workspaces, or member credentials. Its authenticated event stream carries only “mailbox changed” wakeups, never task bodies. Nodes retain polling fallback, so stream availability is not a reliability dependency. If the reverse proxy uses an exact route allowlist, v0.6 must additionally allow `GET /squad/v1/mailbox/events` for immediate wakeups; polling still works when that route is omitted.
 
 ## Safe updates for an always-on Relay
 
@@ -224,6 +263,7 @@ Here, “system language” means the language reported by the browser displayin
 - Envelopes use strict Zod schemas, canonical bytes, and Ed25519 signatures. Reusing one ID with a different payload is a conflict.
 - A signed organization root and append-only member directory are pinned and verified locally by every Node. Protocol-v2 Envelopes bind organization, sender membership, and recipient membership together.
 - Relay mailbox requests use short-lived signatures, nonces for replay protection, and recipient isolation.
+- The Direct endpoint accepts only signed protocol-v1 Envelopes from enabled pinned Peers. A sender marks `Received by peer Node` only after verifying a Node Receipt signed by the recipient's pinned public key. Trust is never granted merely from an IP address and port, and no shared password is used.
 - `/squad/v1/local/*` management routes accept loopback clients only and reject forwarded requests. A public reverse proxy should allowlist only the exact non-`local` Relay routes.
 - Update manifests are verified with the release public key pinned in the package. A downloaded package must match the signed filename, size, and SHA-256, and the plugin process has no authority to replace its own running code.
 - Attachments require HTTPS, reject private, loopback, and rebinding addresses, and verify their declared size and SHA-256 digest.
@@ -269,9 +309,9 @@ DSH_SQUAD_RELEASE_SIGNING_KEY=/secure/path/release-signing-key.pem \
   pnpm release:prepare
 ```
 
-A `v0.5.0` GitHub Release must upload all four files from `artifacts/`: `dsh-squad-plugin-0.5.0.tgz`, its `.sha256`, `dsh-squad-update-manifest-0.5.0.json`, and its `.sig`. Clients reject an update when any asset is missing, the signature fails, or the Release tag does not match.
+A `v0.6.0` GitHub Release must upload all four files from `artifacts/`: `dsh-squad-plugin-0.6.0.tgz`, its `.sha256`, `dsh-squad-update-manifest-0.6.0.json`, and its `.sig`. Clients reject an update when any asset is missing, the signature fails, or the Release tag does not match.
 
-`smoke:delegation` builds a real tarball, installs it into isolated Alice, Bob, and Relay DSH homes, and uses real Chromium to verify WebUI pairing, Team Planner approval and idempotent dispatch, delivery while Bob is offline, Relay and Node restarts, a recipient-only Skill, partial HumanTodo completion, same-Session resume, Outcome privacy boundaries, and reversible plugin disablement. Signed-directory, Relay-authorization, and local-persistence integration tests separately cover organizations.
+`smoke:delegation` builds a real tarball, installs it into isolated Alice, Bob, and Relay DSH homes, and uses real Chromium to verify WebUI pairing, Team Planner approval and idempotent dispatch, delivery while Bob is offline, Relay and Node restarts, a recipient-only Skill, partial HumanTodo completion, same-Session resume, Outcome privacy boundaries, and reversible plugin disablement. Signed-directory, Relay-authorization, and local-persistence integration tests separately cover organizations. Dedicated end-to-end tests cover Direct signed receipts, forged-receipt rejection, offline queueing, automatic retry after reconnect, and idempotent receipt.
 
 ## License
 

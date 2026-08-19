@@ -34,7 +34,7 @@ describe("Squad locale dictionaries", () => {
   it("localizes protocol enums without changing their stored values", () => {
     const t = translator(zh);
     expect(formatStatus(t, "WAITING_HUMAN")).toBe("等待人工处理");
-    expect(formatDelivery(t, "DELIVERED_TO_RELAY")).toBe("已投递至中继");
+    expect(formatDelivery(t, "STORED_BY_RELAY")).toBe("中继已持久保存");
     expect(formatPolicy(t, "SAFE")).toBe("仅安全目标");
     expect(formatPlanStatus(t, "PARTIAL")).toBe("部分失败");
     expect(formatPlanItemStatus(t, "DISPATCHED")).toBe("已创建委派");

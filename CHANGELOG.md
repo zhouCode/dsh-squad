@@ -4,6 +4,32 @@ All notable changes to this project are documented in this file. The format is b
 
 ## [Unreleased]
 
+## [0.6.0] - 2026-08-19
+
+### Added
+
+- Two selectable task transports: the existing centralized Relay mailbox and a new Direct peer-to-peer transport configured independently for each pinned Peer.
+- A Direct inbound Envelope endpoint and a signed Node Receipt. Senders mark a task as received only after the recipient has persisted it and the receipt verifies against that recipient's pinned Ed25519 public key.
+- Durable sender-side Direct retry. An unreachable recipient leaves the original Envelope in the local SQLite outbox, restores retry after process restart, and delivers it without duplication once both Nodes are online and reachable.
+- Transport-specific delivery states: `WAITING_FOR_PEER`, `STORED_BY_RELAY`, `RECEIVED_BY_NODE`, and `DELIVERY_EXPIRED`, with failed-attempt count, next-attempt time, and latest sanitized delivery error in the bilingual WebUI.
+- Direct enablement, public endpoint metadata, retry interval, per-Peer transport, and per-Peer Direct URL configuration in the Host and WebUI.
+- An authenticated Relay server-sent event stream that sends payload-free mailbox wakeups. Existing polling remains the reliability fallback.
+- End-to-end tests for immediate Direct delivery, offline-to-online automatic retry, idempotent receipt, forged-receipt rejection, and Relay mailbox wakeups.
+
+### Changed
+
+- Relay success is now named `STORED_BY_RELAY` instead of the ambiguous `DELIVERED_TO_RELAY`; the version-6 SQLite migration updates existing records automatically.
+- One unavailable Peer no longer prevents other ready outbox items from being attempted during the same transport pump.
+- Concurrent wakeups are coalesced into another transport pump instead of being silently dropped.
+- Signed organization directories and protocol-v2 organization routing remain Relay-backed in v0.6. Direct mode deliberately targets explicitly paired protocol-v1 Peers only.
+
+### Security
+
+- Direct receiving is disabled by default. Production Direct origins require HTTPS; loopback HTTP is accepted only for local development, and configured origins cannot contain credentials, paths, queries, or fragments.
+- Direct requests do not trust an IP address, port, or shared password. The receiver accepts only signed Envelopes from enabled pinned Peers, and the sender validates the recipient identity, Envelope ID, recipient binding, and receipt signature.
+- Direct mode adds no NAT traversal, public exposure automation, distributed store-and-forward, or decentralized organization consensus. Operators must provide a reachable HTTPS route and apply reverse-proxy connection and rate limits.
+- Relay event notifications contain no Envelope payload and remain protected by the existing short-lived signed-request, nonce, enrollment, and rate-limit checks.
+
 ## [0.5.0] - 2026-08-19
 
 ### Added
@@ -91,7 +117,8 @@ All notable changes to this project are documented in this file. The format is b
 - Production Relay URLs require HTTPS; loopback HTTP is accepted only for local development.
 - The Relay is explicitly documented as a trusted content intermediary without end-to-end payload encryption.
 
-[Unreleased]: https://github.com/zhouCode/dsh-squad/compare/v0.5.0...HEAD
+[Unreleased]: https://github.com/zhouCode/dsh-squad/compare/v0.6.0...HEAD
+[0.6.0]: https://github.com/zhouCode/dsh-squad/compare/v0.5.0...v0.6.0
 [0.5.0]: https://github.com/zhouCode/dsh-squad/compare/v0.4.0...v0.5.0
 [0.4.0]: https://github.com/zhouCode/dsh-squad/compare/v0.2.0...v0.4.0
 [0.2.0]: https://github.com/zhouCode/dsh-squad/releases/tag/v0.2.0
