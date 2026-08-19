@@ -242,6 +242,11 @@ export const zh = {
   "sync.lastRefreshed": "最近读取：{time}",
   "sync.refreshNow": "立即同步",
   "sync.refreshing": "正在同步…",
+  "pagination.label": "列表分页",
+  "pagination.range": "第 {start}–{end} 项，共 {total} 项",
+  "pagination.page": "第 {page}/{count} 页",
+  "pagination.previous": "上一页",
+  "pagination.next": "下一页",
   "humanTodo.oneAtATime": "每条待办分别回复；提交一条不会默认完成其他待办。",
   "humanTodo.responsePlaceholder": "填写决定、补充信息或操作结果…",
   "humanTodo.attachments": "附件引用（可选）",
@@ -911,6 +916,11 @@ export const en = {
   "sync.lastRefreshed": "Last read: {time}",
   "sync.refreshNow": "Sync now",
   "sync.refreshing": "Syncing…",
+  "pagination.label": "List pagination",
+  "pagination.range": "{start}–{end} of {total}",
+  "pagination.page": "Page {page} of {count}",
+  "pagination.previous": "Previous",
+  "pagination.next": "Next",
   "humanTodo.oneAtATime":
     "Respond to each todo separately. Submitting one never completes the others by default.",
   "humanTodo.responsePlaceholder":

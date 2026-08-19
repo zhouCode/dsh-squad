@@ -78,6 +78,8 @@ Delegation details expose a four-stage created/delivery/execution/result timelin
 
 The workbench reports local live-event health and the latest successful read. `Sync now` actively pumps organization, outbox, mailbox, and update state.
 
+Delegation and Team Planner lists paginate independently in batches of 25 and navigate directly to records opened across views.
+
 Chat triggering stays unobtrusive: use natural language or `@member`, or use namespaced `/squad-*` commands for tasks, plans, status, organizations, members, invitations, and roles. They are discovered through DSH's native `/` menu; this package adds no command buttons.
 
 ## Updates

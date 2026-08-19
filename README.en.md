@@ -76,6 +76,8 @@ Each delegation detail expands status into a four-stage `Created â†’ Delivery â†
 
 The workbench header reports whether its local live-event channel is connected, reconnecting, or potentially stale and shows the latest successful state read. `Sync now` actively runs organization, outbox, mailbox, and update synchronization instead of merely repainting a cached snapshot.
 
+Delegation and Team Planner lists paginate independently in batches of 25 and remember each tab's position. Opening a delegation from a plan jumps directly to its containing page, so a long history is never rendered as one unbounded list.
+
 The same local Plan API is available for future connectors such as Feishu/Lark to create drafts or read status projections. This version does not include a Feishu/Lark connector and never executes work merely because an external board was edited.
 
 ## Organizations, roles, and Session isolation
