@@ -22,12 +22,14 @@ import {
   organizationDocumentSchema,
   organizationIdFromInvitation,
   organizationInvitation,
+  organizationInvitationViewSchema,
   organizationJoinRequestSchema,
   organizationMembershipCertificateSchema,
   unsignedOrganizationJoinRequest,
   type OrganizationDirectoryBundle,
   type OrganizationDocument,
   type OrganizationJoinRequest,
+  type OrganizationInvitationView,
   type OrganizationMembershipCertificate,
 } from "../shared/organizations.ts";
 import { nodeIdFromPublicKey, verifySignature } from "./identity.ts";
@@ -253,11 +255,13 @@ export class RelayServer {
 
       CREATE TABLE IF NOT EXISTS relay_organization_invites (
         token_hash TEXT PRIMARY KEY,
+        invitation_id TEXT UNIQUE,
         organization_id TEXT NOT NULL,
         created_by_membership_id TEXT NOT NULL,
         expires_at TEXT NOT NULL,
         used_by_request_id TEXT,
         used_at TEXT,
+        revoked_at TEXT,
         created_at TEXT NOT NULL,
         FOREIGN KEY(organization_id) REFERENCES relay_organizations(organization_id) ON DELETE CASCADE
       );
@@ -312,7 +316,38 @@ export class RelayServer {
       this.#db.exec("UPDATE schema_meta SET version = 3 WHERE singleton = 1");
       version = 3;
     }
-    if (version !== 3) {
+    if (version === 3) {
+      const columns = this.#db
+        .prepare("PRAGMA table_info(relay_organization_invites)")
+        .all() as SqlRow[];
+      for (const column of [
+        ["invitation_id", "TEXT"],
+        ["revoked_at", "TEXT"],
+      ] as const) {
+        if (!columns.some((candidate) => candidate.name === column[0])) {
+          this.#db.exec(
+            `ALTER TABLE relay_organization_invites ADD COLUMN ${column[0]} ${column[1]}`,
+          );
+        }
+      }
+      const invitations = this.#db
+        .prepare(
+          "SELECT token_hash FROM relay_organization_invites WHERE invitation_id IS NULL",
+        )
+        .all() as SqlRow[];
+      const assignId = this.#db.prepare(
+        "UPDATE relay_organization_invites SET invitation_id = ? WHERE token_hash = ?",
+      );
+      for (const invitation of invitations) {
+        assignId.run(randomUUID(), String(invitation.token_hash));
+      }
+      this.#db.exec(
+        "CREATE UNIQUE INDEX IF NOT EXISTS relay_organization_invitation_id_idx ON relay_organization_invites(invitation_id)",
+      );
+      this.#db.exec("UPDATE schema_meta SET version = 4 WHERE singleton = 1");
+      version = 4;
+    }
+    if (version !== 4) {
       throw new Error(
         `unsupported Squad Relay database version ${String(version)}`,
       );
@@ -786,7 +821,7 @@ export class RelayServer {
     organizationId: string,
     value: unknown,
     authenticatedNodeId: string,
-  ): { invitation: string; expiresAt: string } {
+  ): { invitation: string; invitationId: string; expiresAt: string } {
     const input = createOrganizationInvitationSchema.parse(value);
     const directory = this.organizationDirectory(organizationId);
     const manager = this.assertOrganizationManager(
@@ -796,12 +831,98 @@ export class RelayServer {
     const expiresAt = new Date(
       Date.now() + input.expiresInMinutes * 60_000,
     ).toISOString();
-    const invitation = this.insertOrganizationInvitation(
+    const created = this.insertOrganizationInvitation(
       organizationId,
       manager.membershipId,
       expiresAt,
     );
-    return { invitation, expiresAt };
+    return { ...created, expiresAt };
+  }
+
+  private organizationInvitationView(row: SqlRow): OrganizationInvitationView {
+    const usedAt =
+      row.used_at === null || row.used_at === undefined
+        ? undefined
+        : String(row.used_at);
+    const revokedAt =
+      row.revoked_at === null || row.revoked_at === undefined
+        ? undefined
+        : String(row.revoked_at);
+    const status =
+      revokedAt !== undefined
+        ? "REVOKED"
+        : row.used_by_request_id !== null &&
+            row.used_by_request_id !== undefined
+          ? "USED"
+          : Date.parse(String(row.expires_at)) <= Date.now()
+            ? "EXPIRED"
+            : "ACTIVE";
+    return organizationInvitationViewSchema.parse({
+      invitationId: row.invitation_id,
+      organizationId: row.organization_id,
+      createdByMembershipId: row.created_by_membership_id,
+      status,
+      createdAt: row.created_at,
+      expiresAt: row.expires_at,
+      ...(usedAt === undefined ? {} : { usedAt }),
+      ...(revokedAt === undefined ? {} : { revokedAt }),
+    });
+  }
+
+  private organizationInvitations(
+    organizationId: string,
+    authenticatedNodeId: string,
+  ): OrganizationInvitationView[] {
+    const directory = this.organizationDirectory(organizationId);
+    this.assertOrganizationManager(directory, authenticatedNodeId);
+    return (
+      this.#db
+        .prepare(
+          `SELECT invitation_id, organization_id, created_by_membership_id,
+                  expires_at, used_by_request_id, used_at, revoked_at, created_at
+             FROM relay_organization_invites
+            WHERE organization_id = ?
+            ORDER BY created_at DESC, invitation_id DESC
+            LIMIT 200`,
+        )
+        .all(organizationId) as SqlRow[]
+    ).map((row) => this.organizationInvitationView(row));
+  }
+
+  private revokeOrganizationInvitation(
+    organizationId: string,
+    invitationId: string,
+    authenticatedNodeId: string,
+  ): OrganizationInvitationView {
+    const directory = this.organizationDirectory(organizationId);
+    this.assertOrganizationManager(directory, authenticatedNodeId);
+    const row = this.#db
+      .prepare(
+        "SELECT * FROM relay_organization_invites WHERE organization_id = ? AND invitation_id = ?",
+      )
+      .get(organizationId, invitationId) as SqlRow | undefined;
+    if (row === undefined) {
+      throw new HttpError(404, "ORGANIZATION_INVITATION_NOT_FOUND");
+    }
+    const current = this.organizationInvitationView(row);
+    if (current.status === "REVOKED") return current;
+    if (current.status === "USED") {
+      throw new HttpError(409, "ORGANIZATION_INVITATION_ALREADY_USED");
+    }
+    if (current.status === "EXPIRED") {
+      throw new HttpError(410, "ORGANIZATION_INVITATION_EXPIRED");
+    }
+    const revokedAt = new Date().toISOString();
+    this.#db
+      .prepare(
+        "UPDATE relay_organization_invites SET revoked_at = ? WHERE organization_id = ? AND invitation_id = ? AND revoked_at IS NULL AND used_by_request_id IS NULL",
+      )
+      .run(revokedAt, organizationId, invitationId);
+    return organizationInvitationViewSchema.parse({
+      ...current,
+      status: "REVOKED",
+      revokedAt,
+    });
   }
 
   private insertEnrollmentInvitation(
@@ -830,26 +951,28 @@ export class RelayServer {
     organizationId: string,
     createdByMembershipId: string,
     expiresAt: string,
-  ): string {
+  ): { invitation: string; invitationId: string } {
     const secret = randomBytes(32).toString("base64url");
     const invitation = organizationInvitation(organizationId, secret);
+    const invitationId = randomUUID();
     this.#db
       .prepare(
         `
         INSERT INTO relay_organization_invites(
-          token_hash, organization_id, created_by_membership_id,
+          token_hash, invitation_id, organization_id, created_by_membership_id,
           expires_at, created_at
-        ) VALUES (?, ?, ?, ?, ?)
+        ) VALUES (?, ?, ?, ?, ?, ?)
       `,
       )
       .run(
         inviteHash(invitation),
+        invitationId,
         organizationId,
         createdByMembershipId,
         expiresAt,
         new Date().toISOString(),
       );
-    return invitation;
+    return { invitation, invitationId };
   }
 
   private createOrganizationJoinPackage(
@@ -876,11 +999,12 @@ export class RelayServer {
         expiresAt,
         authenticatedNodeId,
       );
-      const organizationInvitation = this.insertOrganizationInvitation(
-        organizationId,
-        manager.membershipId,
-        expiresAt,
-      );
+      const { invitation: organizationInvitation } =
+        this.insertOrganizationInvitation(
+          organizationId,
+          manager.membershipId,
+          expiresAt,
+        );
       this.#db.exec("COMMIT");
       return { enrollmentInvitation, organizationInvitation, expiresAt };
     } catch (error) {
@@ -942,7 +1066,7 @@ export class RelayServer {
     }
     const invitation = this.#db
       .prepare(
-        "SELECT organization_id, expires_at, used_by_request_id FROM relay_organization_invites WHERE token_hash = ?",
+        "SELECT organization_id, expires_at, used_by_request_id, revoked_at FROM relay_organization_invites WHERE token_hash = ?",
       )
       .get(inviteHash(input.invitation)) as SqlRow | undefined;
     if (
@@ -953,6 +1077,9 @@ export class RelayServer {
     }
     if (invitation.used_by_request_id !== null) {
       throw new HttpError(409, "ORGANIZATION_INVITATION_ALREADY_USED");
+    }
+    if (invitation.revoked_at !== null) {
+      throw new HttpError(410, "ORGANIZATION_INVITATION_REVOKED");
     }
     if (Date.parse(String(invitation.expires_at)) <= Date.now()) {
       throw new HttpError(410, "ORGANIZATION_INVITATION_EXPIRED");
@@ -1418,6 +1545,40 @@ export class RelayServer {
           this.createOrganizationInvitation(
             organizationInvitationRoute[1],
             jsonBody(body),
+            auth.nodeId,
+          ),
+        );
+        return true;
+      }
+      if (
+        req.method === "GET" &&
+        organizationInvitationRoute?.[1] !== undefined
+      ) {
+        const auth = this.authenticate(req, path, Buffer.alloc(0));
+        reply(res, 200, {
+          invitations: this.organizationInvitations(
+            organizationInvitationRoute[1],
+            auth.nodeId,
+          ),
+        });
+        return true;
+      }
+      const revokeOrganizationInvitationRoute =
+        /^\/squad\/v1\/organizations\/([0-9a-f-]{36})\/invitations\/([0-9a-f-]{36})$/u.exec(
+          url.pathname,
+        );
+      if (
+        req.method === "DELETE" &&
+        revokeOrganizationInvitationRoute?.[1] !== undefined &&
+        revokeOrganizationInvitationRoute[2] !== undefined
+      ) {
+        const auth = this.authenticate(req, path, Buffer.alloc(0));
+        reply(
+          res,
+          200,
+          this.revokeOrganizationInvitation(
+            revokeOrganizationInvitationRoute[1],
+            revokeOrganizationInvitationRoute[2],
             auth.nodeId,
           ),
         );

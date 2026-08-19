@@ -425,6 +425,33 @@ export function createHttpHandler(squad: SquadService) {
         );
         return;
       }
+      if (req.method === "GET" && organizationInvitation?.[1] !== undefined) {
+        reply(
+          res,
+          200,
+          await squad.organizationInvitations(organizationInvitation[1]),
+        );
+        return;
+      }
+      const revokeOrganizationInvitation =
+        /^\/squad\/v1\/local\/organizations\/([0-9a-f-]{36})\/invitations\/([0-9a-f-]{36})$/u.exec(
+          url.pathname,
+        );
+      if (
+        req.method === "DELETE" &&
+        revokeOrganizationInvitation?.[1] !== undefined &&
+        revokeOrganizationInvitation[2] !== undefined
+      ) {
+        reply(
+          res,
+          200,
+          await squad.revokeOrganizationInvitation(
+            revokeOrganizationInvitation[1],
+            revokeOrganizationInvitation[2],
+          ),
+        );
+        return;
+      }
       const approveOrganizationJoin =
         /^\/squad\/v1\/local\/organizations\/([0-9a-f-]{36})\/join-requests\/([0-9a-f-]{36})\/approve$/u.exec(
           url.pathname,

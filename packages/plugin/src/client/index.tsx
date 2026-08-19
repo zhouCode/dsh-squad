@@ -21,7 +21,10 @@ import type {
   AutomationRuleInput,
   AutomationRuleView,
 } from "../shared/automation.ts";
-import type { OrganizationView } from "../shared/organizations.ts";
+import type {
+  OrganizationInvitationView,
+  OrganizationView,
+} from "../shared/organizations.ts";
 import {
   summarizeAttention,
   type SquadConnectionDiagnostics,
@@ -47,6 +50,7 @@ import {
   formatDelivery,
   formatErrorCode,
   formatOrganizationRole,
+  formatOrganizationInvitationStatus,
   formatOrganizationStatus,
   formatPlanItemStatus,
   formatPlanStatus,
@@ -1797,6 +1801,33 @@ function OrganizationCenter({
     expiresAt: string;
     kind: "ORGANIZATION" | "JOIN_PACKAGE";
   }>();
+  const [invitationHistory, setInvitationHistory] = useState<
+    Record<string, OrganizationInvitationView[]>
+  >({});
+  const [loadingInvitations, setLoadingInvitations] = useState<string>();
+
+  const loadInvitations = async (
+    organizationId: string,
+    force = false,
+  ): Promise<void> => {
+    if (!force && invitationHistory[organizationId] !== undefined) return;
+    setLoadingInvitations(organizationId);
+    try {
+      const result = await api<OrganizationInvitationView[]>(
+        `/organizations/${organizationId}/invitations`,
+      );
+      setInvitationHistory((current) => ({
+        ...current,
+        [organizationId]: result,
+      }));
+    } catch (cause) {
+      setError(describeError(cause, t, "error.organizationActionFailed"));
+    } finally {
+      setLoadingInvitations((current) =>
+        current === organizationId ? undefined : current,
+      );
+    }
+  };
 
   const run = async (key: string, action: () => Promise<void>) => {
     setBusy(key);
@@ -1857,18 +1888,20 @@ function OrganizationCenter({
     setError(undefined);
     setInvitation(undefined);
     try {
-      const result = await api<{ invitation: string; expiresAt: string }>(
-        `/organizations/${organizationId}/invitations`,
-        {
-          method: "POST",
-          body: JSON.stringify({ expiresInMinutes }),
-        },
-      );
+      const result = await api<{
+        invitation: string;
+        invitationId: string;
+        expiresAt: string;
+      }>(`/organizations/${organizationId}/invitations`, {
+        method: "POST",
+        body: JSON.stringify({ expiresInMinutes }),
+      });
       setInvitation({
         token: result.invitation,
         expiresAt: result.expiresAt,
         kind: "ORGANIZATION",
       });
+      await loadInvitations(organizationId, true);
     } catch (cause) {
       setError(describeError(cause, t, "error.organizationActionFailed"));
     } finally {
@@ -1896,6 +1929,7 @@ function OrganizationCenter({
         expiresAt: result.expiresAt,
         kind: "JOIN_PACKAGE",
       });
+      await loadInvitations(organizationId, true);
     } catch (cause) {
       setError(describeError(cause, t, "error.organizationActionFailed"));
     } finally {
@@ -1950,6 +1984,31 @@ function OrganizationCenter({
         { method: "POST", body: "{}" },
       ),
     );
+  };
+
+  const revokeInvitation = async (
+    organizationId: string,
+    invitationId: string,
+  ) => {
+    if (
+      !(await confirm({
+        title: t("confirm.revokeInvitationTitle"),
+        message: t("confirm.revokeInvitation"),
+        confirmLabel: t("action.revokeInvitation"),
+        danger: true,
+      }))
+    ) {
+      return;
+    }
+    await run(`revoke-invitation:${invitationId}`, async () => {
+      await api(
+        `/organizations/${organizationId}/invitations/${invitationId}`,
+        {
+          method: "DELETE",
+        },
+      );
+      await loadInvitations(organizationId, true);
+    });
   };
 
   const changeMemberRole = async (
@@ -2145,47 +2204,130 @@ function OrganizationCenter({
                 })}
               </p>
               {canAdminister ? (
-                <div className="squad-organization-admin">
-                  <label>
-                    {t("organizations.invitationExpiry")}
-                    <input
-                      id={`expiry-${organization.organizationId}`}
-                      type="number"
-                      min={5}
-                      max={10_080}
-                      defaultValue={1_440}
-                    />
-                  </label>
-                  <button
-                    disabled={busy !== undefined}
-                    onClick={() => {
-                      const input = document.getElementById(
-                        `expiry-${organization.organizationId}`,
-                      ) as HTMLInputElement | null;
-                      void createJoinPackage(
-                        organization.organizationId,
-                        Number(input?.value ?? 1_440),
-                      );
+                <>
+                  <div className="squad-organization-admin">
+                    <label>
+                      {t("organizations.invitationExpiry")}
+                      <input
+                        id={`expiry-${organization.organizationId}`}
+                        type="number"
+                        min={5}
+                        max={10_080}
+                        defaultValue={1_440}
+                      />
+                    </label>
+                    <button
+                      disabled={busy !== undefined}
+                      onClick={() => {
+                        const input = document.getElementById(
+                          `expiry-${organization.organizationId}`,
+                        ) as HTMLInputElement | null;
+                        void createJoinPackage(
+                          organization.organizationId,
+                          Number(input?.value ?? 1_440),
+                        );
+                      }}
+                    >
+                      {t("action.createJoinPackage")}
+                    </button>
+                    <button
+                      className="squad-secondary"
+                      disabled={busy !== undefined}
+                      onClick={() => {
+                        const input = document.getElementById(
+                          `expiry-${organization.organizationId}`,
+                        ) as HTMLInputElement | null;
+                        void createInvitation(
+                          organization.organizationId,
+                          Number(input?.value ?? 1_440),
+                        );
+                      }}
+                    >
+                      {t("action.createInvitation")}
+                    </button>
+                  </div>
+                  <details
+                    className="squad-invitation-history"
+                    onToggle={(event) => {
+                      if (event.currentTarget.open) {
+                        void loadInvitations(organization.organizationId);
+                      }
                     }}
                   >
-                    {t("action.createJoinPackage")}
-                  </button>
-                  <button
-                    className="squad-secondary"
-                    disabled={busy !== undefined}
-                    onClick={() => {
-                      const input = document.getElementById(
-                        `expiry-${organization.organizationId}`,
-                      ) as HTMLInputElement | null;
-                      void createInvitation(
-                        organization.organizationId,
-                        Number(input?.value ?? 1_440),
-                      );
-                    }}
-                  >
-                    {t("action.createInvitation")}
-                  </button>
-                </div>
+                    <summary>{t("organizations.invitationHistory")}</summary>
+                    <p className="squad-muted">
+                      {t("organizations.invitationHistoryHint")}
+                    </p>
+                    {loadingInvitations === organization.organizationId ? (
+                      <p role="status">
+                        {t("organizations.loadingInvitations")}
+                      </p>
+                    ) : null}
+                    {invitationHistory[organization.organizationId]?.length ===
+                    0 ? (
+                      <p className="squad-muted">
+                        {t("organizations.noInvitations")}
+                      </p>
+                    ) : null}
+                    <div className="squad-invitation-list">
+                      {(
+                        invitationHistory[organization.organizationId] ?? []
+                      ).map((entry) => {
+                        const creator = organization.members.find(
+                          (member) =>
+                            member.membershipId === entry.createdByMembershipId,
+                        );
+                        return (
+                          <article key={entry.invitationId}>
+                            <div>
+                              <strong>
+                                {formatOrganizationInvitationStatus(
+                                  t,
+                                  entry.status,
+                                )}
+                              </strong>
+                              <span>
+                                {t("organizations.invitationCreated", {
+                                  time: new Date(
+                                    entry.createdAt,
+                                  ).toLocaleString(),
+                                })}
+                              </span>
+                              <span>
+                                {t("organizations.invitationExpires", {
+                                  time: new Date(
+                                    entry.expiresAt,
+                                  ).toLocaleString(),
+                                })}
+                              </span>
+                              <span>
+                                {t("organizations.invitationCreator", {
+                                  name:
+                                    creator?.displayName ??
+                                    entry.createdByMembershipId,
+                                })}
+                              </span>
+                            </div>
+                            {entry.status === "ACTIVE" ? (
+                              <button
+                                className="squad-danger"
+                                disabled={busy !== undefined}
+                                onClick={() =>
+                                  void revokeInvitation(
+                                    organization.organizationId,
+                                    entry.invitationId,
+                                  )
+                                }
+                              >
+                                {t("action.revokeInvitation")}
+                              </button>
+                            ) : null}
+                          </article>
+                        );
+                      })}
+                    </div>
+                  </details>
+                </>
               ) : null}
               {canAdminister ? (
                 <section>
@@ -4221,6 +4363,7 @@ const css = `
 .squad-trigger{appearance:none;border:0;background:transparent;color:var(--dsw-alias-label-primary);cursor:pointer;border-radius:10px;display:flex;align-items:center;justify-content:center;gap:8px;height:36px;padding:0 9px;font:inherit;white-space:nowrap}.squad-trigger:hover{background:var(--dsw-alias-interactive-bg-hover)}.squad-trigger-wide{width:100%;justify-content:flex-start}.squad-trigger-icon{font-size:20px;line-height:1}.squad-overlay{position:fixed;inset:0;z-index:1000;pointer-events:none}.squad-backdrop{position:absolute;inset:0;border:0;background:rgba(10,14,22,.34);pointer-events:auto}.squad-panel{position:absolute;pointer-events:auto;top:12px;bottom:12px;right:12px;width:min(920px,calc(100vw - 24px));border:1px solid var(--dsw-alias-border-l2,#ddd);border-radius:18px;background:var(--dsw-specific-dialog-fill,#fff);color:var(--dsw-alias-label-primary,#151515);box-shadow:0 18px 60px rgba(0,0,0,.24);display:flex;flex-direction:column;overflow:hidden}.squad-panel-head{display:flex;justify-content:space-between;align-items:center;padding:22px 24px 12px}.squad-panel-head h1{font-size:24px;margin:2px 0}.squad-eyebrow{font-size:11px;letter-spacing:.14em;text-transform:uppercase;color:var(--dsw-alias-label-secondary,#666)}.squad-close{border:0;background:transparent;color:inherit;font-size:30px;cursor:pointer}.squad-tabs{display:flex;gap:4px;padding:0 18px 14px;overflow:auto;border-bottom:1px solid var(--dsw-alias-border-l2,#ddd)}.squad-tabs button{border:0;border-radius:999px;background:transparent;color:var(--dsw-alias-label-secondary,#666);padding:7px 12px;cursor:pointer;white-space:nowrap}.squad-tabs button.active{background:var(--dsw-alias-interactive-bg-hover,#eee);color:var(--dsw-alias-label-primary,#111)}.squad-content{display:grid;grid-template-columns:290px minmax(0,1fr);min-height:0;flex:1}.squad-list{border-right:1px solid var(--dsw-alias-border-l2,#ddd);padding:10px;overflow:auto}.squad-list button{display:block;width:100%;text-align:left;border:0;background:transparent;color:inherit;border-radius:12px;padding:12px;cursor:pointer}.squad-list button:hover,.squad-list button.active{background:var(--dsw-alias-interactive-bg-hover,#eee)}.squad-list strong,.squad-list span{display:block}.squad-list strong{overflow:hidden;text-overflow:ellipsis;white-space:nowrap}.squad-list span{font-size:12px;margin-top:5px;color:var(--dsw-alias-label-secondary,#666)}.squad-content main,.squad-settings{overflow:auto;padding:22px 26px}.squad-detail>header{display:flex;align-items:center;gap:10px}.squad-detail h2{font-size:22px;line-height:1.35}.squad-detail h3,.squad-settings h3{font-size:14px;margin:24px 0 8px}.squad-detail dl{display:grid;gap:5px}.squad-detail dl div{display:grid;grid-template-columns:78px 1fr;gap:10px}.squad-detail dt{color:var(--dsw-alias-label-secondary,#666)}.squad-detail dd{margin:0;overflow-wrap:anywhere}.squad-status{font-size:11px;font-weight:700;border-radius:999px;padding:4px 8px;background:#e8edf6}.squad-status-completed,.squad-plan-status-dispatched{background:#dff5e6;color:#176c35}.squad-status-failed,.squad-status-rejected,.squad-plan-status-partial{background:#fde4e1;color:#a52a24}.squad-status-waiting_human,.squad-plan-status-draft,.squad-plan-status-dispatching{background:#fff0c7;color:#755400}.squad-direction,.squad-muted{color:var(--dsw-alias-label-secondary,#666);font-size:12px}.squad-prewrap{white-space:pre-wrap;overflow-wrap:anywhere}.squad-todo{border-left:3px solid #d59b1b;padding:2px 12px;margin:10px 0}.squad-todo p{margin:5px 0}.squad-todo-select{display:flex!important;align-items:center;grid-template-columns:auto 1fr!important}.squad-todo-select input{width:auto!important}.squad-detail label,.squad-settings label{display:grid;gap:6px;margin:12px 0;font-size:13px}.squad-detail textarea,.squad-settings textarea,.squad-settings input,.squad-settings select{box-sizing:border-box;width:100%;border:1px solid var(--dsw-alias-border-l2,#ccc);border-radius:9px;background:transparent;color:inherit;padding:9px;font:inherit}.squad-actions{display:flex;gap:8px;margin:12px 0;flex-wrap:wrap}.squad-detail button,.squad-settings button{border:0;border-radius:9px;padding:8px 12px;background:#315ee8;color:#fff;cursor:pointer}.squad-detail button:disabled{opacity:.5}.squad-detail .squad-danger{background:#b13c35}.squad-detail .squad-link-button{display:block;margin:9px 0;background:transparent;color:#315ee8;padding-left:0}.squad-error{color:#b13c35}.squad-load-error{padding:0 24px}.squad-empty{color:var(--dsw-alias-label-secondary,#666);padding:12px}.squad-settings{max-width:680px}.squad-settings code,.squad-peer code,.squad-plan-item code{display:block;overflow-wrap:anywhere;font-size:11px}.squad-peer{display:grid;grid-template-columns:150px 1fr auto;gap:10px;padding:10px 0;border-bottom:1px solid var(--dsw-alias-border-l2,#ddd)}.squad-plan-items{display:grid;gap:12px}.squad-plan-item{border:1px solid var(--dsw-alias-border-l2,#ddd);border-radius:12px;padding:14px}.squad-plan-item>header{display:flex;align-items:flex-start;justify-content:space-between;gap:12px}.squad-plan-item>header strong{line-height:1.4}.squad-plan-item-status{font-size:11px;white-space:nowrap;color:var(--dsw-alias-label-secondary,#666)}.squad-plan-item-status-failed{color:#b13c35}.squad-plan-item-status-dispatched{color:#176c35}.squad-plan-item dl{margin-bottom:0}.squad-plan-item ul{margin:4px 0;padding-left:20px}.squad-plan-item a{color:#315ee8}
 @media(max-width:700px){.squad-panel{inset:0;width:auto;border-radius:0}.squad-content{grid-template-columns:1fr}.squad-list{max-height:180px;border-right:0;border-bottom:1px solid var(--dsw-alias-border-l2,#ddd)}.squad-peer{grid-template-columns:1fr}.squad-panel-head{padding:16px}.squad-content main,.squad-settings{padding:16px}}
 .squad-context-bar{display:grid;grid-template-columns:minmax(150px,1fr) minmax(150px,1fr) minmax(220px,1.4fr);gap:14px;margin:0 22px 12px;padding:12px 14px;border:1px solid var(--dsw-alias-border-l2,#ddd);border-radius:12px;background:var(--dsw-alias-interactive-bg-hover,#f6f7f9)}.squad-context-bar>div,.squad-context-bar>label{display:grid;align-content:start;gap:4px;min-width:0;margin:0;font-size:12px}.squad-context-bar span,.squad-context-bar small{color:var(--dsw-alias-label-secondary,#666)}.squad-context-bar code{overflow:hidden;text-overflow:ellipsis;white-space:nowrap}.squad-context-bar select,.squad-organizations input,.squad-organizations textarea,.squad-organizations select,.squad-peer select{box-sizing:border-box;width:100%;border:1px solid var(--dsw-alias-border-l2,#ccc);border-radius:9px;background:var(--dsw-specific-dialog-fill,#fff);color:inherit;padding:8px;font:inherit}.squad-organizations{overflow:auto;padding:20px 24px;flex:1}.squad-organizations button{border:0;border-radius:9px;padding:8px 12px;background:#315ee8;color:#fff;cursor:pointer}.squad-organizations button:disabled{opacity:.5}.squad-organizations .squad-danger{background:#b13c35}.squad-organizations .squad-secondary{border:1px solid var(--dsw-alias-border-l2,#ccc);background:transparent;color:inherit}.squad-organization-intro{display:grid;grid-template-columns:1fr 1.35fr;gap:22px}.squad-organization-intro h2,.squad-organization-card h2{margin:0}.squad-organization-forms{display:grid;grid-template-columns:1fr 1fr;gap:12px}.squad-organization-forms form{border:1px solid var(--dsw-alias-border-l2,#ddd);border-radius:12px;padding:12px}.squad-organization-forms h3{margin:0 0 8px;font-size:13px}.squad-organizations label{display:grid;gap:5px;margin:8px 0;font-size:12px}.squad-organization-list{display:grid;gap:16px;margin-top:18px}.squad-organization-card{border:1px solid var(--dsw-alias-border-l2,#ddd);border-radius:14px;padding:16px}.squad-organization-card>header{display:flex;justify-content:space-between;gap:16px}.squad-organization-card code,.squad-invitation-result code,.squad-member code,.squad-join-request code{display:block;font-size:11px;overflow-wrap:anywhere}.squad-organization-badges{display:flex;align-items:flex-start;gap:6px}.squad-organization-badges span,.squad-member-role>span{font-size:11px;border-radius:999px;padding:4px 8px;background:var(--dsw-alias-interactive-bg-hover,#eee);white-space:nowrap}.squad-organization-admin{display:flex;align-items:end;gap:8px;margin:12px 0;flex-wrap:wrap}.squad-organization-admin label{margin:0;max-width:210px}.squad-join-request{display:flex;align-items:center;justify-content:space-between;gap:12px;padding:9px 0;border-bottom:1px solid var(--dsw-alias-border-l2,#ddd)}.squad-join-actions{display:flex;gap:7px;flex-wrap:wrap}.squad-member-list{display:grid;gap:8px}.squad-member{display:grid;grid-template-columns:minmax(170px,1.4fr) minmax(130px,.8fr) minmax(150px,1fr) auto;align-items:center;gap:10px;padding:10px;border-radius:10px;background:var(--dsw-alias-interactive-bg-hover,#f4f5f7)}.squad-member-role{display:flex;align-items:center;gap:6px}.squad-policy-control{margin:0!important}.squad-invitation-result{display:grid;gap:7px;margin-top:14px;padding:13px;border:1px solid #d59b1b;border-radius:12px;background:#fff8e5;color:#5d470a}.squad-notice{padding:10px 12px;border-radius:9px;background:#dff5e6;color:#176c35}.squad-warning{padding:10px 12px;border-radius:9px;background:#fff0c7;color:#755400;font-size:12px}
+.squad-invitation-history{margin:12px 0;border:1px solid var(--dsw-alias-border-l2,#ddd);border-radius:10px;padding:10px 12px}.squad-invitation-history>summary{cursor:pointer;font-size:13px;font-weight:600}.squad-invitation-list{display:grid;gap:8px}.squad-invitation-list>article{display:flex;align-items:center;justify-content:space-between;gap:12px;padding:10px;border-radius:9px;background:var(--dsw-alias-interactive-bg-hover,#f4f5f7)}.squad-invitation-list>article>div{display:grid;gap:3px;min-width:0}.squad-invitation-list span{font-size:11px;color:var(--dsw-alias-label-secondary,#666);overflow-wrap:anywhere}@media(max-width:700px){.squad-invitation-list>article{display:grid}}
 @media(max-width:700px){.squad-context-bar,.squad-organization-intro,.squad-organization-forms{grid-template-columns:1fr}.squad-context-bar{margin:0 12px 10px}.squad-organizations{padding:16px}.squad-member{grid-template-columns:1fr}.squad-organization-card>header{display:grid}}
 .squad-node-setup{box-sizing:border-box;overflow:auto;width:100%;max-width:720px;padding:4px 0 20px}.squad-onboarding{align-self:center;flex:1;padding:18px 30px 34px}.squad-node-setup>header{margin-bottom:18px}.squad-node-setup>header h2{font-size:26px;margin:7px 0}.squad-node-setup>header p{color:var(--dsw-alias-label-secondary,#666);line-height:1.55;max-width:620px}.squad-step{font-size:11px;letter-spacing:.12em;text-transform:uppercase;color:#315ee8}.squad-node-setup label{display:grid;gap:6px;margin:13px 0;font-size:13px}.squad-node-setup input,.squad-node-setup textarea{box-sizing:border-box;width:100%;border:1px solid var(--dsw-alias-border-l2,#ccc);border-radius:9px;background:transparent;color:inherit;padding:9px;font:inherit}.squad-node-setup input:disabled{opacity:.55}.squad-node-setup small{color:var(--dsw-alias-label-secondary,#666);line-height:1.45}.squad-mode-picker{display:grid;grid-template-columns:1fr 1fr;gap:10px;border:0;margin:18px 0;padding:0}.squad-mode-picker legend{grid-column:1/-1;padding:0 0 8px;font-size:13px;font-weight:600}.squad-node-setup .squad-mode-picker button{display:grid;gap:6px;border:1px solid var(--dsw-alias-border-l2,#ccc);border-radius:12px;background:transparent;color:inherit;padding:14px;text-align:left;cursor:pointer}.squad-node-setup .squad-mode-picker button.active{border-color:#315ee8;background:rgba(49,94,232,.08);box-shadow:inset 0 0 0 1px #315ee8}.squad-mode-picker button span{color:var(--dsw-alias-label-secondary,#666);font-size:12px;line-height:1.4}.squad-setup-fields{padding:2px 14px;border-radius:12px;background:var(--dsw-alias-interactive-bg-hover,#f6f7f9)}.squad-node-setup .squad-check{display:flex;align-items:center;gap:9px}.squad-node-setup .squad-check input{width:auto}.squad-node-setup button[type=submit]{border:0;border-radius:9px;padding:9px 14px;background:#315ee8;color:#fff;cursor:pointer}.squad-node-setup button:disabled{opacity:.55;cursor:not-allowed}.squad-node-setup .squad-secondary{border:1px solid var(--dsw-alias-border-l2,#ccc);border-radius:9px;padding:8px 13px;background:transparent;color:inherit;cursor:pointer}.squad-settings .squad-node-setup{border-bottom:1px solid var(--dsw-alias-border-l2,#ddd);margin-bottom:22px}.squad-settings .squad-node-setup>h2{margin-top:0}.squad-onboarding-join{padding:14px;border:1px solid #315ee8;border-radius:12px;background:rgba(49,94,232,.06)}.squad-onboarding-join h3{margin:0}.squad-onboarding-join p{font-size:12px;color:var(--dsw-alias-label-secondary,#666)}.squad-form-divider{display:flex;align-items:center;gap:10px;margin:18px 0;color:var(--dsw-alias-label-secondary,#666);font-size:12px}.squad-form-divider:before,.squad-form-divider:after{content:"";height:1px;flex:1;background:var(--dsw-alias-border-l2,#ddd)}
 .squad-setup-fields hr{border:0;border-top:1px solid var(--dsw-alias-border-l2,#ddd);margin:16px 0}.squad-connection-required{display:grid;align-content:center;justify-items:start;max-width:620px}.squad-connection-required h2{margin-bottom:0}

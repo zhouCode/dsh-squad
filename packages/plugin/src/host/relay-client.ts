@@ -1,9 +1,11 @@
 import { envelopeSchema, type Envelope } from "../shared/contracts.ts";
 import {
   organizationDirectoryBundleSchema,
+  organizationInvitationViewSchema,
   type OrganizationDirectoryBundle,
   type OrganizationDocument,
   type OrganizationJoinRequest,
+  type OrganizationInvitationView,
   type OrganizationMembershipCertificate,
 } from "../shared/organizations.ts";
 import type { NodeIdentity } from "./identity.ts";
@@ -246,14 +248,23 @@ export class RelayClient {
   async createOrganizationInvitation(
     organizationId: string,
     expiresInMinutes = 1_440,
-  ): Promise<{ invitation: string; expiresAt: string }> {
+  ): Promise<{
+    invitation: string;
+    invitationId: string;
+    expiresAt: string;
+  }> {
     const body = (await this.request(
       "POST",
       `/squad/v1/organizations/${organizationId}/invitations`,
       { expiresInMinutes },
-    )) as { invitation?: unknown; expiresAt?: unknown };
+    )) as {
+      invitation?: unknown;
+      invitationId?: unknown;
+      expiresAt?: unknown;
+    };
     if (
       typeof body.invitation !== "string" ||
+      typeof body.invitationId !== "string" ||
       typeof body.expiresAt !== "string"
     ) {
       throw new RelayClientError(
@@ -262,7 +273,42 @@ export class RelayClient {
         "Relay organization invitation response is invalid",
       );
     }
-    return { invitation: body.invitation, expiresAt: body.expiresAt };
+    return {
+      invitation: body.invitation,
+      invitationId: body.invitationId,
+      expiresAt: body.expiresAt,
+    };
+  }
+
+  async organizationInvitations(
+    organizationId: string,
+  ): Promise<OrganizationInvitationView[]> {
+    const body = (await this.request(
+      "GET",
+      `/squad/v1/organizations/${organizationId}/invitations`,
+    )) as { invitations?: unknown };
+    if (!Array.isArray(body.invitations)) {
+      throw new RelayClientError(
+        502,
+        "INVALID_RESPONSE",
+        "Relay organization invitation list is invalid",
+      );
+    }
+    return body.invitations.map((invitation) =>
+      organizationInvitationViewSchema.parse(invitation),
+    );
+  }
+
+  async revokeOrganizationInvitation(
+    organizationId: string,
+    invitationId: string,
+  ): Promise<OrganizationInvitationView> {
+    return organizationInvitationViewSchema.parse(
+      await this.request(
+        "DELETE",
+        `/squad/v1/organizations/${organizationId}/invitations/${invitationId}`,
+      ),
+    );
   }
 
   async createOrganizationJoinPackage(

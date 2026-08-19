@@ -116,6 +116,30 @@ export type OrganizationJoinRequestStatus = z.infer<
   typeof organizationJoinRequestStatusSchema
 >;
 
+export const organizationInvitationStatusSchema = z.enum([
+  "ACTIVE",
+  "USED",
+  "EXPIRED",
+  "REVOKED",
+]);
+export type OrganizationInvitationStatus = z.infer<
+  typeof organizationInvitationStatusSchema
+>;
+
+export const organizationInvitationViewSchema = z.strictObject({
+  invitationId: idSchema,
+  organizationId: idSchema,
+  createdByMembershipId: idSchema,
+  status: organizationInvitationStatusSchema,
+  createdAt: timestampSchema,
+  expiresAt: timestampSchema,
+  usedAt: timestampSchema.optional(),
+  revokedAt: timestampSchema.optional(),
+});
+export type OrganizationInvitationView = z.infer<
+  typeof organizationInvitationViewSchema
+>;
+
 export const organizationDirectoryBundleSchema = z.strictObject({
   document: organizationDocumentSchema,
   revision: z.number().int().positive(),

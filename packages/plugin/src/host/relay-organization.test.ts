@@ -114,6 +114,41 @@ describe("Relay organization directory", () => {
     };
     await alice.createOrganization(document, ownerCertificate);
 
+    const revocableInvitation = await alice.createOrganizationInvitation(
+      organizationId,
+      60,
+    );
+    expect(await alice.organizationInvitations(organizationId)).toMatchObject([
+      {
+        invitationId: revocableInvitation.invitationId,
+        status: "ACTIVE",
+      },
+    ]);
+    const revokedInvitation = await alice.revokeOrganizationInvitation(
+      organizationId,
+      revocableInvitation.invitationId,
+    );
+    expect(revokedInvitation.status).toBe("REVOKED");
+    expect(
+      (await alice.organizationInvitations(organizationId))[0]?.status,
+    ).toBe("REVOKED");
+    const revokedRequestUnsigned = unsignedOrganizationJoinRequestSchema.parse({
+      version: 1,
+      requestId: randomUUID(),
+      organizationId,
+      membershipId: randomUUID(),
+      nodeId: daveIdentity.nodeId,
+      publicKey: daveIdentity.publicKey,
+      displayName: "Dave",
+      requestedAt: new Date().toISOString(),
+    });
+    await expect(
+      dave.joinOrganization(revocableInvitation.invitation, {
+        ...revokedRequestUnsigned,
+        signature: daveIdentity.sign(revokedRequestUnsigned),
+      }),
+    ).rejects.toMatchObject({ code: "ORGANIZATION_INVITATION_REVOKED" });
+
     const bobInvitation = await alice.createOrganizationInvitation(
       organizationId,
       60,
@@ -134,6 +169,19 @@ describe("Relay organization directory", () => {
       signature: bobIdentity.sign(bobRequestUnsigned),
     };
     await bob.joinOrganization(bobInvitation.invitation, bobRequest);
+    expect(
+      (await alice.organizationInvitations(organizationId)).find(
+        (invitation) => invitation.invitationId === bobInvitation.invitationId,
+      )?.status,
+    ).toBe("USED");
+    await expect(
+      alice.revokeOrganizationInvitation(
+        organizationId,
+        bobInvitation.invitationId,
+      ),
+    ).rejects.toMatchObject({
+      code: "ORGANIZATION_INVITATION_ALREADY_USED",
+    });
     expect((await bob.organizations())[0]?.selfStatus).toBe("PENDING");
     expect(
       (await alice.organizations())[0]?.pendingJoinRequests[0]?.displayName,

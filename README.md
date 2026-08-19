@@ -78,6 +78,8 @@ Agent 会调用 `propose_team_plan`。负责人确认后，Squad 才为每个计
 
 创建组织的节点是唯一 `Owner`。Owner 可以指定零个或多个 `Admin`；其他参与者加入后都是 `Member`。Owner 和 Admin 可以创建一次性邀请并批准或拒绝加入申请，Admin 只能管理普通 Member，只有 Owner 能任命或撤销 Admin。被拒绝的申请会立即从双方待处理列表消失，申请者需要新邀请才能再次申请。目录 v1 暂不支持 Owner 转让，避免在尚未定义恢复流程时产生双 Owner 或无 Owner 状态。
 
+Owner 和 Admin 还能在 WebUI 查看最近 200 条邀请的有效、已使用、已过期或已撤销状态，并撤销尚未使用的邀请。邀请 token 只在创建时显示一次；状态列表只使用独立随机 ID 和审计时间，不返回 token 或 token 哈希。
+
 组织根由独立 Authority 密钥签名，后续成员事件由当时有权限的 Owner/Admin 节点签名。Relay 和每个节点都会验证完整的追加式事件链、公钥身份、连续修订、签发者角色以及唯一活动 Owner；被禁用的成员不能继续发送组织委派。
 
 一个节点可以加入多个组织，但每个 DSH Session 同一时刻只选择一个组织上下文。`智能体收件箱`顶部实时显示当前节点、Session 和组织，切换只影响该 Session。成员查找、Team Planner 和委派都限定在该签名目录内；选择`直接对等方`即可继续使用旧版的一对一 Peer 模式。

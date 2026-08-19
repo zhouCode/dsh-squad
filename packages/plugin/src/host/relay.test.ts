@@ -3,6 +3,7 @@ import { mkdtempSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { randomUUID } from "node:crypto";
+import { DatabaseSync } from "node:sqlite";
 import { afterEach, describe, expect, it } from "vitest";
 import { NodeIdentity } from "./identity.ts";
 import { RelayServer, signedRequest } from "./relay.ts";
@@ -14,6 +15,68 @@ afterEach(async () => {
 });
 
 describe("Relay mailbox", () => {
+  it("migrates existing organization invitations to opaque management IDs", () => {
+    const root = mkdtempSync(join(tmpdir(), "dsh-squad-relay-migration-"));
+    const databasePath = join(root, "relay.sqlite");
+    const database = new DatabaseSync(databasePath);
+    database.exec(`
+      CREATE TABLE schema_meta (
+        singleton INTEGER PRIMARY KEY CHECK (singleton = 1),
+        version INTEGER NOT NULL
+      );
+      INSERT INTO schema_meta(singleton, version) VALUES (1, 3);
+      CREATE TABLE relay_organization_invites (
+        token_hash TEXT PRIMARY KEY,
+        organization_id TEXT NOT NULL,
+        created_by_membership_id TEXT NOT NULL,
+        expires_at TEXT NOT NULL,
+        used_by_request_id TEXT,
+        used_at TEXT,
+        created_at TEXT NOT NULL
+      );
+    `);
+    database
+      .prepare(
+        `INSERT INTO relay_organization_invites(
+          token_hash, organization_id, created_by_membership_id,
+          expires_at, created_at
+        ) VALUES (?, ?, ?, ?, ?)`,
+      )
+      .run(
+        "legacy-token-hash",
+        randomUUID(),
+        randomUUID(),
+        "2026-08-21T00:00:00.000Z",
+        "2026-08-20T00:00:00.000Z",
+      );
+    database.close();
+
+    const relay = new RelayServer({
+      databasePath,
+      invites: [],
+      maxMailboxItems: 100,
+      maxRequestsPerMinute: 1_000,
+    });
+    relay.close();
+
+    const migrated = new DatabaseSync(databasePath);
+    expect(
+      (
+        migrated
+          .prepare("SELECT version FROM schema_meta WHERE singleton = 1")
+          .get() as Record<string, unknown>
+      ).version,
+    ).toBe(4);
+    const row = migrated
+      .prepare(
+        "SELECT invitation_id, revoked_at FROM relay_organization_invites WHERE token_hash = ?",
+      )
+      .get("legacy-token-hash") as Record<string, unknown>;
+    expect(row.invitation_id).toMatch(/^[0-9a-f-]{36}$/u);
+    expect(row.revoked_at).toBeNull();
+    migrated.close();
+  });
+
   it("enrolls once, persists offline delivery, isolates and explicitly acks", async () => {
     const root = mkdtempSync(join(tmpdir(), "dsh-squad-relay-"));
     const expiresAt = new Date(Date.now() + 60_000).toISOString();

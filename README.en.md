@@ -78,6 +78,8 @@ The same local Plan API is available for future connectors such as Feishu/Lark t
 
 The Node that creates an organization is its sole `Owner`. The Owner may appoint zero or more `Admin` members; every other participant joins as a `Member`. Owner and Admin can create one-time invitations and approve or reject join requests. A rejected request disappears from both pending views immediately, and its applicant needs a new invitation before trying again. Admins can manage ordinary Members, while only the Owner can appoint or demote Admins. Directory v1 deliberately omits Owner transfer until a safe recovery flow can prevent dual-Owner or ownerless states.
 
+Owners and Admins can also inspect the latest 200 invitations as active, used, expired, or revoked and revoke an unused invitation from the WebUI. A token is shown only once at creation; the history returns an independent random ID and audit timestamps, never the token or its hash.
+
 A dedicated Authority key signs the organization root, and authorized Owner/Admin Nodes sign later member events. Relay and every Node verify the complete append-only chain, pinned public-key identity, continuous revisions, issuer role, and exactly one active Owner. A disabled member can no longer send organization-scoped Delegations.
 
 One Node may join multiple organizations, but each DSH Session selects at most one organization context at a time. The top of `Agent Inbox` shows the current Node, Session, and organization in real time; changing it affects only that Session. Member discovery, Team Planner, and delegation remain inside that signed directory. Select `Direct Peers` to retain the original one-to-one mode.

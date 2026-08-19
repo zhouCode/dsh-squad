@@ -63,6 +63,7 @@ import {
   unsignedOrganizationMembershipCertificateSchema,
   type OrganizationDocument,
   type OrganizationJoinRequest,
+  type OrganizationInvitationView,
   type OrganizationMemberView,
   type OrganizationMembershipCertificate,
   type OrganizationRole,
@@ -1109,7 +1110,11 @@ export class SquadService extends Service {
   async createOrganizationInvitation(
     organizationSelector: string,
     expiresInMinutes = 1_440,
-  ): Promise<{ invitation: string; expiresAt: string }> {
+  ): Promise<{
+    invitation: string;
+    invitationId: string;
+    expiresAt: string;
+  }> {
     await this.syncOrganizations();
     const organization = this.database.findOrganization(
       organizationSelector,
@@ -1127,6 +1132,50 @@ export class SquadService extends Service {
     return this.requireRelayClient().createOrganizationInvitation(
       organization.organizationId,
       expiresInMinutes,
+    );
+  }
+
+  async organizationInvitations(
+    organizationId: string,
+  ): Promise<OrganizationInvitationView[]> {
+    await this.syncOrganizations();
+    const organization = this.database.findOrganization(
+      organizationId,
+      this.identity.nodeId,
+    );
+    if (
+      organization === undefined ||
+      organization.membershipStatus !== "ACTIVE" ||
+      organization.role === undefined ||
+      !["OWNER", "ADMIN"].includes(organization.role)
+    ) {
+      throw new Error("Owner or Admin role is required to list invitations");
+    }
+    return this.requireRelayClient().organizationInvitations(
+      organization.organizationId,
+    );
+  }
+
+  async revokeOrganizationInvitation(
+    organizationId: string,
+    invitationId: string,
+  ): Promise<OrganizationInvitationView> {
+    await this.syncOrganizations();
+    const organization = this.database.findOrganization(
+      organizationId,
+      this.identity.nodeId,
+    );
+    if (
+      organization === undefined ||
+      organization.membershipStatus !== "ACTIVE" ||
+      organization.role === undefined ||
+      !["OWNER", "ADMIN"].includes(organization.role)
+    ) {
+      throw new Error("Owner or Admin role is required to revoke invitations");
+    }
+    return this.requireRelayClient().revokeOrganizationInvitation(
+      organization.organizationId,
+      invitationId,
     );
   }
 

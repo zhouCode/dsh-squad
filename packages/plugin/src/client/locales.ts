@@ -4,6 +4,7 @@ import type {
   TeamPlanStatus,
 } from "../shared/contracts.ts";
 import type {
+  OrganizationInvitationStatus,
   OrganizationMemberStatus,
   OrganizationRole,
 } from "../shared/organizations.ts";
@@ -112,6 +113,7 @@ export const zh = {
   "action.createOrganization": "创建组织",
   "action.joinOrganization": "申请加入",
   "action.createInvitation": "创建一次性邀请",
+  "action.revokeInvitation": "撤销邀请",
   "action.createJoinPackage": "为新节点创建加入包",
   "action.approveJoin": "批准加入",
   "action.rejectJoin": "拒绝加入",
@@ -155,6 +157,9 @@ export const zh = {
   "confirm.rejectJoinTitle": "拒绝此加入申请？",
   "confirm.rejectJoin":
     "“{name}”对“{organization}”的申请会被关闭；对方需要新的邀请才能再次申请。",
+  "confirm.revokeInvitationTitle": "撤销此邀请？",
+  "confirm.revokeInvitation":
+    "撤销后，尚未使用的邀请将立即失效；已经完成的加入申请不会受到影响。",
   "confirm.changeRoleTitle": "更改组织角色？",
   "confirm.changeRole":
     "将“{name}”在“{organization}”中的角色改为“{role}”。管理员可以邀请、批准和管理普通成员。",
@@ -425,6 +430,17 @@ export const zh = {
   "organizations.joinPackageResult":
     "一次性团队加入包（包含 Relay 登记和组织邀请，请通过安全渠道发送）",
   "organizations.invitationExpires": "有效期至 {time}",
+  "organizations.invitationHistory": "邀请记录",
+  "organizations.invitationHistoryHint":
+    "出于安全考虑，创建后不会再次显示邀请 token；这里仅显示状态和审计信息。",
+  "organizations.invitationCreated": "创建于 {time}",
+  "organizations.invitationCreator": "创建者：{name}",
+  "organizations.noInvitations": "尚未创建邀请。",
+  "organizations.loadingInvitations": "正在加载邀请记录…",
+  "invitationStatus.ACTIVE": "有效",
+  "invitationStatus.USED": "已使用",
+  "invitationStatus.EXPIRED": "已过期",
+  "invitationStatus.REVOKED": "已撤销",
   "organizations.members": "成员",
   "organizations.pendingRequests": "待审批加入申请",
   "organizations.noPendingRequests": "没有待审批申请。",
@@ -553,6 +569,10 @@ export const zh = {
   "errorCode.INVALID_INVITATION": "一次性邀请无效",
   "errorCode.INVITATION_ALREADY_USED": "一次性邀请已被使用",
   "errorCode.INVITATION_EXPIRED": "一次性邀请已过期",
+  "errorCode.ORGANIZATION_INVITATION_REVOKED": "组织邀请已被撤销",
+  "errorCode.ORGANIZATION_INVITATION_ALREADY_USED": "组织邀请已经使用",
+  "errorCode.ORGANIZATION_INVITATION_EXPIRED": "组织邀请已过期",
+  "errorCode.ORGANIZATION_INVITATION_NOT_FOUND": "找不到组织邀请",
   "errorCode.INVALID_RESPONSE": "Relay 返回了无效响应",
   "summary.executionInterrupted":
     "接收方 DSH 在执行期间停止。可能已经发生的外部副作用不会自动重放。",
@@ -671,6 +691,7 @@ export const en = {
   "action.createOrganization": "Create organization",
   "action.joinOrganization": "Request to join",
   "action.createInvitation": "Create one-time invitation",
+  "action.revokeInvitation": "Revoke invitation",
   "action.createJoinPackage": "Create join package for a new Node",
   "action.approveJoin": "Approve join",
   "action.rejectJoin": "Reject join",
@@ -714,6 +735,9 @@ export const en = {
   "confirm.rejectJoinTitle": "Reject this join request?",
   "confirm.rejectJoin":
     "“{name}”'s request for “{organization}” will be closed. They need a new invitation to request access again.",
+  "confirm.revokeInvitationTitle": "Revoke this invitation?",
+  "confirm.revokeInvitation":
+    "Any unused invitation becomes invalid immediately. Join requests already submitted are unaffected.",
   "confirm.changeRoleTitle": "Change organization role?",
   "confirm.changeRole":
     "Change “{name}” in “{organization}” to “{role}”. Admins can invite, approve, and manage regular members.",
@@ -993,6 +1017,17 @@ export const en = {
   "organizations.joinPackageResult":
     "One-time team join package (contains Relay enrollment and organization invitations; send through a secure channel)",
   "organizations.invitationExpires": "Expires at {time}",
+  "organizations.invitationHistory": "Invitation history",
+  "organizations.invitationHistoryHint":
+    "For security, invitation tokens are never shown again after creation. This view contains status and audit metadata only.",
+  "organizations.invitationCreated": "Created at {time}",
+  "organizations.invitationCreator": "Created by {name}",
+  "organizations.noInvitations": "No invitations have been created.",
+  "organizations.loadingInvitations": "Loading invitation history…",
+  "invitationStatus.ACTIVE": "Active",
+  "invitationStatus.USED": "Used",
+  "invitationStatus.EXPIRED": "Expired",
+  "invitationStatus.REVOKED": "Revoked",
   "organizations.members": "Members",
   "organizations.pendingRequests": "Pending join requests",
   "organizations.noPendingRequests": "No pending join requests.",
@@ -1134,6 +1169,14 @@ export const en = {
   "errorCode.INVITATION_ALREADY_USED":
     "The one-time invitation has already been used",
   "errorCode.INVITATION_EXPIRED": "The one-time invitation has expired",
+  "errorCode.ORGANIZATION_INVITATION_REVOKED":
+    "The organization invitation has been revoked",
+  "errorCode.ORGANIZATION_INVITATION_ALREADY_USED":
+    "The organization invitation has already been used",
+  "errorCode.ORGANIZATION_INVITATION_EXPIRED":
+    "The organization invitation has expired",
+  "errorCode.ORGANIZATION_INVITATION_NOT_FOUND":
+    "The organization invitation was not found",
   "errorCode.INVALID_RESPONSE": "The Relay returned an invalid response",
   "summary.executionInterrupted":
     "The receiving DSH process stopped while execution was active. Potential external side effects were not replayed.",
@@ -1200,6 +1243,13 @@ const organizationStatusKeys = {
   OrganizationMemberStatus | "PENDING",
   SquadLocaleKey
 >;
+
+const organizationInvitationStatusKeys = {
+  ACTIVE: "invitationStatus.ACTIVE",
+  USED: "invitationStatus.USED",
+  EXPIRED: "invitationStatus.EXPIRED",
+  REVOKED: "invitationStatus.REVOKED",
+} as const satisfies Record<OrganizationInvitationStatus, SquadLocaleKey>;
 
 const planStatusKeys = {
   DRAFT: "planStatus.DRAFT",
@@ -1283,6 +1333,12 @@ const errorCodeKeys = {
   INVALID_INVITATION: "errorCode.INVALID_INVITATION",
   INVITATION_ALREADY_USED: "errorCode.INVITATION_ALREADY_USED",
   INVITATION_EXPIRED: "errorCode.INVITATION_EXPIRED",
+  ORGANIZATION_INVITATION_REVOKED: "errorCode.ORGANIZATION_INVITATION_REVOKED",
+  ORGANIZATION_INVITATION_ALREADY_USED:
+    "errorCode.ORGANIZATION_INVITATION_ALREADY_USED",
+  ORGANIZATION_INVITATION_EXPIRED: "errorCode.ORGANIZATION_INVITATION_EXPIRED",
+  ORGANIZATION_INVITATION_NOT_FOUND:
+    "errorCode.ORGANIZATION_INVITATION_NOT_FOUND",
   INVALID_RESPONSE: "errorCode.INVALID_RESPONSE",
 } as const satisfies Record<string, SquadLocaleKey>;
 
@@ -1308,6 +1364,13 @@ export function formatStatus(
   status: DelegationStatus,
 ): string {
   return t(statusKeys[status]);
+}
+
+export function formatOrganizationInvitationStatus(
+  t: SquadTranslate,
+  status: OrganizationInvitationStatus,
+): string {
+  return t(organizationInvitationStatusKeys[status]);
 }
 
 export function formatConnectionStatus(
