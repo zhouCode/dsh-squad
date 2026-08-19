@@ -50,6 +50,11 @@ import {
   type DelegationProgressState,
 } from "./delegation-progress.ts";
 import {
+  localSyncHealth,
+  type LocalEventStreamState,
+  type LocalSyncHealth,
+} from "./live-sync.ts";
+import {
   SQUAD_LOCALE_NS,
   en,
   formatConnectionStatus,
@@ -810,6 +815,13 @@ const nextActionKeys = {
   COMPLETE: "delegationProgress.next.COMPLETE",
   STOPPED: "delegationProgress.next.STOPPED",
 } as const satisfies Record<DelegationNextAction, SquadLocaleKey>;
+
+const localSyncHealthKeys = {
+  CONNECTING: "sync.CONNECTING",
+  LIVE: "sync.LIVE",
+  RECONNECTING: "sync.RECONNECTING",
+  STALE: "sync.STALE",
+} as const satisfies Record<LocalSyncHealth, SquadLocaleKey>;
 
 function PlanStatusPill({
   status,
@@ -4520,24 +4532,47 @@ function SquadPanel({
   const [state, setState] = useState<LocalState>();
   const [selectedId, setSelectedId] = useState<string>();
   const [error, setError] = useState<string>();
+  const [eventStream, setEventStream] =
+    useState<LocalEventStreamState>("CONNECTING");
+  const [lastRefreshedAt, setLastRefreshedAt] = useState<number>();
+  const [refreshing, setRefreshing] = useState(false);
+  const [now, setNow] = useState(() => Date.now());
   const lastFocused = useRef<HTMLElement | null>(null);
 
-  const refresh = useCallback(async () => {
-    try {
-      setState(await api<LocalState>("/state"));
-      setError(undefined);
-    } catch (cause) {
-      setError(describeError(cause, t, "error.loadFailed"));
-    }
-  }, [t]);
+  const refresh = useCallback(
+    async (forceTransport = false) => {
+      if (forceTransport) setRefreshing(true);
+      try {
+        const next = await api<LocalState>(
+          forceTransport ? "/refresh" : "/state",
+          forceTransport ? { method: "POST", body: "{}" } : undefined,
+        );
+        setState((current) =>
+          current === undefined || next.revision >= current.revision
+            ? next
+            : current,
+        );
+        setLastRefreshedAt(Date.now());
+        setError(undefined);
+      } catch (cause) {
+        setError(describeError(cause, t, "error.loadFailed"));
+      } finally {
+        if (forceTransport) setRefreshing(false);
+      }
+    },
+    [t],
+  );
 
   useEffect(() => {
     if (!open) return;
     lastFocused.current = document.activeElement as HTMLElement | null;
+    setEventStream("CONNECTING");
     void refresh();
     const events = new EventSource("/squad/v1/local/events");
     const stateChanged = () => void refresh();
     events.addEventListener("state", stateChanged);
+    events.onopen = () => setEventStream("LIVE");
+    events.onerror = () => setEventStream("RECONNECTING");
     return () => {
       events.removeEventListener("state", stateChanged);
       events.close();
@@ -4549,6 +4584,13 @@ function SquadPanel({
     if (open) void refresh();
   }, [currentSessionId, open, refresh]);
 
+  useEffect(() => {
+    if (!open) return;
+    setNow(Date.now());
+    const timer = window.setInterval(() => setNow(Date.now()), 5_000);
+    return () => window.clearInterval(timer);
+  }, [open]);
+
   const items = useMemo(
     () => (state?.delegations ?? []).filter((item) => belongs(tab, item)),
     [state, tab],
@@ -4558,6 +4600,11 @@ function SquadPanel({
   const selectedPlan = plans.find((plan) => plan.id === selectedId) ?? plans[0];
   const attention = state === undefined ? undefined : localAttention(state);
   const locale = getLocale() === "zh" ? "zh-CN" : "en";
+  const syncHealth = localSyncHealth({
+    eventStream,
+    ...(lastRefreshedAt === undefined ? {} : { lastRefreshedAt }),
+    now,
+  });
   if (!open) return null;
   return (
     <div
@@ -4585,6 +4632,29 @@ function SquadPanel({
             ×
           </button>
         </header>
+        <div className="squad-live-sync">
+          <div aria-live="polite">
+            <span
+              className={`squad-live-dot squad-live-${syncHealth.toLowerCase()}`}
+              aria-hidden="true"
+            />
+            <strong>{t(localSyncHealthKeys[syncHealth])}</strong>
+            {lastRefreshedAt === undefined ? null : (
+              <span>
+                {t("sync.lastRefreshed", {
+                  time: new Date(lastRefreshedAt).toLocaleTimeString(locale),
+                })}
+              </span>
+            )}
+          </div>
+          <button
+            type="button"
+            onClick={() => void refresh(true)}
+            disabled={refreshing}
+          >
+            {refreshing ? t("sync.refreshing") : t("sync.refreshNow")}
+          </button>
+        </div>
         {state?.setup.required ? (
           <NodeSetupForm
             state={state}
@@ -4777,6 +4847,8 @@ const css = `
 .squad-invitation-history{margin:12px 0;border:1px solid var(--dsw-alias-border-l2,#ddd);border-radius:10px;padding:10px 12px}.squad-invitation-history>summary{cursor:pointer;font-size:13px;font-weight:600}.squad-invitation-list{display:grid;gap:8px}.squad-invitation-list>article{display:flex;align-items:center;justify-content:space-between;gap:12px;padding:10px;border-radius:9px;background:var(--dsw-alias-interactive-bg-hover,#f4f5f7)}.squad-invitation-list>article>div{display:grid;gap:3px;min-width:0}.squad-invitation-list span{font-size:11px;color:var(--dsw-alias-label-secondary,#666);overflow-wrap:anywhere}@media(max-width:700px){.squad-invitation-list>article{display:grid}}
 .squad-organization-rename{display:flex;align-items:end;gap:8px;margin:10px 0;flex-wrap:wrap}.squad-organization-rename label{margin:0;min-width:240px}.squad-owner-transfer{display:grid;gap:8px;margin:12px 0;padding:13px;border:1px solid #d59b1b;border-radius:11px;background:#fff8e5;color:#5d470a}.squad-owner-transfer h3,.squad-owner-transfer p{margin:0}.squad-organization-lifecycle{display:flex;justify-content:flex-end;margin-top:16px;padding-top:14px;border-top:1px solid var(--dsw-alias-border-l2,#ddd)}.squad-organization-lifecycle p{margin:0}.squad-owner-transfer-create{display:grid;gap:8px;width:100%}.squad-owner-transfer-create>div{display:flex;align-items:end;justify-content:flex-end;gap:8px;flex-wrap:wrap}.squad-owner-transfer-create label{margin:0;min-width:220px}
 @media(max-width:700px){.squad-context-bar,.squad-organization-intro,.squad-organization-forms{grid-template-columns:1fr}.squad-context-bar{margin:0 12px 10px}.squad-organizations{padding:16px}.squad-member{grid-template-columns:1fr}.squad-organization-card>header{display:grid}}
+.squad-live-sync{display:flex;align-items:center;justify-content:space-between;gap:12px;padding:0 24px 10px;color:var(--dsw-alias-label-secondary,#666);font-size:11px}.squad-live-sync>div{display:flex;align-items:center;gap:7px;min-width:0;flex-wrap:wrap}.squad-live-sync strong{color:var(--dsw-alias-label-primary,#151515)}.squad-live-sync button{border:1px solid var(--dsw-alias-border-l2,#ccc);border-radius:8px;background:transparent;color:inherit;padding:6px 10px;cursor:pointer;white-space:nowrap}.squad-live-sync button:disabled{opacity:.55;cursor:not-allowed}.squad-live-dot{width:8px;height:8px;border-radius:50%;background:#9aa0aa}.squad-live-live{background:#278447}.squad-live-reconnecting,.squad-live-connecting{background:#d59b1b}.squad-live-stale{background:#b13c35}
+@media(max-width:700px){.squad-live-sync{padding:0 16px 10px;align-items:flex-start}.squad-live-sync>div{display:grid;grid-template-columns:auto 1fr}.squad-live-sync>div>span:last-child{grid-column:2}}
 .squad-node-setup{box-sizing:border-box;overflow:auto;width:100%;max-width:720px;padding:4px 0 20px}.squad-onboarding{align-self:center;flex:1;padding:18px 30px 34px}.squad-node-setup>header{margin-bottom:18px}.squad-node-setup>header h2{font-size:26px;margin:7px 0}.squad-node-setup>header p{color:var(--dsw-alias-label-secondary,#666);line-height:1.55;max-width:620px}.squad-step{font-size:11px;letter-spacing:.12em;text-transform:uppercase;color:#315ee8}.squad-node-setup label{display:grid;gap:6px;margin:13px 0;font-size:13px}.squad-node-setup input,.squad-node-setup textarea{box-sizing:border-box;width:100%;border:1px solid var(--dsw-alias-border-l2,#ccc);border-radius:9px;background:transparent;color:inherit;padding:9px;font:inherit}.squad-node-setup input:disabled{opacity:.55}.squad-node-setup small{color:var(--dsw-alias-label-secondary,#666);line-height:1.45}.squad-mode-picker{display:grid;grid-template-columns:1fr 1fr;gap:10px;border:0;margin:18px 0;padding:0}.squad-mode-picker legend{grid-column:1/-1;padding:0 0 8px;font-size:13px;font-weight:600}.squad-node-setup .squad-mode-picker button{display:grid;gap:6px;border:1px solid var(--dsw-alias-border-l2,#ccc);border-radius:12px;background:transparent;color:inherit;padding:14px;text-align:left;cursor:pointer}.squad-node-setup .squad-mode-picker button.active{border-color:#315ee8;background:rgba(49,94,232,.08);box-shadow:inset 0 0 0 1px #315ee8}.squad-mode-picker button span{color:var(--dsw-alias-label-secondary,#666);font-size:12px;line-height:1.4}.squad-setup-fields{padding:2px 14px;border-radius:12px;background:var(--dsw-alias-interactive-bg-hover,#f6f7f9)}.squad-node-setup .squad-check{display:flex;align-items:center;gap:9px}.squad-node-setup .squad-check input{width:auto}.squad-node-setup button[type=submit]{border:0;border-radius:9px;padding:9px 14px;background:#315ee8;color:#fff;cursor:pointer}.squad-node-setup button:disabled{opacity:.55;cursor:not-allowed}.squad-node-setup .squad-secondary{border:1px solid var(--dsw-alias-border-l2,#ccc);border-radius:9px;padding:8px 13px;background:transparent;color:inherit;cursor:pointer}.squad-settings .squad-node-setup{border-bottom:1px solid var(--dsw-alias-border-l2,#ddd);margin-bottom:22px}.squad-settings .squad-node-setup>h2{margin-top:0}.squad-onboarding-join{padding:14px;border:1px solid #315ee8;border-radius:12px;background:rgba(49,94,232,.06)}.squad-onboarding-join h3{margin:0}.squad-onboarding-join p{font-size:12px;color:var(--dsw-alias-label-secondary,#666)}.squad-form-divider{display:flex;align-items:center;gap:10px;margin:18px 0;color:var(--dsw-alias-label-secondary,#666);font-size:12px}.squad-form-divider:before,.squad-form-divider:after{content:"";height:1px;flex:1;background:var(--dsw-alias-border-l2,#ddd)}
 .squad-setup-fields hr{border:0;border-top:1px solid var(--dsw-alias-border-l2,#ddd);margin:16px 0}.squad-connection-required{display:grid;align-content:center;justify-items:start;max-width:620px}.squad-connection-required h2{margin-bottom:0}
 @media(max-width:700px){.squad-onboarding{padding:10px 16px 24px}.squad-mode-picker{grid-template-columns:1fr}.squad-node-setup>header h2{font-size:22px}}

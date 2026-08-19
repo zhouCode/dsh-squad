@@ -150,6 +150,11 @@ export function createHttpHandler(squad: SquadService) {
       if (req.method === "POST" || req.method === "DELETE") {
         assertSameOrigin(req);
       }
+      if (req.method === "POST" && url.pathname === "/squad/v1/local/refresh") {
+        await readJson(req, 1_024);
+        reply(res, 200, await squad.refreshNow());
+        return;
+      }
       if (req.method === "POST" && url.pathname === "/squad/v1/local/setup") {
         const body = await readJson(req, 8 * 1024);
         reply(

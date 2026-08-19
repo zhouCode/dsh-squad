@@ -76,6 +76,8 @@ After dispatch, the plan rolls up live execution progress and collects only the 
 
 Delegation details expose a four-stage created/delivery/execution/result timeline and state exactly whether the local user, local Agent, Relay, peer Node, or automatic retry acts next.
 
+The workbench reports local live-event health and the latest successful read. `Sync now` actively pumps organization, outbox, mailbox, and update state.
+
 Chat triggering stays unobtrusive: use natural language or `@member`, or use namespaced `/squad-*` commands for tasks, plans, status, organizations, members, invitations, and roles. They are discovered through DSH's native `/` menu; this package adds no command buttons.
 
 ## Updates

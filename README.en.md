@@ -74,6 +74,8 @@ After dispatch, the original plan rolls up each item's live queued, running, wai
 
 Each delegation detail expands status into a four-stage `Created → Delivery → Acceptance and execution → Result` timeline and names whether the local user, local Agent, Relay, peer Node, or automatic retry acts next. An offline peer therefore reads as locally queued, persisted by Relay, received by the peer, or executing without requiring users to interpret protocol states.
 
+The workbench header reports whether its local live-event channel is connected, reconnecting, or potentially stale and shows the latest successful state read. `Sync now` actively runs organization, outbox, mailbox, and update synchronization instead of merely repainting a cached snapshot.
+
 The same local Plan API is available for future connectors such as Feishu/Lark to create drafts or read status projections. This version does not include a Feishu/Lark connector and never executes work merely because an external board was edited.
 
 ## Organizations, roles, and Session isolation

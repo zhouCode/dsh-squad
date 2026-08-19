@@ -2893,6 +2893,14 @@ export class SquadService extends Service {
     }
   }
 
+  async refreshNow(): Promise<SquadLocalState> {
+    await this.pump();
+    while (this.#pumping) {
+      await new Promise<void>((resolve) => setImmediate(resolve));
+    }
+    return this.localState();
+  }
+
   localState(): SquadLocalState {
     return {
       setup: {

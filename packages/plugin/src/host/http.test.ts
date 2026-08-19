@@ -200,6 +200,28 @@ describe("Squad host health", () => {
     expect(checkConnections).toHaveBeenCalledOnce();
   });
 
+  it("actively synchronizes before returning refreshed local state", async () => {
+    const refreshNow = vi.fn(async () => ({
+      revision: 42,
+      delegations: [],
+      plans: [],
+    }));
+    const squad = { refreshNow } as unknown as SquadService;
+    const server = createServer(createHttpHandler(squad));
+    servers.push(server);
+    await new Promise<void>((resolve) =>
+      server.listen(0, "127.0.0.1", resolve),
+    );
+    const address = server.address() as AddressInfo;
+    const response = await fetch(
+      `http://127.0.0.1:${address.port}/squad/v1/local/refresh`,
+      { method: "POST", body: "{}" },
+    );
+    expect(response.status).toBe(200);
+    expect(await response.json()).toMatchObject({ revision: 42 });
+    expect(refreshNow).toHaveBeenCalledOnce();
+  });
+
   it("routes organization join rejection through the local API", async () => {
     const organizationId = "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa";
     const requestId = "bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb";
