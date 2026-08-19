@@ -8,6 +8,7 @@ import {
   type FormEvent,
   type KeyboardEvent as ReactKeyboardEvent,
   type ReactElement,
+  type RefObject,
 } from "react";
 import type {
   ClientContext,
@@ -43,6 +44,7 @@ import {
   type AttachmentDraft,
   type AttachmentDraftError,
 } from "./human-input.ts";
+import { masterDetailClassName } from "./master-detail.ts";
 import {
   buildTeamPlanUpdate,
   draftFromTeamPlan,
@@ -4917,6 +4919,21 @@ function Pagination({
   );
 }
 
+function MobileListBack({
+  onBack,
+  t,
+}: {
+  onBack: () => void;
+  t: SquadTranslate;
+}) {
+  return (
+    <button type="button" className="squad-mobile-back" onClick={onBack}>
+      <span aria-hidden="true">←</span>
+      {t("action.backToList")}
+    </button>
+  );
+}
+
 function SquadPanel({
   openSession,
   sessionSource,
@@ -4947,6 +4964,8 @@ function SquadPanel({
   const lastFocused = useRef<HTMLElement | null>(null);
   const panel = useRef<HTMLDivElement>(null);
   const closeButton = useRef<HTMLButtonElement>(null);
+  const listPane = useRef<HTMLElement>(null);
+  const detailPane = useRef<HTMLElement>(null);
 
   const refresh = useCallback(
     async (forceTransport = false) => {
@@ -5086,6 +5105,23 @@ function SquadPanel({
     setPages((current) => ({ ...current, [scope]: page }));
     setSelectedId(undefined);
   };
+  const focusOnCompactLayout = (target: RefObject<HTMLElement | null>) => {
+    if (
+      typeof window.matchMedia !== "function" ||
+      !window.matchMedia("(max-width: 700px)").matches
+    ) {
+      return;
+    }
+    window.requestAnimationFrame(() => target.current?.focus());
+  };
+  const showWorkDetail = (id: string) => {
+    setSelectedId(id);
+    focusOnCompactLayout(detailPane);
+  };
+  const returnToWorkList = () => {
+    setSelectedId(undefined);
+    focusOnCompactLayout(listPane);
+  };
   const openPlanDelegation = (
     id: string,
     status: DelegationStatus,
@@ -5094,6 +5130,7 @@ function SquadPanel({
     if (archivedAt !== undefined) {
       setTab("archived");
       setSelectedId(`delegation:${id}`);
+      focusOnCompactLayout(detailPane);
       return;
     }
     setTab(
@@ -5102,6 +5139,7 @@ function SquadPanel({
         : "sent",
     );
     setSelectedId(id);
+    focusOnCompactLayout(detailPane);
   };
   const attention = state === undefined ? undefined : localAttention(state);
   const locale = getLocale() === "zh" ? "zh-CN" : "en";
@@ -5295,8 +5333,8 @@ function SquadPanel({
         ) : tab === "settings" && state ? (
           <Settings state={state} refresh={refresh} t={t} />
         ) : tab === "archived" && state ? (
-          <div className="squad-content">
-            <aside className="squad-list">
+          <div className={masterDetailClassName(selectedId)}>
+            <aside ref={listPane} className="squad-list" tabIndex={-1}>
               {archivedItems.length === 0 ? (
                 <p className="squad-empty">{t("empty.archived")}</p>
               ) : null}
@@ -5304,7 +5342,7 @@ function SquadPanel({
                 <button
                   key={item.key}
                   className={selectedArchived?.key === item.key ? "active" : ""}
-                  onClick={() => setSelectedId(item.key)}
+                  onClick={() => showWorkDetail(item.key)}
                 >
                   <strong>
                     {item.kind === "DELEGATION"
@@ -5325,7 +5363,8 @@ function SquadPanel({
                 t={t}
               />
             </aside>
-            <main>
+            <main ref={detailPane} tabIndex={-1}>
+              <MobileListBack onBack={returnToWorkList} t={t} />
               {selectedArchived?.kind === "DELEGATION" ? (
                 <DelegationDetail
                   item={selectedArchived.delegation}
@@ -5347,8 +5386,8 @@ function SquadPanel({
             </main>
           </div>
         ) : tab === "plans" && state ? (
-          <div className="squad-content">
-            <aside className="squad-list">
+          <div className={masterDetailClassName(selectedId)}>
+            <aside ref={listPane} className="squad-list" tabIndex={-1}>
               {plans.length === 0 ? (
                 <p className="squad-empty">{t("empty.plans")}</p>
               ) : null}
@@ -5356,7 +5395,7 @@ function SquadPanel({
                 <button
                   key={plan.id}
                   className={selectedPlan?.id === plan.id ? "active" : ""}
-                  onClick={() => setSelectedId(plan.id)}
+                  onClick={() => showWorkDetail(plan.id)}
                 >
                   <strong>{plan.title}</strong>
                   <span>
@@ -5374,7 +5413,8 @@ function SquadPanel({
                 t={t}
               />
             </aside>
-            <main>
+            <main ref={detailPane} tabIndex={-1}>
+              <MobileListBack onBack={returnToWorkList} t={t} />
               {selectedPlan ? (
                 <TeamPlanDetail
                   plan={selectedPlan}
@@ -5389,8 +5429,8 @@ function SquadPanel({
             </main>
           </div>
         ) : (
-          <div className="squad-content">
-            <aside className="squad-list">
+          <div className={masterDetailClassName(selectedId)}>
+            <aside ref={listPane} className="squad-list" tabIndex={-1}>
               {items.length === 0 ? (
                 <p className="squad-empty">
                   {tab === "sent"
@@ -5404,7 +5444,7 @@ function SquadPanel({
                 <button
                   key={item.id}
                   className={selected?.id === item.id ? "active" : ""}
-                  onClick={() => setSelectedId(item.id)}
+                  onClick={() => showWorkDetail(item.id)}
                 >
                   <strong>{item.objective}</strong>
                   <span>
@@ -5419,7 +5459,8 @@ function SquadPanel({
                 t={t}
               />
             </aside>
-            <main>
+            <main ref={detailPane} tabIndex={-1}>
+              <MobileListBack onBack={returnToWorkList} t={t} />
               {selected ? (
                 <DelegationDetail
                   item={selected}
@@ -5440,9 +5481,9 @@ function SquadPanel({
 
 const css = `
 .squad-trigger:focus-visible,.squad-overlay :is(button,a,input,select,textarea,[tabindex]):focus-visible{outline:3px solid #315ee8;outline-offset:2px}
-.squad-trigger{appearance:none;border:0;background:transparent;color:var(--dsw-alias-label-primary);cursor:pointer;border-radius:10px;display:flex;align-items:center;justify-content:center;gap:8px;height:36px;padding:0 9px;font:inherit;white-space:nowrap}.squad-trigger:hover{background:var(--dsw-alias-interactive-bg-hover)}.squad-trigger-wide{width:100%;justify-content:flex-start}.squad-trigger-icon{font-size:20px;line-height:1}.squad-overlay{position:fixed;inset:0;z-index:1000;pointer-events:none}.squad-backdrop{position:absolute;inset:0;border:0;background:rgba(10,14,22,.34);pointer-events:auto}.squad-panel{position:absolute;pointer-events:auto;top:12px;bottom:12px;right:12px;width:min(920px,calc(100vw - 24px));border:1px solid var(--dsw-alias-border-l2,#ddd);border-radius:18px;background:var(--dsw-specific-dialog-fill,#fff);color:var(--dsw-alias-label-primary,#151515);box-shadow:0 18px 60px rgba(0,0,0,.24);display:flex;flex-direction:column;overflow:hidden}.squad-panel-head{display:flex;justify-content:space-between;align-items:center;padding:22px 24px 12px}.squad-panel-head h1{font-size:24px;margin:2px 0}.squad-eyebrow{font-size:11px;letter-spacing:.14em;text-transform:uppercase;color:var(--dsw-alias-label-secondary,#666)}.squad-close{border:0;background:transparent;color:inherit;font-size:30px;cursor:pointer}.squad-tabs{display:flex;gap:4px;padding:0 18px 14px;overflow:auto;border-bottom:1px solid var(--dsw-alias-border-l2,#ddd)}.squad-tabs button{border:0;border-radius:999px;background:transparent;color:var(--dsw-alias-label-secondary,#666);padding:7px 12px;cursor:pointer;white-space:nowrap}.squad-tabs button.active{background:var(--dsw-alias-interactive-bg-hover,#eee);color:var(--dsw-alias-label-primary,#111)}.squad-content{display:grid;grid-template-columns:290px minmax(0,1fr);min-height:0;flex:1}.squad-list{border-right:1px solid var(--dsw-alias-border-l2,#ddd);padding:10px;overflow:auto}.squad-list button{display:block;width:100%;text-align:left;border:0;background:transparent;color:inherit;border-radius:12px;padding:12px;cursor:pointer}.squad-list button:hover,.squad-list button.active{background:var(--dsw-alias-interactive-bg-hover,#eee)}.squad-list strong,.squad-list span{display:block}.squad-list strong{overflow:hidden;text-overflow:ellipsis;white-space:nowrap}.squad-list span{font-size:12px;margin-top:5px;color:var(--dsw-alias-label-secondary,#666)}.squad-content main,.squad-settings{overflow:auto;padding:22px 26px}.squad-detail>header{display:flex;align-items:center;gap:10px}.squad-detail h2{font-size:22px;line-height:1.35}.squad-detail h3,.squad-settings h3{font-size:14px;margin:24px 0 8px}.squad-detail dl{display:grid;gap:5px}.squad-detail dl div{display:grid;grid-template-columns:78px 1fr;gap:10px}.squad-detail dt{color:var(--dsw-alias-label-secondary,#666)}.squad-detail dd{margin:0;overflow-wrap:anywhere}.squad-status{font-size:11px;font-weight:700;border-radius:999px;padding:4px 8px;background:#e8edf6}.squad-status-completed,.squad-plan-status-dispatched{background:#dff5e6;color:#176c35}.squad-status-failed,.squad-status-rejected,.squad-plan-status-partial{background:#fde4e1;color:#a52a24}.squad-status-waiting_human,.squad-plan-status-draft,.squad-plan-status-dispatching{background:#fff0c7;color:#755400}.squad-direction,.squad-muted{color:var(--dsw-alias-label-secondary,#666);font-size:12px}.squad-prewrap{white-space:pre-wrap;overflow-wrap:anywhere}.squad-todo{border-left:3px solid #d59b1b;padding:2px 12px;margin:10px 0}.squad-todo p{margin:5px 0}.squad-todo-select{display:flex!important;align-items:center;grid-template-columns:auto 1fr!important}.squad-todo-select input{width:auto!important}.squad-detail label,.squad-settings label{display:grid;gap:6px;margin:12px 0;font-size:13px}.squad-detail textarea,.squad-settings textarea,.squad-settings input,.squad-settings select{box-sizing:border-box;width:100%;border:1px solid var(--dsw-alias-border-l2,#ccc);border-radius:9px;background:transparent;color:inherit;padding:9px;font:inherit}.squad-actions{display:flex;gap:8px;margin:12px 0;flex-wrap:wrap}.squad-detail button,.squad-settings button{border:0;border-radius:9px;padding:8px 12px;background:#315ee8;color:#fff;cursor:pointer}.squad-detail button:disabled{opacity:.5}.squad-detail .squad-danger{background:#b13c35}.squad-detail .squad-link-button{display:block;margin:9px 0;background:transparent;color:#315ee8;padding-left:0}.squad-error{color:#b13c35}.squad-load-error{padding:0 24px}.squad-empty{color:var(--dsw-alias-label-secondary,#666);padding:12px}.squad-settings{max-width:680px}.squad-settings code,.squad-peer code,.squad-plan-item code{display:block;overflow-wrap:anywhere;font-size:11px}.squad-peer{display:grid;grid-template-columns:150px 1fr auto;gap:10px;padding:10px 0;border-bottom:1px solid var(--dsw-alias-border-l2,#ddd)}.squad-plan-items{display:grid;gap:12px}.squad-plan-item{border:1px solid var(--dsw-alias-border-l2,#ddd);border-radius:12px;padding:14px}.squad-plan-item>header{display:flex;align-items:flex-start;justify-content:space-between;gap:12px}.squad-plan-item>header strong{line-height:1.4}.squad-plan-item-status{font-size:11px;white-space:nowrap;color:var(--dsw-alias-label-secondary,#666)}.squad-plan-item-status-failed{color:#b13c35}.squad-plan-item-status-dispatched{color:#176c35}.squad-plan-item dl{margin-bottom:0}.squad-plan-item ul{margin:4px 0;padding-left:20px}.squad-plan-item a{color:#315ee8}
+.squad-trigger{appearance:none;border:0;background:transparent;color:var(--dsw-alias-label-primary);cursor:pointer;border-radius:10px;display:flex;align-items:center;justify-content:center;gap:8px;height:36px;padding:0 9px;font:inherit;white-space:nowrap}.squad-trigger:hover{background:var(--dsw-alias-interactive-bg-hover)}.squad-trigger-wide{width:100%;justify-content:flex-start}.squad-trigger-icon{font-size:20px;line-height:1}.squad-overlay{position:fixed;inset:0;z-index:1000;pointer-events:none}.squad-backdrop{position:absolute;inset:0;border:0;background:rgba(10,14,22,.34);pointer-events:auto}.squad-panel{position:absolute;pointer-events:auto;top:12px;bottom:12px;right:12px;width:min(920px,calc(100vw - 24px));border:1px solid var(--dsw-alias-border-l2,#ddd);border-radius:18px;background:var(--dsw-specific-dialog-fill,#fff);color:var(--dsw-alias-label-primary,#151515);box-shadow:0 18px 60px rgba(0,0,0,.24);display:flex;flex-direction:column;overflow:hidden}.squad-panel-head{display:flex;justify-content:space-between;align-items:center;padding:22px 24px 12px}.squad-panel-head h1{font-size:24px;margin:2px 0}.squad-eyebrow{font-size:11px;letter-spacing:.14em;text-transform:uppercase;color:var(--dsw-alias-label-secondary,#666)}.squad-close{border:0;background:transparent;color:inherit;font-size:30px;cursor:pointer}.squad-tabs{display:flex;gap:4px;padding:0 18px 14px;overflow:auto;border-bottom:1px solid var(--dsw-alias-border-l2,#ddd)}.squad-tabs button{border:0;border-radius:999px;background:transparent;color:var(--dsw-alias-label-secondary,#666);padding:7px 12px;cursor:pointer;white-space:nowrap}.squad-tabs button.active{background:var(--dsw-alias-interactive-bg-hover,#eee);color:var(--dsw-alias-label-primary,#111)}.squad-content{display:grid;grid-template-columns:290px minmax(0,1fr);min-height:0;flex:1}.squad-list{border-right:1px solid var(--dsw-alias-border-l2,#ddd);padding:10px;overflow:auto}.squad-list button{display:block;width:100%;text-align:left;border:0;background:transparent;color:inherit;border-radius:12px;padding:12px;cursor:pointer}.squad-list button:hover,.squad-list button.active{background:var(--dsw-alias-interactive-bg-hover,#eee)}.squad-list strong,.squad-list span{display:block}.squad-list strong{overflow:hidden;text-overflow:ellipsis;white-space:nowrap}.squad-list span{font-size:12px;margin-top:5px;color:var(--dsw-alias-label-secondary,#666)}.squad-content main,.squad-settings{overflow:auto;padding:22px 26px}.squad-mobile-back{display:none}.squad-detail>header{display:flex;align-items:center;gap:10px}.squad-detail h2{font-size:22px;line-height:1.35}.squad-detail h3,.squad-settings h3{font-size:14px;margin:24px 0 8px}.squad-detail dl{display:grid;gap:5px}.squad-detail dl div{display:grid;grid-template-columns:78px 1fr;gap:10px}.squad-detail dt{color:var(--dsw-alias-label-secondary,#666)}.squad-detail dd{margin:0;overflow-wrap:anywhere}.squad-status{font-size:11px;font-weight:700;border-radius:999px;padding:4px 8px;background:#e8edf6}.squad-status-completed,.squad-plan-status-dispatched{background:#dff5e6;color:#176c35}.squad-status-failed,.squad-status-rejected,.squad-plan-status-partial{background:#fde4e1;color:#a52a24}.squad-status-waiting_human,.squad-plan-status-draft,.squad-plan-status-dispatching{background:#fff0c7;color:#755400}.squad-direction,.squad-muted{color:var(--dsw-alias-label-secondary,#666);font-size:12px}.squad-prewrap{white-space:pre-wrap;overflow-wrap:anywhere}.squad-todo{border-left:3px solid #d59b1b;padding:2px 12px;margin:10px 0}.squad-todo p{margin:5px 0}.squad-todo-select{display:flex!important;align-items:center;grid-template-columns:auto 1fr!important}.squad-todo-select input{width:auto!important}.squad-detail label,.squad-settings label{display:grid;gap:6px;margin:12px 0;font-size:13px}.squad-detail textarea,.squad-settings textarea,.squad-settings input,.squad-settings select{box-sizing:border-box;width:100%;border:1px solid var(--dsw-alias-border-l2,#ccc);border-radius:9px;background:transparent;color:inherit;padding:9px;font:inherit}.squad-actions{display:flex;gap:8px;margin:12px 0;flex-wrap:wrap}.squad-detail button,.squad-settings button{border:0;border-radius:9px;padding:8px 12px;background:#315ee8;color:#fff;cursor:pointer}.squad-detail button:disabled{opacity:.5}.squad-detail .squad-danger{background:#b13c35}.squad-detail .squad-link-button{display:block;margin:9px 0;background:transparent;color:#315ee8;padding-left:0}.squad-error{color:#b13c35}.squad-load-error{padding:0 24px}.squad-empty{color:var(--dsw-alias-label-secondary,#666);padding:12px}.squad-settings{max-width:680px}.squad-settings code,.squad-peer code,.squad-plan-item code{display:block;overflow-wrap:anywhere;font-size:11px}.squad-peer{display:grid;grid-template-columns:150px 1fr auto;gap:10px;padding:10px 0;border-bottom:1px solid var(--dsw-alias-border-l2,#ddd)}.squad-plan-items{display:grid;gap:12px}.squad-plan-item{border:1px solid var(--dsw-alias-border-l2,#ddd);border-radius:12px;padding:14px}.squad-plan-item>header{display:flex;align-items:flex-start;justify-content:space-between;gap:12px}.squad-plan-item>header strong{line-height:1.4}.squad-plan-item-status{font-size:11px;white-space:nowrap;color:var(--dsw-alias-label-secondary,#666)}.squad-plan-item-status-failed{color:#b13c35}.squad-plan-item-status-dispatched{color:#176c35}.squad-plan-item dl{margin-bottom:0}.squad-plan-item ul{margin:4px 0;padding-left:20px}.squad-plan-item a{color:#315ee8}
 .squad-delegation-progress{margin:18px 0;padding:14px;border:1px solid var(--dsw-alias-border-l2,#ddd);border-radius:12px}.squad-delegation-progress h3{margin:0 0 12px}.squad-delegation-progress ol{display:grid;grid-template-columns:repeat(4,minmax(0,1fr));gap:0;margin:0;padding:0;list-style:none}.squad-delegation-progress li{position:relative;display:grid;grid-template-columns:14px minmax(0,1fr);gap:7px;padding-right:8px}.squad-delegation-progress li:not(:last-child):after{content:"";position:absolute;top:6px;left:12px;right:-2px;height:2px;background:var(--dsw-alias-border-l2,#ddd)}.squad-progress-marker{z-index:1;width:10px;height:10px;border:2px solid var(--dsw-alias-border-l2,#aaa);border-radius:50%;background:var(--dsw-specific-dialog-fill,#fff)}.squad-delegation-progress li>div{z-index:1;display:grid;align-content:start;gap:3px;min-width:0;background:var(--dsw-specific-dialog-fill,#fff)}.squad-delegation-progress li strong{font-size:12px}.squad-delegation-progress li small,.squad-delegation-progress li time,.squad-delegation-progress li span{font-size:10px;color:var(--dsw-alias-label-secondary,#666);overflow-wrap:anywhere}.squad-delegation-progress .squad-progress-done .squad-progress-marker{border-color:#278447;background:#278447}.squad-delegation-progress .squad-progress-current .squad-progress-marker{border-color:#315ee8;background:#315ee8;box-shadow:0 0 0 3px rgba(49,94,232,.15)}.squad-delegation-progress .squad-progress-error .squad-progress-marker{border-color:#b13c35;background:#b13c35}.squad-next-action{display:grid;gap:3px;margin-top:14px;padding:10px;border-radius:9px;background:var(--dsw-alias-interactive-bg-hover,#f4f5f7)}.squad-next-action strong{font-size:11px}.squad-next-action span{font-size:12px}
-@media(max-width:700px){.squad-panel{inset:0;width:auto;border-radius:0}.squad-content{grid-template-columns:1fr}.squad-list{max-height:180px;border-right:0;border-bottom:1px solid var(--dsw-alias-border-l2,#ddd)}.squad-peer{grid-template-columns:1fr}.squad-panel-head{padding:16px}.squad-content main,.squad-settings{padding:16px}}
+@media(max-width:700px){.squad-panel{inset:0;width:auto;border-radius:0}.squad-content{display:block}.squad-content:not(.squad-detail-open)>main{display:none}.squad-content.squad-detail-open>.squad-list{display:none}.squad-content.squad-detail-open>main{display:block}.squad-list{box-sizing:border-box;height:100%;max-height:none;border-right:0;border-bottom:0}.squad-content main{box-sizing:border-box;height:100%}.squad-mobile-back{position:sticky;z-index:2;top:-16px;display:inline-flex;align-items:center;gap:7px;min-height:44px;margin:-5px 0 8px;padding:8px 12px;border:1px solid var(--dsw-alias-border-l2,#ccc);border-radius:9px;background:var(--dsw-specific-dialog-fill,#fff);color:inherit;cursor:pointer}.squad-tabs button,.squad-list button,.squad-actions button,.squad-close{min-height:44px}.squad-peer{grid-template-columns:1fr}.squad-panel-head{padding:12px 16px 8px}.squad-content main,.squad-settings{padding:16px}}
 .squad-context-bar{display:grid;grid-template-columns:minmax(150px,1fr) minmax(150px,1fr) minmax(220px,1.4fr);gap:14px;margin:0 22px 12px;padding:12px 14px;border:1px solid var(--dsw-alias-border-l2,#ddd);border-radius:12px;background:var(--dsw-alias-interactive-bg-hover,#f6f7f9)}.squad-context-bar>div,.squad-context-bar>label{display:grid;align-content:start;gap:4px;min-width:0;margin:0;font-size:12px}.squad-context-bar span,.squad-context-bar small{color:var(--dsw-alias-label-secondary,#666)}.squad-context-bar code{overflow:hidden;text-overflow:ellipsis;white-space:nowrap}.squad-context-bar select,.squad-organizations input,.squad-organizations textarea,.squad-organizations select,.squad-peer select{box-sizing:border-box;width:100%;border:1px solid var(--dsw-alias-border-l2,#ccc);border-radius:9px;background:var(--dsw-specific-dialog-fill,#fff);color:inherit;padding:8px;font:inherit}.squad-organizations{overflow:auto;padding:20px 24px;flex:1}.squad-organizations button{border:0;border-radius:9px;padding:8px 12px;background:#315ee8;color:#fff;cursor:pointer}.squad-organizations button:disabled{opacity:.5}.squad-organizations .squad-danger{background:#b13c35}.squad-organizations .squad-secondary{border:1px solid var(--dsw-alias-border-l2,#ccc);background:transparent;color:inherit}.squad-organization-intro{display:grid;grid-template-columns:1fr 1.35fr;gap:22px}.squad-organization-intro h2,.squad-organization-card h2{margin:0}.squad-organization-forms{display:grid;grid-template-columns:1fr 1fr;gap:12px}.squad-organization-forms form{border:1px solid var(--dsw-alias-border-l2,#ddd);border-radius:12px;padding:12px}.squad-organization-forms h3{margin:0 0 8px;font-size:13px}.squad-organizations label{display:grid;gap:5px;margin:8px 0;font-size:12px}.squad-organization-list{display:grid;gap:16px;margin-top:18px}.squad-organization-card{border:1px solid var(--dsw-alias-border-l2,#ddd);border-radius:14px;padding:16px}.squad-organization-card>header{display:flex;justify-content:space-between;gap:16px}.squad-organization-card code,.squad-invitation-result code,.squad-member code,.squad-join-request code{display:block;font-size:11px;overflow-wrap:anywhere}.squad-organization-badges{display:flex;align-items:flex-start;gap:6px}.squad-organization-badges span,.squad-member-role>span{font-size:11px;border-radius:999px;padding:4px 8px;background:var(--dsw-alias-interactive-bg-hover,#eee);white-space:nowrap}.squad-organization-admin{display:flex;align-items:end;gap:8px;margin:12px 0;flex-wrap:wrap}.squad-organization-admin label{margin:0;max-width:210px}.squad-join-request{display:flex;align-items:center;justify-content:space-between;gap:12px;padding:9px 0;border-bottom:1px solid var(--dsw-alias-border-l2,#ddd)}.squad-join-actions{display:flex;gap:7px;flex-wrap:wrap}.squad-member-list{display:grid;gap:8px}.squad-member{display:grid;grid-template-columns:minmax(170px,1.4fr) minmax(130px,.8fr) minmax(150px,1fr) auto;align-items:center;gap:10px;padding:10px;border-radius:10px;background:var(--dsw-alias-interactive-bg-hover,#f4f5f7)}.squad-member-role{display:flex;align-items:center;gap:6px}.squad-policy-control{margin:0!important}.squad-invitation-result{display:grid;gap:7px;margin-top:14px;padding:13px;border:1px solid #d59b1b;border-radius:12px;background:#fff8e5;color:#5d470a}.squad-notice{padding:10px 12px;border-radius:9px;background:#dff5e6;color:#176c35}.squad-warning{padding:10px 12px;border-radius:9px;background:#fff0c7;color:#755400;font-size:12px}
 .squad-invitation-history{margin:12px 0;border:1px solid var(--dsw-alias-border-l2,#ddd);border-radius:10px;padding:10px 12px}.squad-invitation-history>summary{cursor:pointer;font-size:13px;font-weight:600}.squad-invitation-list{display:grid;gap:8px}.squad-invitation-list>article{display:flex;align-items:center;justify-content:space-between;gap:12px;padding:10px;border-radius:9px;background:var(--dsw-alias-interactive-bg-hover,#f4f5f7)}.squad-invitation-list>article>div{display:grid;gap:3px;min-width:0}.squad-invitation-list span{font-size:11px;color:var(--dsw-alias-label-secondary,#666);overflow-wrap:anywhere}@media(max-width:700px){.squad-invitation-list>article{display:grid}}
 .squad-organization-rename{display:flex;align-items:end;gap:8px;margin:10px 0;flex-wrap:wrap}.squad-organization-rename label{margin:0;min-width:240px}.squad-owner-transfer{display:grid;gap:8px;margin:12px 0;padding:13px;border:1px solid #d59b1b;border-radius:11px;background:#fff8e5;color:#5d470a}.squad-owner-transfer h3,.squad-owner-transfer p{margin:0}.squad-organization-lifecycle{display:flex;justify-content:flex-end;margin-top:16px;padding-top:14px;border-top:1px solid var(--dsw-alias-border-l2,#ddd)}.squad-organization-lifecycle p{margin:0}.squad-owner-transfer-create{display:grid;gap:8px;width:100%}.squad-owner-transfer-create>div{display:flex;align-items:end;justify-content:flex-end;gap:8px;flex-wrap:wrap}.squad-owner-transfer-create label{margin:0;min-width:220px}

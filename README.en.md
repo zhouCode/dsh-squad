@@ -18,6 +18,7 @@ DSH Squad turns personal Agents running on different computers, networks, and lo
 - **Per-person trust with enforced limits**: every direct Peer or organization member can be set to always ask, match local rules only, or always auto-run. A local rule matches the full objective and enforces tools, attachments, preset, runtime, and token limits; no match means human confirmation.
 - **No YAML edit for first-time setup**: open `Agent Inbox` to choose Relay or Direct, validate the connection, and save it locally through the Simplified Chinese or English guide; change it later in Settings.
 - **Operable by keyboard and assistive technology**: the workbench contains and restores focus, supports Escape, Tab loops, and arrow-key tab navigation, never relies on color alone for status, and honors reduced-motion preferences.
+- **Practical on compact screens**: Delegations, plans, and archives use list → single detail → back navigation on mobile instead of squeezing a short list above a long record; desktop retains the two-pane layout.
 - **Native to DSH**: work runs in the recipient's existing Agent, Session, Skill catalog, tools, and Permission/Approval flow, without a second runtime or standalone management platform.
 
 ## Two team modes

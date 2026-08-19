@@ -88,6 +88,8 @@ Chat triggering stays unobtrusive: use natural language or `@member`, or use nam
 
 The workbench is a keyboard-contained modal with focus restoration, Escape handling, Tab loops, Arrow/Home/End tab navigation, explicit focus indicators, text-backed status cues, and reduced-motion support.
 
+On compact screens, Delegations, plans, and archives switch from the desktop two-pane layout to a full-height list followed by one focused detail view with an explicit back action and touch-sized controls.
+
 ## Updates
 
 v0.5.0 adds `Agent Inbox → Updates` and a separate `dsh-squad-update` executable. The default is notify-only; users may instead disable checks or opt into installation while the Node is idle. The plugin process never replaces itself. Only a separately configured systemd updater may stop the service, back up the profile and explicit data paths, install a GitHub Release verified by both an Ed25519-signed manifest and SHA-256, restart, and check the reported version. Failure restores the old profile and data.
