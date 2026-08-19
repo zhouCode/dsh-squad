@@ -9,6 +9,7 @@ All notable changes to this project are documented in this file. The format is b
 - Delegation details now show a four-stage created/delivery/execution/result timeline and an explicit next actor, distinguishing local retry, Relay persistence, peer receipt, local human input, execution, and terminal outcomes.
 - The Squad workbench now reports whether its local server-sent event stream is live, reconnecting, or stale, records the latest successful state read, and offers a `Sync now` action that runs a complete organization/outbox/mailbox/update pump before returning state.
 - Delegation and Team Planner lists now paginate independently in batches of 25, preserve each tab's position, clamp safely when data shrinks, and jump to the page containing a delegation opened from a plan.
+- Terminal delegations and fully dispatched or canceled plans can be moved into one reversible local archive. Archived failures leave attention counts, while records, results, plan items, and audit history remain intact and restorable.
 - Team Planner now rolls up live execution state, result summaries, and published outputs for every dispatched item, with direct navigation to its full delegation record.
 - Organization Owners and Admins can explicitly reject pending join requests; rejected applicants require a new one-time invitation before reapplying.
 - Organization invitation history exposes active, used, expired, and revoked states without returning secret tokens or hashes, and managers can revoke unused invitations.

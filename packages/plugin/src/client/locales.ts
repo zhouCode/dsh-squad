@@ -28,6 +28,7 @@ export const zh = {
   "tab.running": "运行中",
   "tab.sent": "已发送",
   "tab.completed": "已完成",
+  "tab.archived": "归档",
   "tab.organizations": "组织",
   "tab.diagnostics": "连接诊断",
   "tab.updates": "更新",
@@ -99,6 +100,7 @@ export const zh = {
   "field.planItems": "计划项",
   "field.delegationId": "委派 ID",
   "field.updatedAt": "最近更新",
+  "field.archivedAt": "归档时间",
   "action.completeSelected": "完成所选项",
   "action.submitTodo": "提交此项并继续",
   "action.addAttachment": "添加附件引用",
@@ -152,6 +154,8 @@ export const zh = {
   "action.copyPrompt": "复制示例",
   "action.retry": "重试",
   "action.cancel": "返回",
+  "action.archive": "移入归档",
+  "action.restore": "恢复到工作列表",
   "confirm.rejectTitle": "拒绝这个任务？",
   "confirm.rejectDelegation":
     "拒绝后，发送方会收到明确的拒绝状态。任务：“{objective}”",
@@ -181,6 +185,12 @@ export const zh = {
   "confirm.cancelPlanTitle": "取消计划中的剩余项？",
   "confirm.cancelPlan":
     "“{title}”中尚未发送的计划项会被取消；已经发出的任务不会自动撤回。",
+  "confirm.archiveDelegationTitle": "归档这条委派？",
+  "confirm.archiveDelegation":
+    "“{objective}”会从日常工作列表和关注计数中移除，但完整记录、结果和审计信息都会保留，可随时恢复。",
+  "confirm.archivePlanTitle": "归档这个分派计划？",
+  "confirm.archivePlan":
+    "“{title}”会从计划列表移除，但计划项和已有委派不会删除或停止，可随时恢复。",
   "confirm.approveJoinTitle": "批准成员加入？",
   "confirm.approveJoin":
     "“{name}”将加入“{organization}”，并可查看成员目录和接收组织任务。",
@@ -548,6 +558,10 @@ export const zh = {
   "empty.sent":
     "还没有发出的委派。可以直接在 DSH 会话中告诉 Agent 要委派给谁、完成什么。",
   "empty.completed": "尚无已结束的委派。",
+  "empty.archived": "归档中还没有委派或分派计划。",
+  "empty.archiveSelection": "请选择一条归档记录。",
+  "archive.delegation": "委派",
+  "archive.plan": "分派计划",
   "status.QUEUED": "已排队",
   "status.RECEIVED": "已接收",
   "status.TRIAGING": "评估中",
@@ -698,6 +712,7 @@ export const en = {
   "tab.running": "Running",
   "tab.sent": "Sent",
   "tab.completed": "Completed",
+  "tab.archived": "Archive",
   "tab.organizations": "Organizations",
   "tab.diagnostics": "Connection",
   "tab.updates": "Updates",
@@ -772,6 +787,7 @@ export const en = {
   "field.planItems": "Plan items",
   "field.delegationId": "Delegation ID",
   "field.updatedAt": "Last updated",
+  "field.archivedAt": "Archived",
   "action.completeSelected": "Complete selected",
   "action.submitTodo": "Submit this item and continue",
   "action.addAttachment": "Add attachment reference",
@@ -825,6 +841,8 @@ export const en = {
   "action.copyPrompt": "Copy example",
   "action.retry": "Retry",
   "action.cancel": "Go back",
+  "action.archive": "Move to archive",
+  "action.restore": "Restore to work lists",
   "confirm.rejectTitle": "Reject this task?",
   "confirm.rejectDelegation":
     "The sender receives an explicit rejected status. Task: “{objective}”",
@@ -854,6 +872,12 @@ export const en = {
   "confirm.cancelPlanTitle": "Cancel remaining plan items?",
   "confirm.cancelPlan":
     "Unsent items in “{title}” will be canceled. Tasks already sent are not recalled automatically.",
+  "confirm.archiveDelegationTitle": "Archive this delegation?",
+  "confirm.archiveDelegation":
+    "“{objective}” will leave daily work lists and attention counts. Its complete record, results, and audit data remain available and can be restored at any time.",
+  "confirm.archivePlanTitle": "Archive this delegation plan?",
+  "confirm.archivePlan":
+    "“{title}” will leave the plan list. Its items and existing delegations are neither deleted nor stopped, and the plan can be restored at any time.",
   "confirm.approveJoinTitle": "Approve this member?",
   "confirm.approveJoin":
     "“{name}” will join “{organization}” and can see its member directory and receive organization tasks.",
@@ -1234,6 +1258,10 @@ export const en = {
   "empty.sent":
     "No outgoing delegations yet. Tell the Agent who should receive a task and what should be completed.",
   "empty.completed": "No finished delegations yet.",
+  "empty.archived": "No archived delegations or plans.",
+  "empty.archiveSelection": "Select an archived record.",
+  "archive.delegation": "Delegation",
+  "archive.plan": "Delegation plan",
   "status.QUEUED": "Queued",
   "status.RECEIVED": "Received",
   "status.TRIAGING": "Triaging",

@@ -2040,12 +2040,36 @@ export class SquadService extends Service {
     return Promise.resolve(this.database.cancelTeamPlan(id));
   }
 
+  archiveTeamPlan(id: string): Promise<TeamPlan> {
+    const plan = this.database.archiveTeamPlan(id);
+    this.touchLocalState();
+    return Promise.resolve(plan);
+  }
+
+  restoreTeamPlan(id: string): Promise<TeamPlan> {
+    const plan = this.database.restoreTeamPlan(id);
+    this.touchLocalState();
+    return Promise.resolve(plan);
+  }
+
   getDelegation(id: string): Promise<DelegationView | undefined> {
     return Promise.resolve(this.database.getDelegation(id));
   }
 
   listInbox(): Promise<DelegationView[]> {
     return Promise.resolve(this.database.listDelegations());
+  }
+
+  archiveDelegation(id: string): Promise<DelegationView> {
+    const delegation = this.database.archiveDelegation(id);
+    this.touchLocalState();
+    return Promise.resolve(delegation);
+  }
+
+  restoreDelegation(id: string): Promise<DelegationView> {
+    const delegation = this.database.restoreDelegation(id);
+    this.touchLocalState();
+    return Promise.resolve(delegation);
   }
 
   async acceptDelegation(id: string): Promise<void> {

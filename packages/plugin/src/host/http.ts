@@ -630,7 +630,7 @@ export function createHttpHandler(squad: SquadService) {
         return;
       }
       const action =
-        /^\/squad\/v1\/local\/delegations\/([0-9a-f-]{36})\/(accept|reject|human-input|retry|cancel)$/u.exec(
+        /^\/squad\/v1\/local\/delegations\/([0-9a-f-]{36})\/(accept|reject|human-input|retry|cancel|archive|restore)$/u.exec(
           url.pathname,
         );
       if (
@@ -666,11 +666,19 @@ export function createHttpHandler(squad: SquadService) {
             body.reason === undefined ? undefined : String(body.reason),
           );
         }
+        if (action[2] === "archive") {
+          reply(res, 200, await squad.archiveDelegation(action[1]));
+          return;
+        }
+        if (action[2] === "restore") {
+          reply(res, 200, await squad.restoreDelegation(action[1]));
+          return;
+        }
         reply(res, 200, { ok: true });
         return;
       }
       const planAction =
-        /^\/squad\/v1\/local\/plans\/([0-9a-f-]{36})\/(approve|retry|cancel)$/u.exec(
+        /^\/squad\/v1\/local\/plans\/([0-9a-f-]{36})\/(approve|retry|cancel|archive|restore)$/u.exec(
           url.pathname,
         );
       if (
@@ -681,7 +689,11 @@ export function createHttpHandler(squad: SquadService) {
         const plan =
           planAction[2] === "cancel"
             ? await squad.cancelTeamPlan(planAction[1])
-            : await squad.approveTeamPlan(planAction[1]);
+            : planAction[2] === "archive"
+              ? await squad.archiveTeamPlan(planAction[1])
+              : planAction[2] === "restore"
+                ? await squad.restoreTeamPlan(planAction[1])
+                : await squad.approveTeamPlan(planAction[1]);
         reply(res, 200, plan);
         return;
       }

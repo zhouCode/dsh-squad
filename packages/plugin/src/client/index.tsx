@@ -119,6 +119,7 @@ interface DelegationView {
   createdAt: string;
   updatedAt: string;
   completedAt?: string;
+  archivedAt?: string;
   todos: TodoView[];
 }
 
@@ -162,6 +163,22 @@ interface LocalState {
   updates: UpdateSnapshot;
   connection: SquadConnectionDiagnostics;
 }
+
+type ArchivedWorkItem =
+  | {
+      key: string;
+      kind: "DELEGATION";
+      archivedAt: string;
+      updatedAt: string;
+      delegation: DelegationView;
+    }
+  | {
+      key: string;
+      kind: "PLAN";
+      archivedAt: string;
+      updatedAt: string;
+      plan: TeamPlan;
+    };
 
 let panelOpen = false;
 const panelListeners = new Set<() => void>();
@@ -598,6 +615,7 @@ type Tab =
   | "running"
   | "sent"
   | "completed"
+  | "archived"
   | "organizations"
   | "diagnostics"
   | "updates"
@@ -610,6 +628,7 @@ const tabKeys = {
   running: "tab.running",
   sent: "tab.sent",
   completed: "tab.completed",
+  archived: "tab.archived",
   organizations: "tab.organizations",
   diagnostics: "tab.diagnostics",
   updates: "tab.updates",
@@ -622,7 +641,15 @@ const tabGroups: readonly {
 }[] = [
   {
     label: "nav.work",
-    tabs: ["overview", "waiting", "running", "sent", "completed", "plans"],
+    tabs: [
+      "overview",
+      "waiting",
+      "running",
+      "sent",
+      "completed",
+      "plans",
+      "archived",
+    ],
   },
   { label: "nav.team", tabs: ["organizations"] },
   { label: "nav.system", tabs: ["diagnostics", "updates", "settings"] },
@@ -762,6 +789,8 @@ function Overview({
 }
 
 function belongs(tab: Tab, item: DelegationView): boolean {
+  if (tab === "archived") return item.archivedAt !== undefined;
+  if (item.archivedAt !== undefined) return false;
   if (tab === "waiting") {
     return item.direction === "INCOMING" && item.status === "WAITING_HUMAN";
   }
@@ -980,6 +1009,20 @@ function DelegationDetail({
       await act("cancel");
     }
   };
+  const archive = async () => {
+    if (
+      await confirm({
+        title: t("confirm.archiveDelegationTitle"),
+        message: t("confirm.archiveDelegation", { objective: item.objective }),
+        confirmLabel: t("action.archive"),
+      })
+    ) {
+      await act("archive");
+    }
+  };
+  const terminal = ["COMPLETED", "REJECTED", "FAILED", "CANCELED"].includes(
+    item.status,
+  );
   return (
     <article className="squad-detail">
       <header>
@@ -1000,6 +1043,12 @@ function DelegationDetail({
           <dt>{t("field.delivery")}</dt>
           <dd>{formatDelivery(t, item.deliveryStatus)}</dd>
         </div>
+        {item.archivedAt ? (
+          <div>
+            <dt>{t("field.archivedAt")}</dt>
+            <dd>{new Date(item.archivedAt).toLocaleString()}</dd>
+          </div>
+        ) : null}
         {item.deliveryAttempts > 0 ? (
           <div>
             <dt>{t("field.deliveryAttempts")}</dt>
@@ -1186,6 +1235,27 @@ function DelegationDetail({
         >
           {t("action.openSession")}
         </button>
+      ) : null}
+      {terminal ? (
+        <div className="squad-actions">
+          {item.archivedAt ? (
+            <button
+              className="squad-secondary"
+              disabled={busy}
+              onClick={() => void act("restore")}
+            >
+              {t("action.restore")}
+            </button>
+          ) : (
+            <button
+              className="squad-secondary"
+              disabled={busy}
+              onClick={() => void archive()}
+            >
+              {t("action.archive")}
+            </button>
+          )}
+        </div>
       ) : null}
       {item.outputs.length > 0 ? (
         <section>
@@ -1537,7 +1607,11 @@ function TeamPlanDetail({
   plan: TeamPlan;
   state: LocalState;
   refresh: () => Promise<void>;
-  openDelegation: (id: string, status: DelegationStatus) => void;
+  openDelegation: (
+    id: string,
+    status: DelegationStatus,
+    archivedAt?: string,
+  ) => void;
   t: SquadTranslate;
 }) {
   const [busy, setBusy] = useState(false);
@@ -1545,7 +1619,9 @@ function TeamPlanDetail({
   const [editing, setEditing] = useState(false);
   const { confirm, confirmation } = useConfirmation(t);
   useEffect(() => setEditing(false), [plan.id]);
-  const act = async (action: "approve" | "retry" | "cancel") => {
+  const act = async (
+    action: "approve" | "retry" | "cancel" | "archive" | "restore",
+  ) => {
     setBusy(true);
     setError(undefined);
     try {
@@ -1562,6 +1638,9 @@ function TeamPlanDetail({
   ).length;
   const canDispatch = ["DRAFT", "DISPATCHING", "PARTIAL"].includes(plan.status);
   const canCancel = !["DISPATCHED", "CANCELED"].includes(plan.status);
+  const canArchive =
+    plan.archivedAt === undefined &&
+    ["DISPATCHED", "CANCELED"].includes(plan.status);
   const settled =
     plan.rollup.completed + plan.rollup.failed + plan.rollup.canceled;
   const active = plan.rollup.queued + plan.rollup.running;
@@ -1595,6 +1674,17 @@ function TeamPlanDetail({
       await act("cancel");
     }
   };
+  const archivePlan = async () => {
+    if (
+      await confirm({
+        title: t("confirm.archivePlanTitle"),
+        message: t("confirm.archivePlan", { title: plan.title }),
+        confirmLabel: t("action.archive"),
+      })
+    ) {
+      await act("archive");
+    }
+  };
   if (editing && plan.status === "DRAFT") {
     return (
       <article className="squad-detail squad-plan-detail">
@@ -1626,6 +1716,11 @@ function TeamPlanDetail({
           total: plan.items.length,
         })}
       </p>
+      {plan.archivedAt ? (
+        <p className="squad-muted">
+          {t("field.archivedAt")}: {new Date(plan.archivedAt).toLocaleString()}
+        </p>
+      ) : null}
       <section
         className="squad-plan-rollup"
         aria-label={t("plan.progressLabel")}
@@ -1704,6 +1799,27 @@ function TeamPlanDetail({
               {t("action.cancelPlan")}
             </button>
           ) : null}
+        </div>
+      ) : null}
+      {canArchive || plan.archivedAt ? (
+        <div className="squad-actions">
+          {plan.archivedAt ? (
+            <button
+              className="squad-secondary"
+              disabled={busy}
+              onClick={() => void act("restore")}
+            >
+              {t("action.restore")}
+            </button>
+          ) : (
+            <button
+              className="squad-secondary"
+              disabled={busy}
+              onClick={() => void archivePlan()}
+            >
+              {t("action.archive")}
+            </button>
+          )}
         </div>
       ) : null}
       <section>
@@ -1829,7 +1945,11 @@ function TeamPlanDetail({
                 <button
                   className="squad-link-button"
                   onClick={() =>
-                    openDelegation(item.delegationId!, item.delegation!.status)
+                    openDelegation(
+                      item.delegationId!,
+                      item.delegation!.status,
+                      item.delegation!.archivedAt,
+                    )
                   }
                 >
                   {t("action.viewDelegation")}
@@ -4641,7 +4761,44 @@ function SquadPanel({
     () => (state?.delegations ?? []).filter((item) => belongs(tab, item)),
     [state, tab],
   );
-  const plans = state?.plans ?? [];
+  const allPlans = state?.plans ?? [];
+  const plans = useMemo(
+    () => allPlans.filter((plan) => plan.archivedAt === undefined),
+    [allPlans],
+  );
+  const archivedItems = useMemo<ArchivedWorkItem[]>(() => {
+    const delegations = (state?.delegations ?? []).flatMap((delegation) =>
+      delegation.archivedAt === undefined
+        ? []
+        : [
+            {
+              key: `delegation:${delegation.id}`,
+              kind: "DELEGATION" as const,
+              archivedAt: delegation.archivedAt,
+              updatedAt: delegation.updatedAt,
+              delegation,
+            },
+          ],
+    );
+    const planItems = allPlans.flatMap((plan) =>
+      plan.archivedAt === undefined
+        ? []
+        : [
+            {
+              key: `plan:${plan.id}`,
+              kind: "PLAN" as const,
+              archivedAt: plan.archivedAt,
+              updatedAt: plan.updatedAt,
+              plan,
+            },
+          ],
+    );
+    return [...delegations, ...planItems].sort(
+      (left, right) =>
+        right.archivedAt.localeCompare(left.archivedAt) ||
+        left.key.localeCompare(right.key),
+    );
+  }, [allPlans, state?.delegations]);
   const selectedItemIndex = items.findIndex((item) => item.id === selectedId);
   const itemPage = paginate(
     items,
@@ -4660,9 +4817,38 @@ function SquadPanel({
   );
   const selectedPlan =
     plans.find((plan) => plan.id === selectedId) ?? planPage.items[0];
+  const selectedArchivedIndex = archivedItems.findIndex(
+    (item) => item.key === selectedId,
+  );
+  const archivePage = paginate(
+    archivedItems,
+    selectedArchivedIndex < 0
+      ? (pages.archived ?? 1)
+      : pageContaining(selectedArchivedIndex),
+  );
+  const selectedArchived =
+    archivedItems.find((item) => item.key === selectedId) ??
+    archivePage.items[0];
   const changePage = (scope: Tab, page: number) => {
     setPages((current) => ({ ...current, [scope]: page }));
     setSelectedId(undefined);
+  };
+  const openPlanDelegation = (
+    id: string,
+    status: DelegationStatus,
+    archivedAt?: string,
+  ) => {
+    if (archivedAt !== undefined) {
+      setTab("archived");
+      setSelectedId(`delegation:${id}`);
+      return;
+    }
+    setTab(
+      ["COMPLETED", "REJECTED", "FAILED", "CANCELED"].includes(status)
+        ? "completed"
+        : "sent",
+    );
+    setSelectedId(id);
   };
   const attention = state === undefined ? undefined : localAttention(state);
   const locale = getLocale() === "zh" ? "zh-CN" : "en";
@@ -4814,6 +5000,58 @@ function SquadPanel({
           <UpdateCenter state={state} refresh={refresh} t={t} />
         ) : tab === "settings" && state ? (
           <Settings state={state} refresh={refresh} t={t} />
+        ) : tab === "archived" && state ? (
+          <div className="squad-content">
+            <aside className="squad-list">
+              {archivedItems.length === 0 ? (
+                <p className="squad-empty">{t("empty.archived")}</p>
+              ) : null}
+              {archivePage.items.map((item) => (
+                <button
+                  key={item.key}
+                  className={selectedArchived?.key === item.key ? "active" : ""}
+                  onClick={() => setSelectedId(item.key)}
+                >
+                  <strong>
+                    {item.kind === "DELEGATION"
+                      ? item.delegation.objective
+                      : item.plan.title}
+                  </strong>
+                  <span>
+                    {item.kind === "DELEGATION"
+                      ? t("archive.delegation")
+                      : t("archive.plan")}{" "}
+                    · {new Date(item.archivedAt).toLocaleString(locale)}
+                  </span>
+                </button>
+              ))}
+              <Pagination
+                {...archivePage}
+                onPage={(page) => changePage("archived", page)}
+                t={t}
+              />
+            </aside>
+            <main>
+              {selectedArchived?.kind === "DELEGATION" ? (
+                <DelegationDetail
+                  item={selectedArchived.delegation}
+                  refresh={refresh}
+                  openSession={openSession}
+                  t={t}
+                />
+              ) : selectedArchived?.kind === "PLAN" ? (
+                <TeamPlanDetail
+                  plan={selectedArchived.plan}
+                  state={state}
+                  refresh={refresh}
+                  openDelegation={openPlanDelegation}
+                  t={t}
+                />
+              ) : (
+                <p className="squad-empty">{t("empty.archiveSelection")}</p>
+              )}
+            </main>
+          </div>
         ) : tab === "plans" && state ? (
           <div className="squad-content">
             <aside className="squad-list">
@@ -4848,16 +5086,7 @@ function SquadPanel({
                   plan={selectedPlan}
                   state={state}
                   refresh={refresh}
-                  openDelegation={(id, status) => {
-                    setTab(
-                      ["COMPLETED", "REJECTED", "FAILED", "CANCELED"].includes(
-                        status,
-                      )
-                        ? "completed"
-                        : "sent",
-                    );
-                    setSelectedId(id);
-                  }}
+                  openDelegation={openPlanDelegation}
                   t={t}
                 />
               ) : (

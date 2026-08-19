@@ -71,8 +71,9 @@ export interface SquadAttentionSource {
     direction: "INCOMING" | "OUTGOING";
     status: DelegationStatus;
     deliveryStatus: string;
+    archivedAt?: string;
   }[];
-  plans: readonly { status: string }[];
+  plans: readonly { status: string; archivedAt?: string }[];
   organizations: readonly {
     role?: string;
     membershipStatus: string;
@@ -89,10 +90,14 @@ export function summarizeAttention(
   source: SquadAttentionSource,
 ): SquadAttentionSummary {
   const waitingHuman = source.delegations.filter(
-    (item) => item.direction === "INCOMING" && item.status === "WAITING_HUMAN",
+    (item) =>
+      item.archivedAt === undefined &&
+      item.direction === "INCOMING" &&
+      item.status === "WAITING_HUMAN",
   ).length;
   const failedOutgoing = source.delegations.filter(
     (item) =>
+      item.archivedAt === undefined &&
       item.direction === "OUTGOING" &&
       (item.status === "FAILED" || item.deliveryStatus === "DELIVERY_EXPIRED"),
   ).length;
@@ -106,8 +111,10 @@ export function summarizeAttention(
       (count, organization) => count + organization.pendingJoinRequests.length,
       0,
     );
-  const draftPlans = source.plans.filter((plan) =>
-    ["DRAFT", "PARTIAL"].includes(plan.status),
+  const draftPlans = source.plans.filter(
+    (plan) =>
+      plan.archivedAt === undefined &&
+      ["DRAFT", "PARTIAL"].includes(plan.status),
   ).length;
   return {
     revision: source.revision,

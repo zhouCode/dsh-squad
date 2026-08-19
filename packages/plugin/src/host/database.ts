@@ -115,6 +115,7 @@ export interface DelegationRecord {
   createdAt: string;
   updatedAt: string;
   completedAt?: string;
+  archivedAt?: string;
   todos: HumanTodo[];
 }
 
@@ -280,6 +281,7 @@ export class SquadDatabase {
         created_at TEXT NOT NULL,
         updated_at TEXT NOT NULL,
         completed_at TEXT,
+        archived_at TEXT,
         FOREIGN KEY(peer_node_id) REFERENCES peer_policies(node_id)
       );
       CREATE INDEX IF NOT EXISTS local_delegations_status_idx
@@ -349,6 +351,7 @@ export class SquadDatabase {
         revision INTEGER NOT NULL,
         approved_at TEXT,
         canceled_at TEXT,
+        archived_at TEXT,
         created_at TEXT NOT NULL,
         updated_at TEXT NOT NULL
       );
@@ -612,7 +615,25 @@ export class SquadDatabase {
       this.#db.exec("UPDATE schema_meta SET version = 11 WHERE singleton = 1");
       currentVersion = 11;
     }
-    if (currentVersion !== 11) {
+    if (currentVersion === 11) {
+      const delegationColumns = this.#db
+        .prepare("PRAGMA table_info(local_delegations)")
+        .all() as SqlRow[];
+      if (!delegationColumns.some((column) => column.name === "archived_at")) {
+        this.#db.exec(
+          "ALTER TABLE local_delegations ADD COLUMN archived_at TEXT",
+        );
+      }
+      const planColumns = this.#db
+        .prepare("PRAGMA table_info(team_plans)")
+        .all() as SqlRow[];
+      if (!planColumns.some((column) => column.name === "archived_at")) {
+        this.#db.exec("ALTER TABLE team_plans ADD COLUMN archived_at TEXT");
+      }
+      this.#db.exec("UPDATE schema_meta SET version = 12 WHERE singleton = 1");
+      currentVersion = 12;
+    }
+    if (currentVersion !== 12) {
       throw new Error(
         `unsupported Squad database version ${String(currentVersion)}`,
       );
@@ -1596,13 +1617,14 @@ export class SquadDatabase {
           : (this.#db
               .prepare(
                 `SELECT status, delivery_status, summary, outputs_json,
-                        error_code, updated_at, completed_at
+                        error_code, updated_at, completed_at, archived_at
                    FROM local_delegations WHERE id = ?`,
               )
               .get(delegationId) as SqlRow | undefined);
       const delegationSummary = optionalString(delegation?.summary);
       const delegationErrorCode = optionalString(delegation?.error_code);
       const delegationCompletedAt = optionalString(delegation?.completed_at);
+      const delegationArchivedAt = optionalString(delegation?.archived_at);
       return {
         id: String(item.id),
         planId: String(item.plan_id),
@@ -1640,6 +1662,9 @@ export class SquadDatabase {
                 ...(delegationCompletedAt === undefined
                   ? {}
                   : { completedAt: delegationCompletedAt }),
+                ...(delegationArchivedAt === undefined
+                  ? {}
+                  : { archivedAt: delegationArchivedAt }),
               },
             }),
         ...(error === undefined ? {} : { error }),
@@ -1650,6 +1675,7 @@ export class SquadDatabase {
     const sourceSummary = optionalString(row.source_summary);
     const approvedAt = optionalString(row.approved_at);
     const canceledAt = optionalString(row.canceled_at);
+    const archivedAt = optionalString(row.archived_at);
     const organizationId = optionalString(row.organization_id);
     return {
       id: String(row.id),
@@ -1660,6 +1686,7 @@ export class SquadDatabase {
       revision: Number(row.revision),
       ...(approvedAt === undefined ? {} : { approvedAt }),
       ...(canceledAt === undefined ? {} : { canceledAt }),
+      ...(archivedAt === undefined ? {} : { archivedAt }),
       createdAt: String(row.created_at),
       updatedAt: String(row.updated_at),
       items,
@@ -1838,6 +1865,37 @@ export class SquadDatabase {
         .prepare("SELECT * FROM team_plans ORDER BY updated_at DESC, id")
         .all() as SqlRow[]
     ).map((row) => this.teamPlanFromRow(row));
+  }
+
+  archiveTeamPlan(idCandidate: string): TeamPlan {
+    const id = idSchema.parse(idCandidate);
+    const current = this.getTeamPlan(id);
+    if (current === undefined) throw new Error(`unknown team plan ${id}`);
+    if (current.archivedAt !== undefined) return current;
+    if (!(current.status === "DISPATCHED" || current.status === "CANCELED")) {
+      throw new Error(
+        `team plan ${id} cannot be archived from ${current.status}`,
+      );
+    }
+    this.#db
+      .prepare("UPDATE team_plans SET archived_at = ? WHERE id = ?")
+      .run(new Date().toISOString(), id);
+    const updated = this.getTeamPlan(id);
+    if (updated === undefined) throw new Error(`team plan ${id} disappeared`);
+    return updated;
+  }
+
+  restoreTeamPlan(idCandidate: string): TeamPlan {
+    const id = idSchema.parse(idCandidate);
+    const current = this.getTeamPlan(id);
+    if (current === undefined) throw new Error(`unknown team plan ${id}`);
+    if (current.archivedAt === undefined) return current;
+    this.#db
+      .prepare("UPDATE team_plans SET archived_at = NULL WHERE id = ?")
+      .run(id);
+    const updated = this.getTeamPlan(id);
+    if (updated === undefined) throw new Error(`team plan ${id} disappeared`);
+    return updated;
   }
 
   beginTeamPlanDispatch(id: string): TeamPlan {
@@ -2204,6 +2262,7 @@ export class SquadDatabase {
     const summary = optionalString(row.summary);
     const errorCode = optionalString(row.error_code);
     const completedAt = optionalString(row.completed_at);
+    const archivedAt = optionalString(row.archived_at);
     const outbox = this.#db
       .prepare(
         "SELECT attempts, last_error, next_attempt_at FROM local_outbox WHERE envelope_id = ?",
@@ -2244,6 +2303,7 @@ export class SquadDatabase {
       createdAt: String(row.created_at),
       updatedAt: String(row.updated_at),
       ...(completedAt === undefined ? {} : { completedAt }),
+      ...(archivedAt === undefined ? {} : { archivedAt }),
       todos,
     };
   }
@@ -2268,6 +2328,37 @@ export class SquadDatabase {
         .prepare("SELECT * FROM local_delegations ORDER BY updated_at DESC, id")
         .all() as SqlRow[]
     ).map((row) => this.delegationFromRow(row));
+  }
+
+  archiveDelegation(idCandidate: string): DelegationRecord {
+    const id = idSchema.parse(idCandidate);
+    const current = this.getDelegation(id);
+    if (current === undefined) throw new Error(`unknown delegation ${id}`);
+    if (current.archivedAt !== undefined) return current;
+    if (!isTerminalStatus(current.status)) {
+      throw new Error(
+        `delegation ${id} cannot be archived from ${current.status}`,
+      );
+    }
+    this.#db
+      .prepare("UPDATE local_delegations SET archived_at = ? WHERE id = ?")
+      .run(new Date().toISOString(), id);
+    const updated = this.getDelegation(id);
+    if (updated === undefined) throw new Error(`delegation ${id} disappeared`);
+    return updated;
+  }
+
+  restoreDelegation(idCandidate: string): DelegationRecord {
+    const id = idSchema.parse(idCandidate);
+    const current = this.getDelegation(id);
+    if (current === undefined) throw new Error(`unknown delegation ${id}`);
+    if (current.archivedAt === undefined) return current;
+    this.#db
+      .prepare("UPDATE local_delegations SET archived_at = NULL WHERE id = ?")
+      .run(id);
+    const updated = this.getDelegation(id);
+    if (updated === undefined) throw new Error(`delegation ${id} disappeared`);
+    return updated;
   }
 
   countRunningFromPeer(nodeId: string, organizationId?: string): number {

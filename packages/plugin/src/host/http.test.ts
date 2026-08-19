@@ -222,6 +222,43 @@ describe("Squad host health", () => {
     expect(refreshNow).toHaveBeenCalledOnce();
   });
 
+  it("routes reversible work archival through the local API", async () => {
+    const delegationId = "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa";
+    const planId = "bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb";
+    const archiveDelegation = vi.fn(async () => ({ id: delegationId }));
+    const restoreDelegation = vi.fn(async () => ({ id: delegationId }));
+    const archiveTeamPlan = vi.fn(async () => ({ id: planId }));
+    const restoreTeamPlan = vi.fn(async () => ({ id: planId }));
+    const squad = {
+      archiveDelegation,
+      restoreDelegation,
+      archiveTeamPlan,
+      restoreTeamPlan,
+    } as unknown as SquadService;
+    const server = createServer(createHttpHandler(squad));
+    servers.push(server);
+    await new Promise<void>((resolve) =>
+      server.listen(0, "127.0.0.1", resolve),
+    );
+    const address = server.address() as AddressInfo;
+    for (const path of [
+      `delegations/${delegationId}/archive`,
+      `delegations/${delegationId}/restore`,
+      `plans/${planId}/archive`,
+      `plans/${planId}/restore`,
+    ]) {
+      const response = await fetch(
+        `http://127.0.0.1:${address.port}/squad/v1/local/${path}`,
+        { method: "POST", body: "{}" },
+      );
+      expect(response.status).toBe(200);
+    }
+    expect(archiveDelegation).toHaveBeenCalledWith(delegationId);
+    expect(restoreDelegation).toHaveBeenCalledWith(delegationId);
+    expect(archiveTeamPlan).toHaveBeenCalledWith(planId);
+    expect(restoreTeamPlan).toHaveBeenCalledWith(planId);
+  });
+
   it("routes organization join rejection through the local API", async () => {
     const organizationId = "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa";
     const requestId = "bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb";

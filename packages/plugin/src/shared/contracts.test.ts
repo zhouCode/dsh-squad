@@ -256,8 +256,21 @@ describe("Squad attention summary", () => {
             status: "COMPLETED",
             deliveryStatus: "RECEIVED_LOCAL",
           },
+          {
+            direction: "OUTGOING",
+            status: "FAILED",
+            deliveryStatus: "RECEIVED_BY_NODE",
+            archivedAt: "2026-08-20T00:00:00.000Z",
+          },
         ],
-        plans: [{ status: "DRAFT" }, { status: "DISPATCHED" }],
+        plans: [
+          { status: "DRAFT" },
+          { status: "DISPATCHED" },
+          {
+            status: "DRAFT",
+            archivedAt: "2026-08-20T00:00:00.000Z",
+          },
+        ],
         organizations: [
           {
             role: "OWNER",

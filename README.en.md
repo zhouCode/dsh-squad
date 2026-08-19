@@ -78,6 +78,8 @@ The workbench header reports whether its local live-event channel is connected, 
 
 Delegation and Team Planner lists paginate independently in batches of 25 and remember each tab's position. Opening a delegation from a plan jumps directly to its containing page, so a long history is never rendered as one unbounded list.
 
+Finished delegations and fully dispatched or canceled plans can move into one `Archive` tab. Archival changes only local workbench organization: archived failures leave attention counts, while tasks, results, plan items, and audit records remain intact, already dispatched work is not stopped, and every record can be restored.
+
 The same local Plan API is available for future connectors such as Feishu/Lark to create drafts or read status projections. This version does not include a Feishu/Lark connector and never executes work merely because an external board was edited.
 
 ## Organizations, roles, and Session isolation

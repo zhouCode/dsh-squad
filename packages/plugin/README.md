@@ -80,6 +80,8 @@ The workbench reports local live-event health and the latest successful read. `S
 
 Delegation and Team Planner lists paginate independently in batches of 25 and navigate directly to records opened across views.
 
+Finished delegations and fully dispatched or canceled plans share a reversible local archive. Archival removes failures from attention counts without deleting records, results, plan items, or audit history.
+
 Chat triggering stays unobtrusive: use natural language or `@member`, or use namespaced `/squad-*` commands for tasks, plans, status, organizations, members, invitations, and roles. They are discovered through DSH's native `/` menu; this package adds no command buttons.
 
 ## Updates

@@ -59,6 +59,20 @@ describe("SquadDatabase", () => {
     expect(db.receiveRequest(envelope, digest)).toBe("INSERTED");
     expect(db.receiveRequest(envelope, digest)).toBe("DUPLICATE");
     expect(db.listDelegations()).toHaveLength(1);
+    expect(() => db.archiveDelegation(delegationId)).toThrow(
+      /cannot be archived/u,
+    );
+    db.transition(delegationId, "TRIAGING");
+    db.transition(delegationId, "RUNNING", {
+      sessionId: `squad-${delegationId}`,
+    });
+    db.transition(delegationId, "COMPLETED", {
+      summary: "Counted exactly.",
+      completedAt: new Date().toISOString(),
+    });
+    expect(db.archiveDelegation(delegationId).archivedAt).toBeDefined();
+    expect(db.restoreDelegation(delegationId).archivedAt).toBeUndefined();
+    db.archiveDelegation(delegationId);
     db.close();
 
     const versionTwo = new DatabaseSync(dbPath);
@@ -72,6 +86,7 @@ describe("SquadDatabase", () => {
     const reopened = new SquadDatabase(dbPath);
     expect(reopened.identityNodeId()).toBe(identity.nodeId);
     expect(reopened.listDelegations()).toHaveLength(1);
+    expect(reopened.getDelegation(delegationId)?.archivedAt).toBeDefined();
     expect(reopened.listTeamPlans()).toEqual([]);
     reopened.close();
 
@@ -79,7 +94,7 @@ describe("SquadDatabase", () => {
     const schema = migrated
       .prepare("SELECT version FROM schema_meta WHERE singleton = 1")
       .get();
-    expect(schema?.version).toBe(11);
+    expect(schema?.version).toBe(12);
     const organizationColumns = migrated
       .prepare("PRAGMA table_info(organizations)")
       .all() as Array<{ name?: string }>;
@@ -91,6 +106,18 @@ describe("SquadDatabase", () => {
     expect(
       organizationColumns.some((column) => column.name === "dissolved_at"),
     ).toBe(true);
+    const delegationColumns = migrated
+      .prepare("PRAGMA table_info(local_delegations)")
+      .all() as Array<{ name?: string }>;
+    const planColumns = migrated
+      .prepare("PRAGMA table_info(team_plans)")
+      .all() as Array<{ name?: string }>;
+    expect(
+      delegationColumns.some((column) => column.name === "archived_at"),
+    ).toBe(true);
+    expect(planColumns.some((column) => column.name === "archived_at")).toBe(
+      true,
+    );
     migrated.close();
   });
 
@@ -391,6 +418,7 @@ describe("SquadDatabase", () => {
     );
     expect(plan.status).toBe("DRAFT");
     expect(plan.items).toHaveLength(2);
+    expect(() => db.archiveTeamPlan(plan.id)).toThrow(/cannot be archived/u);
 
     const originalFirstId = plan.items[0]!.id;
     const retainedSecondId = plan.items[1]!.id;
@@ -481,7 +509,14 @@ describe("SquadDatabase", () => {
         [peers[0]!],
       ),
     ).toThrow(/cannot be edited/u);
+    expect(reopened.archiveTeamPlan(plan.id).archivedAt).toBeDefined();
+    expect(reopened.restoreTeamPlan(plan.id).archivedAt).toBeUndefined();
+    reopened.archiveTeamPlan(plan.id);
     reopened.close();
+
+    const audited = new SquadDatabase(dbPath);
+    expect(audited.getTeamPlan(plan.id)?.archivedAt).toBeDefined();
+    audited.close();
   });
 
   it("persists a verified organization, local member policy, and Session scope", () => {

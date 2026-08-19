@@ -314,6 +314,7 @@ export interface TeamPlanItem {
     errorCode?: string;
     updatedAt: string;
     completedAt?: string;
+    archivedAt?: string;
   };
   error?: string;
   createdAt: string;
@@ -341,6 +342,7 @@ export interface TeamPlan {
   revision: number;
   approvedAt?: string;
   canceledAt?: string;
+  archivedAt?: string;
   createdAt: string;
   updatedAt: string;
   items: TeamPlanItem[];
