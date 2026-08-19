@@ -70,6 +70,8 @@ Ownership transfer is a two-party signed operation: the current Owner proposes i
 
 Owners can rename an organization through an append-only signed metadata event; the pinned root and prior names remain verifiable.
 
+Owners can irreversibly dissolve an organization with a signed terminal event. Relay immediately closes invitations, pending join requests, and new organization routing; Nodes clear related Session context after synchronization. Membership and task history remain read-only for audit, and no directory event may follow dissolution.
+
 After dispatch, the plan rolls up live execution progress and collects only the result summaries and outputs explicitly published by recipients; each item links to its full delegation record.
 
 Chat triggering stays unobtrusive: use natural language or `@member`, or use namespaced `/squad-*` commands for tasks, plans, status, organizations, members, invitations, and roles. They are discovered through DSH's native `/` menu; this package adds no command buttons.

@@ -3,6 +3,7 @@ import {
   organizationDirectoryBundleSchema,
   organizationInvitationViewSchema,
   type OrganizationDirectoryBundle,
+  type OrganizationDissolutionEvent,
   type OrganizationDocument,
   type OrganizationJoinRequest,
   type OrganizationInvitationView,
@@ -418,6 +419,17 @@ export class RelayClient {
     await this.request(
       "POST",
       `/squad/v1/organizations/${organizationId}/name`,
+      { event },
+    );
+  }
+
+  async dissolveOrganization(
+    organizationId: string,
+    event: OrganizationDissolutionEvent,
+  ): Promise<void> {
+    await this.request(
+      "POST",
+      `/squad/v1/organizations/${organizationId}/dissolve`,
       { event },
     );
   }

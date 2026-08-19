@@ -192,6 +192,7 @@ describe("Squad slash commands", () => {
     vi.mocked(harness.squad.sessionOrganization).mockReturnValue({
       organizationId: "52d596aa-306a-4475-ad73-d95040813310",
       name: "Product",
+      lifecycleStatus: "ACTIVE",
       role: "OWNER",
       selfMembershipId: "c321ad37-df34-4f96-bffa-5ad21b20d040",
       membershipStatus: "ACTIVE",

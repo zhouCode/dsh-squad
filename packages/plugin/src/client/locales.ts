@@ -114,6 +114,7 @@ export const zh = {
   "action.joinOrganization": "申请加入",
   "action.leaveOrganization": "退出组织",
   "action.renameOrganization": "保存新名称",
+  "action.dissolveOrganization": "解散组织",
   "action.transferOwnership": "转让所有权",
   "action.acceptOwnership": "接受并成为 Owner",
   "action.declineOwnership": "拒绝转让",
@@ -172,6 +173,9 @@ export const zh = {
   "confirm.renameOrganizationTitle": "更改组织名称？",
   "confirm.renameOrganization":
     "将组织名称从“{from}”改为“{to}”。这会追加一条 Owner 签名的目录事件；尚未接受的所有权转让提案会失效。",
+  "confirm.dissolveOrganizationTitle": "永久解散此组织？",
+  "confirm.dissolveOrganization":
+    "解散“{organization}”不可撤销。所有新邀请、加入申请和组织任务路由会立即停止，会话中的组织上下文会清除；成员目录和历史任务仍会保留用于审计。",
   "confirm.transferOwnershipTitle": "发起所有权转让？",
   "confirm.transferOwnership":
     "“{name}”需要在自己的节点明确接受，才会成为“{organization}”的唯一 Owner；接受后你将变为 Admin。转让完成前可以取消。",
@@ -472,6 +476,8 @@ export const zh = {
   "organizations.self": "本节点",
   "organizations.localPolicy": "本机接收策略",
   "organizations.directoryRevision": "签名目录修订 {revision}",
+  "organizations.dissolvedHint":
+    "此组织已于 {time} 解散。目录与历史任务仅供审计，不能再用于邀请、成员管理或任务路由。",
   "organizations.pendingHint": "加入申请已发送，等待 Owner 或 Admin 批准。",
   "organizations.ownerLeaveHint":
     "Owner 需要先转让所有权，接受完成后才能退出组织。原 Owner 会变为 Admin。",
@@ -498,6 +504,7 @@ export const zh = {
   "organizationStatus.ACTIVE": "活动",
   "organizationStatus.PENDING": "待批准",
   "organizationStatus.DISABLED": "已禁用",
+  "organizationLifecycle.DISSOLVED": "已解散",
   "empty.list": "这里暂时没有内容。",
   "empty.selection": "请选择一个委派。",
   "empty.plans":
@@ -607,6 +614,11 @@ export const zh = {
   "errorCode.LEAVE_CERTIFICATE_MISMATCH": "退出组织的签名凭证不匹配",
   "errorCode.ORGANIZATION_RENAME_MISMATCH": "组织改名事件与当前 Owner 不匹配",
   "errorCode.ORGANIZATION_RENAME_INVALID": "组织改名签名或名称变化无效",
+  "errorCode.ORGANIZATION_DISSOLVED": "组织已经解散，不能再执行此操作",
+  "errorCode.ORGANIZATION_DISSOLUTION_MISMATCH":
+    "组织解散事件与当前 Owner 不匹配",
+  "errorCode.ORGANIZATION_DISSOLUTION_EXPIRED": "组织解散确认已经过期",
+  "errorCode.ORGANIZATION_DISSOLUTION_INVALID": "组织解散签名或目录状态无效",
   "errorCode.ORGANIZATION_OWNER_REQUIRED": "只有当前 Owner 可以发起转让",
   "errorCode.OWNERSHIP_TRANSFER_MISMATCH": "所有权转让与当前组织不匹配",
   "errorCode.OWNERSHIP_TRANSFER_EXPIRY_INVALID": "所有权转让的有效期无效",
@@ -739,6 +751,7 @@ export const en = {
   "action.joinOrganization": "Request to join",
   "action.leaveOrganization": "Leave organization",
   "action.renameOrganization": "Save new name",
+  "action.dissolveOrganization": "Dissolve organization",
   "action.transferOwnership": "Transfer ownership",
   "action.acceptOwnership": "Accept and become Owner",
   "action.declineOwnership": "Decline transfer",
@@ -797,6 +810,10 @@ export const en = {
   "confirm.renameOrganizationTitle": "Rename this organization?",
   "confirm.renameOrganization":
     "Rename “{from}” to “{to}”. This appends an Owner-signed directory event and makes any unaccepted ownership-transfer proposal stale.",
+  "confirm.dissolveOrganizationTitle":
+    "Permanently dissolve this organization?",
+  "confirm.dissolveOrganization":
+    "Dissolving “{organization}” cannot be undone. New invitations, join requests, and organization task routing stop immediately, and Session organization context is cleared. The member directory and task history remain available for audit.",
   "confirm.transferOwnershipTitle": "Propose an ownership transfer?",
   "confirm.transferOwnership":
     "“{name}” must explicitly accept on their own Node before becoming the sole Owner of “{organization}”. You then become an Admin. The proposal can be canceled until acceptance.",
@@ -1107,6 +1124,8 @@ export const en = {
   "organizations.self": "This Node",
   "organizations.localPolicy": "Local receiving policy",
   "organizations.directoryRevision": "Signed directory revision {revision}",
+  "organizations.dissolvedHint":
+    "This organization was dissolved at {time}. Its directory and task history remain for audit but cannot be used for invitations, member management, or task routing.",
   "organizations.pendingHint":
     "The join request was sent and is waiting for an Owner or Admin.",
   "organizations.ownerLeaveHint":
@@ -1135,6 +1154,7 @@ export const en = {
   "organizationStatus.ACTIVE": "Active",
   "organizationStatus.PENDING": "Pending approval",
   "organizationStatus.DISABLED": "Disabled",
+  "organizationLifecycle.DISSOLVED": "Dissolved",
   "empty.list": "Nothing here.",
   "empty.selection": "Select a delegation.",
   "empty.plans":
@@ -1263,6 +1283,14 @@ export const en = {
     "The organization rename does not match the current Owner",
   "errorCode.ORGANIZATION_RENAME_INVALID":
     "The organization rename signature or name transition is invalid",
+  "errorCode.ORGANIZATION_DISSOLVED":
+    "The organization has been dissolved and no longer accepts this action",
+  "errorCode.ORGANIZATION_DISSOLUTION_MISMATCH":
+    "The organization dissolution does not match the current Owner",
+  "errorCode.ORGANIZATION_DISSOLUTION_EXPIRED":
+    "The organization dissolution confirmation has expired",
+  "errorCode.ORGANIZATION_DISSOLUTION_INVALID":
+    "The organization dissolution signature or directory state is invalid",
   "errorCode.ORGANIZATION_OWNER_REQUIRED":
     "Only the current Owner can propose a transfer",
   "errorCode.OWNERSHIP_TRANSFER_MISMATCH":
@@ -1453,6 +1481,13 @@ const errorCodeKeys = {
   LEAVE_CERTIFICATE_MISMATCH: "errorCode.LEAVE_CERTIFICATE_MISMATCH",
   ORGANIZATION_RENAME_MISMATCH: "errorCode.ORGANIZATION_RENAME_MISMATCH",
   ORGANIZATION_RENAME_INVALID: "errorCode.ORGANIZATION_RENAME_INVALID",
+  ORGANIZATION_DISSOLVED: "errorCode.ORGANIZATION_DISSOLVED",
+  ORGANIZATION_DISSOLUTION_MISMATCH:
+    "errorCode.ORGANIZATION_DISSOLUTION_MISMATCH",
+  ORGANIZATION_DISSOLUTION_EXPIRED:
+    "errorCode.ORGANIZATION_DISSOLUTION_EXPIRED",
+  ORGANIZATION_DISSOLUTION_INVALID:
+    "errorCode.ORGANIZATION_DISSOLUTION_INVALID",
   ORGANIZATION_OWNER_REQUIRED: "errorCode.ORGANIZATION_OWNER_REQUIRED",
   OWNERSHIP_TRANSFER_MISMATCH: "errorCode.OWNERSHIP_TRANSFER_MISMATCH",
   OWNERSHIP_TRANSFER_EXPIRY_INVALID:

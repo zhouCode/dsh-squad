@@ -66,13 +66,19 @@ describe("Relay mailbox", () => {
           .prepare("SELECT version FROM schema_meta WHERE singleton = 1")
           .get() as Record<string, unknown>
       ).version,
-    ).toBe(5);
+    ).toBe(6);
     const transferTable = migrated
       .prepare(
         "SELECT name FROM sqlite_master WHERE type = 'table' AND name = 'relay_organization_owner_transfers'",
       )
       .get() as Record<string, unknown> | undefined;
     expect(transferTable?.name).toBe("relay_organization_owner_transfers");
+    const organizationColumns = migrated
+      .prepare("PRAGMA table_info(relay_organizations)")
+      .all() as Array<{ name?: string }>;
+    expect(
+      organizationColumns.some((column) => column.name === "dissolved_at"),
+    ).toBe(true);
     const row = migrated
       .prepare(
         "SELECT invitation_id, revoked_at FROM relay_organization_invites WHERE token_hash = ?",

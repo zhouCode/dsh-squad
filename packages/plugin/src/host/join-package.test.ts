@@ -184,6 +184,35 @@ describe("one-step team join package", () => {
         name: "Product Core",
         membershipStatus: "DISABLED",
       });
+
+      await alice.selectSessionOrganization(
+        "dissolve-session",
+        organization.organizationId,
+      );
+      await alice.dissolveOrganization(
+        organization.organizationId,
+        "Project completed",
+      );
+      expect(alice.sessionOrganization("dissolve-session")).toBeUndefined();
+      expect(alice.localState().organizations[0]).toMatchObject({
+        organizationId: organization.organizationId,
+        name: "Product Core",
+        lifecycleStatus: "DISSOLVED",
+      });
+      const dissolvedBobBundle = (await bob.relayClient?.organizations())?.[0];
+      if (dissolvedBobBundle === undefined) {
+        throw new Error("missing dissolved Bob directory");
+      }
+      bob.database.applyOrganizationBundle(
+        dissolvedBobBundle,
+        bob.identity.nodeId,
+      );
+      expect(bob.localState().organizations[0]?.lifecycleStatus).toBe(
+        "DISSOLVED",
+      );
+      await expect(
+        alice.createOrganizationJoinPackage(organization.organizationId, 60),
+      ).rejects.toThrow(/dissolved|active organization/iu);
     } finally {
       await Promise.all([alice.close(), bob.close(), charlie.close()]);
       await http.close();

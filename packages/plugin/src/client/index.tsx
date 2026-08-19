@@ -2060,6 +2060,27 @@ function OrganizationCenter({
     );
   };
 
+  const dissolveOrganization = async (organization: OrganizationView) => {
+    if (
+      !(await confirm({
+        title: t("confirm.dissolveOrganizationTitle"),
+        message: t("confirm.dissolveOrganization", {
+          organization: organization.name,
+        }),
+        confirmLabel: t("action.dissolveOrganization"),
+        danger: true,
+      }))
+    ) {
+      return;
+    }
+    await run(`dissolve:${organization.organizationId}`, () =>
+      api(`/organizations/${organization.organizationId}/dissolve`, {
+        method: "POST",
+        body: "{}",
+      }),
+    );
+  };
+
   const proposeOwnershipTransfer = async (
     organization: OrganizationView,
     target: OrganizationView["members"][number],
@@ -2309,6 +2330,7 @@ function OrganizationCenter({
       <div className="squad-organization-list">
         {state.organizations.map((organization) => {
           const canAdminister =
+            organization.lifecycleStatus === "ACTIVE" &&
             organization.membershipStatus === "ACTIVE" &&
             (organization.role === "OWNER" || organization.role === "ADMIN");
           const ownerTransfer = organization.pendingOwnerTransfer;
@@ -2345,6 +2367,9 @@ function OrganizationCenter({
                   <span>
                     {formatOrganizationStatus(t, organization.membershipStatus)}
                   </span>
+                  {organization.lifecycleStatus === "DISSOLVED" ? (
+                    <span>{t("organizationLifecycle.DISSOLVED")}</span>
+                  ) : null}
                 </div>
               </header>
               <p className="squad-muted">
@@ -2352,7 +2377,15 @@ function OrganizationCenter({
                   revision: organization.revision,
                 })}
               </p>
-              {organization.membershipStatus === "ACTIVE" &&
+              {organization.lifecycleStatus === "DISSOLVED" ? (
+                <p className="squad-warning">
+                  {t("organizations.dissolvedHint", {
+                    time: new Date(organization.dissolvedAt!).toLocaleString(),
+                  })}
+                </p>
+              ) : null}
+              {organization.lifecycleStatus === "ACTIVE" &&
+              organization.membershipStatus === "ACTIVE" &&
               organization.role === "OWNER" ? (
                 <form
                   className="squad-organization-rename"
@@ -2593,10 +2626,12 @@ function OrganizationCenter({
                 <div className="squad-member-list">
                   {organization.members.map((member) => {
                     const canSetRole =
+                      organization.lifecycleStatus === "ACTIVE" &&
                       organization.role === "OWNER" &&
                       !member.isSelf &&
                       member.role !== "OWNER";
                     const canSetStatus =
+                      organization.lifecycleStatus === "ACTIVE" &&
                       !member.isSelf &&
                       member.role !== "OWNER" &&
                       (organization.role === "OWNER" ||
@@ -2653,7 +2688,10 @@ function OrganizationCenter({
                             {t("organizations.localPolicy")}
                             <PolicySelect
                               value={member.policy.autoExecute}
-                              disabled={busy !== undefined}
+                              disabled={
+                                busy !== undefined ||
+                                organization.lifecycleStatus === "DISSOLVED"
+                              }
                               t={t}
                               onChange={(autoExecute) =>
                                 void changeMemberPolicy(
@@ -2691,7 +2729,8 @@ function OrganizationCenter({
               ) ? (
                 <p className="squad-warning">{t("settings.trustedWarning")}</p>
               ) : null}
-              {organization.membershipStatus === "ACTIVE" ? (
+              {organization.lifecycleStatus === "ACTIVE" &&
+              organization.membershipStatus === "ACTIVE" ? (
                 <div className="squad-organization-lifecycle">
                   {organization.role === "OWNER" ? (
                     <div className="squad-owner-transfer-create">
@@ -2742,6 +2781,13 @@ function OrganizationCenter({
                           </button>
                         </div>
                       ) : null}
+                      <button
+                        className="squad-danger"
+                        disabled={busy !== undefined}
+                        onClick={() => void dissolveOrganization(organization)}
+                      >
+                        {t("action.dissolveOrganization")}
+                      </button>
                     </div>
                   ) : (
                     <button

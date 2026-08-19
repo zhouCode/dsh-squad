@@ -154,9 +154,36 @@ export type OrganizationRenameEvent = z.infer<
   typeof organizationRenameEventSchema
 >;
 
+export const unsignedOrganizationDissolutionEventSchema = z.strictObject({
+  version: z.literal(ORGANIZATION_DIRECTORY_VERSION),
+  kind: z.literal("ORGANIZATION_DISSOLVED"),
+  eventId: idSchema,
+  organizationId: idSchema,
+  organizationRevision: z.number().int().positive(),
+  name: z.string().trim().min(1).max(120),
+  issuer: z.strictObject({
+    membershipId: idSchema,
+    nodeId: nodeIdSchema,
+  }),
+  reason: z.string().trim().min(1).max(500).optional(),
+  dissolvedAt: timestampSchema,
+});
+export type UnsignedOrganizationDissolutionEvent = z.infer<
+  typeof unsignedOrganizationDissolutionEventSchema
+>;
+
+export const organizationDissolutionEventSchema =
+  unsignedOrganizationDissolutionEventSchema
+    .extend({ signature: signatureSchema })
+    .strict();
+export type OrganizationDissolutionEvent = z.infer<
+  typeof organizationDissolutionEventSchema
+>;
+
 export const organizationDirectoryEventSchema = z.union([
   organizationOwnershipTransferEventSchema,
   organizationRenameEventSchema,
+  organizationDissolutionEventSchema,
   organizationMembershipCertificateSchema,
 ]);
 export type OrganizationDirectoryEvent = z.infer<
@@ -248,6 +275,8 @@ export interface OrganizationMemberView {
 export interface OrganizationView {
   organizationId: string;
   name: string;
+  lifecycleStatus: "ACTIVE" | "DISSOLVED";
+  dissolvedAt?: string;
   role?: OrganizationRole;
   selfMembershipId?: string;
   membershipStatus: "ACTIVE" | "PENDING" | "DISABLED";
@@ -303,6 +332,13 @@ export function organizationOwnershipTransferAcceptance(
 export function unsignedOrganizationRenameEvent(
   event: OrganizationRenameEvent,
 ): UnsignedOrganizationRenameEvent {
+  const { signature: _signature, ...unsigned } = event;
+  return unsigned;
+}
+
+export function unsignedOrganizationDissolutionEvent(
+  event: OrganizationDissolutionEvent,
+): UnsignedOrganizationDissolutionEvent {
   const { signature: _signature, ...unsigned } = event;
   return unsigned;
 }

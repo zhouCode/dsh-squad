@@ -6,6 +6,7 @@ import { join } from "node:path";
 import { afterEach, describe, expect, it } from "vitest";
 import {
   organizationOwnershipTransferAcceptance,
+  unsignedOrganizationDissolutionEventSchema,
   unsignedOrganizationDocumentSchema,
   unsignedOrganizationJoinRequestSchema,
   unsignedOrganizationMembershipCertificateSchema,
@@ -518,5 +519,45 @@ describe("Relay organization directory", () => {
     await expect(
       alice.leaveOrganization(organizationId, aliceLeave),
     ).rejects.toMatchObject({ code: "ORGANIZATION_MEMBERSHIP_REJECTED" });
+
+    const dissolutionUnsigned =
+      unsignedOrganizationDissolutionEventSchema.parse({
+        version: 1,
+        kind: "ORGANIZATION_DISSOLVED",
+        eventId: randomUUID(),
+        organizationId,
+        organizationRevision: 8,
+        name: "Distributed Product",
+        issuer: {
+          membershipId: carolMembershipId,
+          nodeId: carolIdentity.nodeId,
+        },
+        reason: "Team closed",
+        dissolvedAt: new Date().toISOString(),
+      });
+    await carol.dissolveOrganization(organizationId, {
+      ...dissolutionUnsigned,
+      signature: carolIdentity.sign(dissolutionUnsigned),
+    });
+    const dissolved = (await carol.organizations())[0];
+    expect(dissolved?.revision).toBe(8);
+    expect(dissolved?.events.at(-1)).toMatchObject({
+      kind: "ORGANIZATION_DISSOLVED",
+      reason: "Team closed",
+    });
+    await expect(
+      carol.createOrganizationInvitation(organizationId, 60),
+    ).rejects.toMatchObject({ code: "ORGANIZATION_DISSOLVED" });
+    const postDissolutionLeaveUnsigned =
+      unsignedOrganizationMembershipCertificateSchema.parse({
+        ...carolOwnerLeaveUnsigned,
+        organizationRevision: 9,
+      });
+    await expect(
+      carol.leaveOrganization(organizationId, {
+        ...postDissolutionLeaveUnsigned,
+        signature: carolIdentity.sign(postDissolutionLeaveUnsigned),
+      }),
+    ).rejects.toMatchObject({ code: "ORGANIZATION_DISSOLVED" });
   });
 });

@@ -20,6 +20,7 @@ import { z } from "zod";
 import { canonicalBytes } from "../shared/canonical.ts";
 import {
   organizationDirectoryEventSchema,
+  organizationDissolutionEventSchema,
   authorityIdSchema,
   organizationDocumentSchema,
   organizationMembershipCertificateSchema,
@@ -28,10 +29,12 @@ import {
   organizationOwnershipTransferProposalSchema,
   organizationRenameEventSchema,
   unsignedOrganizationDocument,
+  unsignedOrganizationDissolutionEvent,
   unsignedOrganizationMembershipCertificate,
   unsignedOrganizationOwnershipTransferProposal,
   unsignedOrganizationRenameEvent,
   type OrganizationDirectoryEvent,
+  type OrganizationDissolutionEvent,
   type OrganizationDocument,
   type OrganizationMembershipCertificate,
   type OrganizationOwnershipTransferEvent,
@@ -171,6 +174,8 @@ export interface VerifiedOrganizationDirectory {
   name: string;
   revision: number;
   members: Map<string, OrganizationMembershipCertificate>;
+  dissolvedAt?: string;
+  dissolvedByMembershipId?: string;
 }
 
 function verifyCertificateSignature(
@@ -453,6 +458,44 @@ export function applyOrganizationRename(
   return event.name;
 }
 
+export function applyOrganizationDissolution(
+  documentCandidate: OrganizationDocument,
+  members: Map<string, OrganizationMembershipCertificate>,
+  currentRevision: number,
+  currentName: string,
+  candidate: OrganizationDissolutionEvent,
+): void {
+  const document = verifyOrganizationDocument(documentCandidate);
+  const event = organizationDissolutionEventSchema.parse(candidate);
+  if (event.organizationId !== document.organizationId) {
+    throw new Error("organization dissolution belongs to another organization");
+  }
+  if (event.organizationRevision !== currentRevision + 1) {
+    throw new Error("organization dissolution revision is not contiguous");
+  }
+  if (event.name !== currentName) {
+    throw new Error("organization dissolution does not match the current name");
+  }
+  const owner = members.get(event.issuer.membershipId);
+  if (
+    owner === undefined ||
+    owner.nodeId !== event.issuer.nodeId ||
+    owner.status !== "ACTIVE" ||
+    owner.role !== "OWNER"
+  ) {
+    throw new Error("organization dissolution requires the active owner");
+  }
+  if (
+    !verifySignature(
+      unsignedOrganizationDissolutionEvent(event),
+      event.signature,
+      owner.publicKey,
+    )
+  ) {
+    throw new Error("organization dissolution signature is invalid");
+  }
+}
+
 export function applyOrganizationDirectoryEvent(
   document: OrganizationDocument,
   members: Map<string, OrganizationMembershipCertificate>,
@@ -470,7 +513,7 @@ export function applyOrganizationDirectoryEvent(
     );
     return;
   }
-  if ("eventId" in event) {
+  if ("kind" in event && event.kind === "ORGANIZATION_RENAME") {
     return applyOrganizationRename(
       document,
       members,
@@ -478,6 +521,16 @@ export function applyOrganizationDirectoryEvent(
       currentName,
       event,
     );
+  }
+  if ("kind" in event && event.kind === "ORGANIZATION_DISSOLVED") {
+    applyOrganizationDissolution(
+      document,
+      members,
+      currentRevision,
+      currentName,
+      event,
+    );
+    return;
   }
   applyOrganizationCertificate(document, members, currentRevision, event);
   return undefined;
@@ -491,7 +544,12 @@ export function verifyOrganizationDirectory(
   const members = new Map<string, OrganizationMembershipCertificate>();
   let revision = 0;
   let name = document.name;
+  let dissolvedAt: string | undefined;
+  let dissolvedByMembershipId: string | undefined;
   for (const event of eventCandidates) {
+    if (dissolvedAt !== undefined) {
+      throw new Error("organization directory cannot change after dissolution");
+    }
     name =
       applyOrganizationDirectoryEvent(
         document,
@@ -500,6 +558,10 @@ export function verifyOrganizationDirectory(
         event,
         name,
       ) ?? name;
+    if ("kind" in event && event.kind === "ORGANIZATION_DISSOLVED") {
+      dissolvedAt = event.dissolvedAt;
+      dissolvedByMembershipId = event.issuer.membershipId;
+    }
     revision = event.organizationRevision;
   }
   if (revision === 0) throw new Error("organization directory has no owner");
@@ -509,5 +571,14 @@ export function verifyOrganizationDirectory(
   if (owners.length !== 1) {
     throw new Error("organization directory must contain one active owner");
   }
-  return { document, name, revision, members };
+  return {
+    document,
+    name,
+    revision,
+    members,
+    ...(dissolvedAt === undefined ? {} : { dissolvedAt }),
+    ...(dissolvedByMembershipId === undefined
+      ? {}
+      : { dissolvedByMembershipId }),
+  };
 }

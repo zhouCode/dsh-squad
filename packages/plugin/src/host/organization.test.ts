@@ -5,6 +5,7 @@ import { randomUUID } from "node:crypto";
 import { describe, expect, it } from "vitest";
 import {
   organizationOwnershipTransferAcceptance,
+  unsignedOrganizationDissolutionEventSchema,
   unsignedOrganizationDocumentSchema,
   unsignedOrganizationMembershipCertificateSchema,
   unsignedOrganizationOwnershipTransferProposalSchema,
@@ -215,6 +216,25 @@ describe("organization signed directory", () => {
       ...renameUnsigned,
       signature: admin.sign(renameUnsigned),
     };
+    const dissolutionUnsigned =
+      unsignedOrganizationDissolutionEventSchema.parse({
+        version: 1,
+        kind: "ORGANIZATION_DISSOLVED",
+        eventId: randomUUID(),
+        organizationId,
+        organizationRevision: 8,
+        name: "Product Platform",
+        issuer: {
+          membershipId: promotedAdmin.membershipId,
+          nodeId: admin.nodeId,
+        },
+        reason: "Project completed",
+        dissolvedAt: new Date(Date.parse(acceptedAt) + 1_000).toISOString(),
+      });
+    const dissolution = {
+      ...dissolutionUnsigned,
+      signature: admin.sign(dissolutionUnsigned),
+    };
     const verified = verifyOrganizationDirectory(document, [
       ownerCertificate,
       adminMember,
@@ -223,9 +243,12 @@ describe("organization signed directory", () => {
       leftMember,
       transfer,
       rename,
+      dissolution,
     ]);
-    expect(verified.revision).toBe(7);
+    expect(verified.revision).toBe(8);
     expect(verified.name).toBe("Product Platform");
+    expect(verified.dissolvedAt).toBe(dissolution.dissolvedAt);
+    expect(verified.dissolvedByMembershipId).toBe(promotedAdmin.membershipId);
     expect(verified.members.get(promotedAdmin.membershipId)?.role).toBe(
       "OWNER",
     );
@@ -256,6 +279,20 @@ describe("organization signed directory", () => {
         { ...rename, signature: owner.sign(renameUnsigned) },
       ]),
     ).toThrow("rename signature is invalid");
+
+    expect(() =>
+      verifyOrganizationDirectory(document, [
+        ownerCertificate,
+        adminMember,
+        promotedAdmin,
+        memberCertificate,
+        leftMember,
+        transfer,
+        rename,
+        dissolution,
+        { ...rename, organizationRevision: 9, previousName: rename.name },
+      ]),
+    ).toThrow("cannot change after dissolution");
   });
 
   it("does not let an owner leave before ownership is transferred", () => {

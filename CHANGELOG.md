@@ -12,6 +12,7 @@ All notable changes to this project are documented in this file. The format is b
 - Active Admins and Members can leave an organization with a self-signed directory event. Local Session contexts are cleared while membership history remains auditable; Owners must transfer ownership first.
 - Two-party signed ownership transfer lets the current Owner propose and the target explicitly accept before Relay atomically establishes one new Owner and demotes the previous Owner to Admin. Proposals support cancellation, rejection, expiry, and stale-revision invalidation.
 - Owners can rename organizations through an append-only signed metadata event that preserves the pinned root and auditable name history.
+- Owners can irreversibly dissolve organizations through a signed terminal event. Relay closes invitations, pending joins, ownership proposals, and new protocol-v2 routing; Nodes clear Session context while retaining signed directories and task history for audit.
 
 ## [0.7.0] - 2026-08-19
 

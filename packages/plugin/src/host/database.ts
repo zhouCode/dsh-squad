@@ -135,6 +135,8 @@ export interface OrganizationDirectoryRecord {
   document: OrganizationDocument;
   name: string;
   revision: number;
+  dissolvedAt?: string;
+  dissolvedByMembershipId?: string;
   events: OrganizationDirectoryEvent[];
   members: Map<string, OrganizationMembershipCertificate>;
   selfStatus: "ACTIVE" | "PENDING" | "DISABLED";
@@ -383,6 +385,7 @@ export class SquadDatabase {
         self_status TEXT NOT NULL CHECK (self_status IN ('ACTIVE', 'PENDING', 'DISABLED')),
         highest_revision INTEGER NOT NULL CHECK (highest_revision >= 0),
         pending_owner_transfer_json TEXT,
+        dissolved_at TEXT,
         created_at TEXT NOT NULL,
         updated_at TEXT NOT NULL
       );
@@ -597,7 +600,19 @@ export class SquadDatabase {
       this.#db.exec("UPDATE schema_meta SET version = 10 WHERE singleton = 1");
       currentVersion = 10;
     }
-    if (currentVersion !== 10) {
+    if (currentVersion === 10) {
+      const organizationColumns = this.#db
+        .prepare("PRAGMA table_info(organizations)")
+        .all() as SqlRow[];
+      if (
+        !organizationColumns.some((column) => column.name === "dissolved_at")
+      ) {
+        this.#db.exec("ALTER TABLE organizations ADD COLUMN dissolved_at TEXT");
+      }
+      this.#db.exec("UPDATE schema_meta SET version = 11 WHERE singleton = 1");
+      currentVersion = 11;
+    }
+    if (currentVersion !== 11) {
       throw new Error(
         `unsupported Squad database version ${String(currentVersion)}`,
       );
@@ -1050,7 +1065,7 @@ export class SquadDatabase {
     }
     const existing = this.#db
       .prepare(
-        "SELECT document_json, self_status, highest_revision, pending_owner_transfer_json FROM organizations WHERE organization_id = ?",
+        "SELECT document_json, self_status, highest_revision, pending_owner_transfer_json, dissolved_at FROM organizations WHERE organization_id = ?",
       )
       .get(bundle.document.organizationId) as SqlRow | undefined;
     if (
@@ -1103,6 +1118,7 @@ export class SquadDatabase {
       existing === undefined ||
       previousRevision !== bundle.revision ||
       existing.self_status !== bundle.selfStatus ||
+      optionalString(existing.dissolved_at) !== verified.dissolvedAt ||
       previousRequests !== nextRequests ||
       (optionalString(existing.pending_owner_transfer_json) ?? "") !==
         (bundle.pendingOwnerTransfer === undefined
@@ -1115,13 +1131,15 @@ export class SquadDatabase {
           `
           INSERT INTO organizations(
             organization_id, name, document_json, self_status,
-            highest_revision, pending_owner_transfer_json, created_at, updated_at
-          ) VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+            highest_revision, pending_owner_transfer_json, dissolved_at,
+            created_at, updated_at
+          ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
           ON CONFLICT(organization_id) DO UPDATE SET
             name = excluded.name,
             self_status = excluded.self_status,
             highest_revision = excluded.highest_revision,
             pending_owner_transfer_json = excluded.pending_owner_transfer_json,
+            dissolved_at = excluded.dissolved_at,
             updated_at = excluded.updated_at
         `,
         )
@@ -1134,6 +1152,7 @@ export class SquadDatabase {
           bundle.pendingOwnerTransfer === undefined
             ? null
             : JSON.stringify(bundle.pendingOwnerTransfer),
+          verified.dissolvedAt ?? null,
           bundle.document.createdAt,
           now,
         );
@@ -1159,9 +1178,11 @@ export class SquadDatabase {
         const issuedAt =
           "transferId" in event
             ? event.acceptedAt
-            : "eventId" in event
+            : "kind" in event && event.kind === "ORGANIZATION_RENAME"
               ? event.renamedAt
-              : event.issuedAt;
+              : "kind" in event && event.kind === "ORGANIZATION_DISSOLVED"
+                ? event.dissolvedAt
+                : event.issuedAt;
         insertEvent.run(
           bundle.document.organizationId,
           event.organizationRevision,
@@ -1239,7 +1260,10 @@ export class SquadDatabase {
           request.requestedAt,
         );
       }
-      if (bundle.selfStatus !== "ACTIVE") {
+      if (
+        bundle.selfStatus !== "ACTIVE" ||
+        verified.dissolvedAt !== undefined
+      ) {
         this.#db
           .prepare(
             "DELETE FROM session_organizations WHERE organization_id = ?",
@@ -1274,7 +1298,8 @@ export class SquadDatabase {
     const verified = verifyOrganizationDirectory(document, events);
     if (
       verified.revision !== Number(row.highest_revision) ||
-      verified.name !== String(row.name)
+      verified.name !== String(row.name) ||
+      verified.dissolvedAt !== optionalString(row.dissolved_at)
     ) {
       throw new Error("local organization revision is inconsistent");
     }
@@ -1299,6 +1324,12 @@ export class SquadDatabase {
       document,
       name: verified.name,
       revision: verified.revision,
+      ...(verified.dissolvedAt === undefined
+        ? {}
+        : { dissolvedAt: verified.dissolvedAt }),
+      ...(verified.dissolvedByMembershipId === undefined
+        ? {}
+        : { dissolvedByMembershipId: verified.dissolvedByMembershipId }),
       events,
       members: verified.members,
       selfStatus: row.self_status as "ACTIVE" | "PENDING" | "DISABLED",
@@ -1363,6 +1394,13 @@ export class SquadDatabase {
       return {
         organizationId,
         name: String(row.name),
+        lifecycleStatus:
+          optionalString(row.dissolved_at) === undefined
+            ? "ACTIVE"
+            : "DISSOLVED",
+        ...(optionalString(row.dissolved_at) === undefined
+          ? {}
+          : { dissolvedAt: String(row.dissolved_at) }),
         ...(self === undefined ? {} : { role: self.role }),
         ...(self === undefined ? {} : { selfMembershipId: self.membershipId }),
         membershipStatus: row.self_status as "ACTIVE" | "PENDING" | "DISABLED",
@@ -1421,6 +1459,15 @@ export class SquadDatabase {
     membershipId: string,
     candidate: Partial<PeerPolicy>,
   ): OrganizationMemberView {
+    const organization = this.#db
+      .prepare(
+        "SELECT dissolved_at FROM organizations WHERE organization_id = ?",
+      )
+      .get(organizationId) as SqlRow | undefined;
+    if (organization === undefined) throw new Error("unknown organization");
+    if (optionalString(organization.dissolved_at) !== undefined) {
+      throw new Error("the organization has been dissolved");
+    }
     const row = this.#db
       .prepare(
         `
@@ -1493,7 +1540,8 @@ export class SquadDatabase {
     const organization = this.findOrganization(organizationId, selfNodeId);
     if (
       organization === undefined ||
-      organization.membershipStatus !== "ACTIVE"
+      organization.membershipStatus !== "ACTIVE" ||
+      organization.lifecycleStatus !== "ACTIVE"
     ) {
       throw new Error("organization is not active for this Node");
     }

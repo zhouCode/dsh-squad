@@ -292,11 +292,13 @@ describe("Squad host health", () => {
     const transferId = "bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb";
     const targetMembershipId = "cccccccc-cccc-4ccc-8ccc-cccccccccccc";
     const renameOrganization = vi.fn(async () => undefined);
+    const dissolveOrganization = vi.fn(async () => undefined);
     const proposeOrganizationOwnershipTransfer = vi.fn(async () => undefined);
     const acceptOrganizationOwnershipTransfer = vi.fn(async () => undefined);
     const declineOrganizationOwnershipTransfer = vi.fn(async () => undefined);
     const squad = {
       renameOrganization,
+      dissolveOrganization,
       proposeOrganizationOwnershipTransfer,
       acceptOrganizationOwnershipTransfer,
       declineOrganizationOwnershipTransfer,
@@ -321,6 +323,20 @@ describe("Squad host health", () => {
     expect(renameOrganization).toHaveBeenCalledWith(
       organizationId,
       "Product Core",
+    );
+
+    const dissolved = await fetch(
+      `http://127.0.0.1:${address.port}/squad/v1/local/organizations/${organizationId}/dissolve`,
+      {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({ reason: "Project completed" }),
+      },
+    );
+    expect(dissolved.status).toBe(200);
+    expect(dissolveOrganization).toHaveBeenCalledWith(
+      organizationId,
+      "Project completed",
     );
 
     const proposed = await fetch(base, {

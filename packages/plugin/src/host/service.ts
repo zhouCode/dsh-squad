@@ -60,6 +60,7 @@ import {
   organizationOwnershipTransferAcceptance,
   organizationRoleSchema,
   unsignedOrganizationDocumentSchema,
+  unsignedOrganizationDissolutionEventSchema,
   unsignedOrganizationJoinRequestSchema,
   unsignedOrganizationMembershipCertificateSchema,
   unsignedOrganizationOwnershipTransferProposalSchema,
@@ -1024,6 +1025,9 @@ export class SquadService extends Service {
   private selfOrganizationMember(
     directory: OrganizationDirectoryRecord,
   ): OrganizationMembershipCertificate {
+    if (directory.dissolvedAt !== undefined) {
+      throw new Error("the organization has been dissolved");
+    }
     const member = [...directory.members.values()].find(
       (candidate) =>
         candidate.nodeId === this.identity.nodeId &&
@@ -1126,7 +1130,8 @@ export class SquadService extends Service {
     );
     if (
       organization === undefined ||
-      organization.membershipStatus !== "ACTIVE"
+      organization.membershipStatus !== "ACTIVE" ||
+      organization.lifecycleStatus !== "ACTIVE"
     ) {
       throw new Error("unknown active organization");
     }
@@ -1150,6 +1155,7 @@ export class SquadService extends Service {
     if (
       organization === undefined ||
       organization.membershipStatus !== "ACTIVE" ||
+      organization.lifecycleStatus !== "ACTIVE" ||
       organization.role === undefined ||
       !["OWNER", "ADMIN"].includes(organization.role)
     ) {
@@ -1172,6 +1178,7 @@ export class SquadService extends Service {
     if (
       organization === undefined ||
       organization.membershipStatus !== "ACTIVE" ||
+      organization.lifecycleStatus !== "ACTIVE" ||
       organization.role === undefined ||
       !["OWNER", "ADMIN"].includes(organization.role)
     ) {
@@ -1194,7 +1201,8 @@ export class SquadService extends Service {
     );
     if (
       organization === undefined ||
-      organization.membershipStatus !== "ACTIVE"
+      organization.membershipStatus !== "ACTIVE" ||
+      organization.lifecycleStatus !== "ACTIVE"
     ) {
       throw new Error("unknown active organization");
     }
@@ -1590,6 +1598,42 @@ export class SquadService extends Service {
     await this.syncOrganizations();
   }
 
+  async dissolveOrganization(
+    organizationId: string,
+    reasonCandidate?: string,
+  ): Promise<void> {
+    const reason = reasonCandidate?.trim();
+    if (reason !== undefined && (reason.length < 1 || reason.length > 500)) {
+      throw new Error("dissolution reason must contain 1 to 500 characters");
+    }
+    await this.syncOrganizations();
+    const directory = this.database.organizationDirectory(organizationId);
+    if (directory === undefined) throw new Error("unknown organization");
+    const owner = this.selfOrganizationMember(directory);
+    if (owner.role !== "OWNER") {
+      throw new Error("only the Owner can dissolve the organization");
+    }
+    const unsigned = unsignedOrganizationDissolutionEventSchema.parse({
+      version: 1,
+      kind: "ORGANIZATION_DISSOLVED",
+      eventId: randomUUID(),
+      organizationId,
+      organizationRevision: directory.revision + 1,
+      name: directory.name,
+      issuer: {
+        membershipId: owner.membershipId,
+        nodeId: owner.nodeId,
+      },
+      ...(reason === undefined ? {} : { reason }),
+      dissolvedAt: new Date().toISOString(),
+    });
+    await this.requireRelayClient().dissolveOrganization(organizationId, {
+      ...unsigned,
+      signature: this.identity.sign(unsigned),
+    });
+    await this.syncOrganizations();
+  }
+
   async acceptOrganizationOwnershipTransfer(
     organizationId: string,
     transferId: string,
@@ -1857,6 +1901,7 @@ export class SquadService extends Service {
     if (
       organization === undefined ||
       organization.membershipStatus !== "ACTIVE" ||
+      organization.lifecycleStatus !== "ACTIVE" ||
       organization.selfMembershipId === undefined
     ) {
       throw new Error("the selected organization is not active on this Node");
@@ -2427,6 +2472,7 @@ export class SquadService extends Service {
       );
       if (
         organization?.membershipStatus !== "ACTIVE" ||
+        organization.lifecycleStatus !== "ACTIVE" ||
         sender === undefined ||
         sender.status !== "ACTIVE" ||
         sender.nodeId !== envelope.senderNodeId ||

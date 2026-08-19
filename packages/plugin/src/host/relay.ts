@@ -22,6 +22,7 @@ import {
 import {
   organizationDirectoryBundleSchema,
   organizationDirectoryEventSchema,
+  organizationDissolutionEventSchema,
   organizationDocumentSchema,
   organizationIdFromInvitation,
   organizationInvitation,
@@ -94,6 +95,10 @@ const acceptOwnershipTransferSchema = z.strictObject({
 
 const renameOrganizationSchema = z.strictObject({
   event: organizationRenameEventSchema,
+});
+
+const dissolveOrganizationSchema = z.strictObject({
+  event: organizationDissolutionEventSchema,
 });
 
 const createOrganizationInvitationSchema = z.strictObject({
@@ -240,6 +245,7 @@ export class RelayServer {
         authority_id TEXT NOT NULL UNIQUE,
         owner_membership_id TEXT NOT NULL,
         revision INTEGER NOT NULL CHECK (revision >= 1),
+        dissolved_at TEXT,
         created_at TEXT NOT NULL,
         updated_at TEXT NOT NULL
       );
@@ -390,7 +396,19 @@ export class RelayServer {
       this.#db.exec("UPDATE schema_meta SET version = 5 WHERE singleton = 1");
       version = 5;
     }
-    if (version !== 5) {
+    if (version === 5) {
+      const columns = this.#db
+        .prepare("PRAGMA table_info(relay_organizations)")
+        .all() as SqlRow[];
+      if (!columns.some((column) => column.name === "dissolved_at")) {
+        this.#db.exec(
+          "ALTER TABLE relay_organizations ADD COLUMN dissolved_at TEXT",
+        );
+      }
+      this.#db.exec("UPDATE schema_meta SET version = 6 WHERE singleton = 1");
+      version = 6;
+    }
+    if (version !== 6) {
       throw new Error(
         `unsupported Squad Relay database version ${String(version)}`,
       );
@@ -624,10 +642,12 @@ export class RelayServer {
     revision: number;
     events: OrganizationDirectoryEvent[];
     members: Map<string, OrganizationMembershipCertificate>;
+    dissolvedAt?: string;
+    dissolvedByMembershipId?: string;
   } {
     const row = this.#db
       .prepare(
-        "SELECT document_json, name, revision FROM relay_organizations WHERE organization_id = ?",
+        "SELECT document_json, name, revision, dissolved_at FROM relay_organizations WHERE organization_id = ?",
       )
       .get(organizationId) as SqlRow | undefined;
     if (row === undefined) throw new HttpError(404, "ORGANIZATION_NOT_FOUND");
@@ -648,7 +668,9 @@ export class RelayServer {
     const verified = verifyOrganizationDirectory(document, events);
     if (
       verified.revision !== Number(row.revision) ||
-      verified.name !== String(row.name)
+      verified.name !== String(row.name) ||
+      verified.dissolvedAt !==
+        (typeof row.dissolved_at === "string" ? row.dissolved_at : undefined)
     ) {
       throw new Error("Relay organization revision is inconsistent");
     }
@@ -658,7 +680,21 @@ export class RelayServer {
       revision: verified.revision,
       events,
       members: verified.members,
+      ...(verified.dissolvedAt === undefined
+        ? {}
+        : { dissolvedAt: verified.dissolvedAt }),
+      ...(verified.dissolvedByMembershipId === undefined
+        ? {}
+        : { dissolvedByMembershipId: verified.dissolvedByMembershipId }),
     };
+  }
+
+  private assertOrganizationActive(
+    directory: ReturnType<RelayServer["organizationDirectory"]>,
+  ): void {
+    if (directory.dissolvedAt !== undefined) {
+      throw new HttpError(410, "ORGANIZATION_DISSOLVED");
+    }
   }
 
   private organizationMemberForNode(
@@ -674,6 +710,7 @@ export class RelayServer {
     directory: ReturnType<RelayServer["organizationDirectory"]>,
     nodeId: string,
   ): OrganizationMembershipCertificate {
+    this.assertOrganizationActive(directory);
     const member = this.organizationMemberForNode(directory, nodeId);
     if (
       member === undefined ||
@@ -719,6 +756,7 @@ export class RelayServer {
   ): { organizationId: string; transferId: string; status: "PENDING" } {
     const { proposal } = proposeOwnershipTransferSchema.parse(value);
     const directory = this.organizationDirectory(organizationId);
+    this.assertOrganizationActive(directory);
     const owner = this.organizationMemberForNode(
       directory,
       authenticatedNodeId,
@@ -831,6 +869,7 @@ export class RelayServer {
       throw new HttpError(403, "OWNERSHIP_TRANSFER_TARGET_REQUIRED");
     }
     const directory = this.organizationDirectory(organizationId);
+    this.assertOrganizationActive(directory);
     if (
       proposal.organizationRevision !== directory.revision + 1 ||
       Date.parse(proposal.expiresAt) <= Date.now()
@@ -937,6 +976,7 @@ export class RelayServer {
   ): { organizationId: string; revision: number; name: string } {
     const { event } = renameOrganizationSchema.parse(value);
     const directory = this.organizationDirectory(organizationId);
+    this.assertOrganizationActive(directory);
     const owner = this.organizationMemberForNode(
       directory,
       authenticatedNodeId,
@@ -983,6 +1023,76 @@ export class RelayServer {
     return { organizationId, revision: event.organizationRevision, name };
   }
 
+  private dissolveOrganization(
+    organizationId: string,
+    value: unknown,
+    authenticatedNodeId: string,
+  ): { organizationId: string; revision: number; dissolvedAt: string } {
+    const { event } = dissolveOrganizationSchema.parse(value);
+    const directory = this.organizationDirectory(organizationId);
+    this.assertOrganizationActive(directory);
+    const owner = this.organizationMemberForNode(
+      directory,
+      authenticatedNodeId,
+    );
+    if (
+      owner === undefined ||
+      owner.status !== "ACTIVE" ||
+      owner.role !== "OWNER"
+    ) {
+      throw new HttpError(403, "ORGANIZATION_OWNER_REQUIRED");
+    }
+    if (
+      event.organizationId !== organizationId ||
+      event.issuer.membershipId !== owner.membershipId ||
+      event.issuer.nodeId !== authenticatedNodeId
+    ) {
+      throw new HttpError(400, "ORGANIZATION_DISSOLUTION_MISMATCH");
+    }
+    if (Math.abs(Date.now() - Date.parse(event.dissolvedAt)) > 5 * 60_000) {
+      throw new HttpError(400, "ORGANIZATION_DISSOLUTION_EXPIRED");
+    }
+    try {
+      applyOrganizationDirectoryEvent(
+        directory.document,
+        directory.members,
+        directory.revision,
+        event,
+        directory.name,
+      );
+    } catch (error) {
+      throw new HttpError(
+        400,
+        "ORGANIZATION_DISSOLUTION_INVALID",
+        error instanceof Error ? error.message : String(error),
+      );
+    }
+    const now = new Date().toISOString();
+    this.#db.exec("BEGIN IMMEDIATE");
+    try {
+      this.insertOrganizationEventUnsafe(event);
+      this.#db
+        .prepare(
+          "UPDATE relay_organization_invites SET revoked_at = coalesce(revoked_at, ?) WHERE organization_id = ? AND used_by_request_id IS NULL",
+        )
+        .run(now, organizationId);
+      this.#db
+        .prepare(
+          "UPDATE relay_organization_join_requests SET status = 'REJECTED', resolved_at = coalesce(resolved_at, ?) WHERE organization_id = ? AND status = 'PENDING'",
+        )
+        .run(now, organizationId);
+      this.#db.exec("COMMIT");
+    } catch (error) {
+      this.#db.exec("ROLLBACK");
+      throw error;
+    }
+    return {
+      organizationId,
+      revision: event.organizationRevision,
+      dissolvedAt: event.dissolvedAt,
+    };
+  }
+
   private insertOrganizationEventUnsafe(
     event: OrganizationDirectoryEvent,
   ): void {
@@ -1007,9 +1117,11 @@ export class RelayServer {
     const issuedAt =
       "transferId" in event
         ? event.acceptedAt
-        : "eventId" in event
+        : "kind" in event && event.kind === "ORGANIZATION_RENAME"
           ? event.renamedAt
-          : event.issuedAt;
+          : "kind" in event && event.kind === "ORGANIZATION_DISSOLVED"
+            ? event.dissolvedAt
+            : event.issuedAt;
     this.#db
       .prepare(
         `
@@ -1084,12 +1196,19 @@ export class RelayServer {
         )
         .run(new Date().toISOString(), event.organizationId, event.transferId);
     } else {
-      if ("eventId" in event) {
+      if ("kind" in event && event.kind === "ORGANIZATION_RENAME") {
         this.#db
           .prepare(
             "UPDATE relay_organizations SET name = ? WHERE organization_id = ?",
           )
           .run(event.name, event.organizationId);
+      }
+      if ("kind" in event && event.kind === "ORGANIZATION_DISSOLVED") {
+        this.#db
+          .prepare(
+            "UPDATE relay_organizations SET dissolved_at = ? WHERE organization_id = ?",
+          )
+          .run(event.dissolvedAt, event.organizationId);
       }
       this.#db
         .prepare(
@@ -1457,7 +1576,8 @@ export class RelayServer {
     if (Math.abs(Date.now() - Date.parse(request.requestedAt)) > 5 * 60_000) {
       throw new HttpError(400, "JOIN_REQUEST_EXPIRED");
     }
-    this.organizationDirectory(organizationId);
+    const directory = this.organizationDirectory(organizationId);
+    this.assertOrganizationActive(directory);
     const existingMember = this.#db
       .prepare(
         "SELECT membership_id FROM relay_organization_members WHERE organization_id = ? AND node_id = ?",
@@ -1545,6 +1665,7 @@ export class RelayServer {
   ): { organizationId: string; revision: number } {
     const input = approveJoinRequestSchema.parse(value);
     const directory = this.organizationDirectory(organizationId);
+    this.assertOrganizationActive(directory);
     const manager = this.assertOrganizationManager(
       directory,
       authenticatedNodeId,
@@ -1669,6 +1790,7 @@ export class RelayServer {
   ): { organizationId: string; revision: number; status: "DISABLED" } {
     const input = updateMemberCertificateSchema.parse(value);
     const directory = this.organizationDirectory(organizationId);
+    this.assertOrganizationActive(directory);
     const member = this.organizationMemberForNode(
       directory,
       authenticatedNodeId,
@@ -1768,6 +1890,7 @@ export class RelayServer {
         throw new HttpError(400, "ORGANIZATION_ROUTING_REQUIRED");
       }
       const directory = this.organizationDirectory(organizationId);
+      this.assertOrganizationActive(directory);
       const senderMember = directory.members.get(senderMembershipId);
       const recipientMember = directory.members.get(recipientMembershipId);
       if (
@@ -1921,6 +2044,9 @@ export class RelayServer {
                 FROM relay_organization_members self
                 JOIN relay_organization_members teammate
                   ON teammate.organization_id = self.organization_id
+                JOIN relay_organizations organization
+                  ON organization.organization_id = self.organization_id
+                 AND organization.dissolved_at IS NULL
                 WHERE self.node_id = ?
                   AND self.status = 'ACTIVE'
                   AND teammate.node_id = n.node_id
@@ -2136,6 +2262,27 @@ export class RelayServer {
           200,
           this.renameOrganization(
             renameOrganizationRoute[1],
+            jsonBody(body),
+            auth.nodeId,
+          ),
+        );
+        return true;
+      }
+      const dissolveOrganizationRoute =
+        /^\/squad\/v1\/organizations\/([0-9a-f-]{36})\/dissolve$/u.exec(
+          url.pathname,
+        );
+      if (
+        req.method === "POST" &&
+        dissolveOrganizationRoute?.[1] !== undefined
+      ) {
+        const body = await readBody(req, 32 * 1024);
+        const auth = this.authenticate(req, path, body);
+        reply(
+          res,
+          200,
+          this.dissolveOrganization(
+            dissolveOrganizationRoute[1],
             jsonBody(body),
             auth.nodeId,
           ),
