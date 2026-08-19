@@ -90,6 +90,8 @@ Chat triggering stays unobtrusive: use natural language or `@member`, or use nam
 
 v0.5.0 adds `Agent Inbox → Updates` and a separate `dsh-squad-update` executable. The default is notify-only; users may instead disable checks or opt into installation while the Node is idle. The plugin process never replaces itself. Only a separately configured systemd updater may stop the service, back up the profile and explicit data paths, install a GitHub Release verified by both an Ed25519-signed manifest and SHA-256, restart, and check the reported version. Failure restores the old profile and data.
 
+The Update Center exposes a preflight checklist before installation: updater configuration, verified-release availability, duplicate requests, active Delegations, and dispatching plans. The request button remains disabled until all items pass, and the external updater independently enforces the same idle-work rule before shutdown.
+
 v0.5.0 must be installed manually before later releases can use self-update. See the repository's [English README](https://github.com/zhouCode/dsh-squad/blob/main/README.en.md#safe-updates-for-an-always-on-relay) for full systemd setup, commands, and safety constraints. This updates Squad only, not DSH or other plugins.
 
 ## Languages

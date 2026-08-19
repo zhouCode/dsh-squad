@@ -13,7 +13,7 @@ import {
 } from "node:fs/promises";
 import { basename, dirname, join, resolve } from "node:path";
 import { z } from "zod";
-import type { UpdateStatus } from "../shared/updates.ts";
+import { countUpdateActiveWork, type UpdateStatus } from "../shared/updates.ts";
 import { SQUAD_VERSION } from "../shared/version.ts";
 import {
   checkLatestRelease,
@@ -178,16 +178,11 @@ async function assertNodeIdle(
       `updater ${SQUAD_VERSION} is connected to Squad ${state.updates.currentVersion}`,
     );
   }
-  const activeDelegations = state.delegations.filter((item) =>
-    ["TRIAGING", "RUNNING"].includes(item.status ?? ""),
-  );
-  const activePlans = state.plans.filter(
-    (item) => item.status === "DISPATCHING",
-  );
-  if (activeDelegations.length > 0 || activePlans.length > 0) {
+  const { activeDelegations, dispatchingPlans } = countUpdateActiveWork(state);
+  if (activeDelegations > 0 || dispatchingPlans > 0) {
     throw new UpdateBlockedError(
       "ACTIVE_WORK",
-      `update deferred: ${activeDelegations.length} active delegation(s) and ${activePlans.length} dispatching plan(s)`,
+      `update deferred: ${activeDelegations} active delegation(s) and ${dispatchingPlans} dispatching plan(s)`,
     );
   }
   return state.identity.nodeId;

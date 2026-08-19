@@ -32,7 +32,11 @@ import {
   type RelayOperationsSnapshot,
   type SquadAttentionSummary,
 } from "../shared/state.ts";
-import type { UpdateMode, UpdateSnapshot } from "../shared/updates.ts";
+import type {
+  UpdateMode,
+  UpdateReadiness,
+  UpdateSnapshot,
+} from "../shared/updates.ts";
 import {
   parseAttachmentDrafts,
   type AttachmentDraft,
@@ -167,6 +171,7 @@ interface LocalState {
   plans: TeamPlan[];
   delegations: DelegationView[];
   updates: UpdateSnapshot;
+  updateReadiness: UpdateReadiness;
   connection: SquadConnectionDiagnostics;
 }
 
@@ -4486,6 +4491,7 @@ function UpdateCenter({
   const [error, setError] = useState<string>();
   const { confirm, confirmation } = useConfirmation(t);
   const updates = state.updates;
+  const readiness = state.updateReadiness;
   const run = async (
     action: "check" | "policy" | "install",
     operation: () => Promise<unknown>,
@@ -4612,6 +4618,100 @@ function UpdateCenter({
           <p className="squad-muted">{t("updates.updaterSetupHint")}</p>
         ) : null}
       </section>
+      <section className="squad-update-readiness">
+        <header>
+          <div>
+            <h3>{t("updates.readinessTitle")}</h3>
+            <p className="squad-muted">{t("updates.readinessHint")}</p>
+          </div>
+          <span
+            className={`squad-status ${
+              readiness.ready ? "squad-update-ready" : "squad-update-not-ready"
+            }`}
+          >
+            {readiness.ready ? t("updates.ready") : t("updates.notReady")}
+          </span>
+        </header>
+        <ul>
+          <li className={readiness.updaterConfigured ? "ready" : "blocked"}>
+            <span aria-hidden="true">
+              {readiness.updaterConfigured ? "✓" : "!"}
+            </span>
+            <div>
+              <strong>{t("updates.readinessUpdater")}</strong>
+              <small>
+                {readiness.updaterConfigured
+                  ? t("updates.readinessUpdaterReady")
+                  : t("updates.readinessUpdaterBlocked")}
+              </small>
+            </div>
+          </li>
+          <li
+            className={readiness.verifiedReleaseAvailable ? "ready" : "blocked"}
+          >
+            <span aria-hidden="true">
+              {readiness.verifiedReleaseAvailable ? "✓" : "!"}
+            </span>
+            <div>
+              <strong>{t("updates.readinessRelease")}</strong>
+              <small>
+                {readiness.verifiedReleaseAvailable
+                  ? t("updates.readinessReleaseReady", {
+                      version: updates.status.latestVersion ?? "",
+                    })
+                  : t("updates.readinessReleaseBlocked")}
+              </small>
+            </div>
+          </li>
+          <li className={readiness.installRequested ? "blocked" : "ready"}>
+            <span aria-hidden="true">
+              {readiness.installRequested ? "!" : "✓"}
+            </span>
+            <div>
+              <strong>{t("updates.readinessRequest")}</strong>
+              <small>
+                {readiness.installRequested
+                  ? t("updates.readinessRequestBlocked")
+                  : t("updates.readinessRequestReady")}
+              </small>
+            </div>
+          </li>
+          <li
+            className={readiness.activeDelegations === 0 ? "ready" : "blocked"}
+          >
+            <span aria-hidden="true">
+              {readiness.activeDelegations === 0 ? "✓" : "!"}
+            </span>
+            <div>
+              <strong>{t("updates.readinessDelegations")}</strong>
+              <small>
+                {readiness.activeDelegations === 0
+                  ? t("updates.readinessDelegationsReady")
+                  : t("updates.readinessDelegationsBlocked", {
+                      count: readiness.activeDelegations,
+                    })}
+              </small>
+            </div>
+          </li>
+          <li
+            className={readiness.dispatchingPlans === 0 ? "ready" : "blocked"}
+          >
+            <span aria-hidden="true">
+              {readiness.dispatchingPlans === 0 ? "✓" : "!"}
+            </span>
+            <div>
+              <strong>{t("updates.readinessPlans")}</strong>
+              <small>
+                {readiness.dispatchingPlans === 0
+                  ? t("updates.readinessPlansReady")
+                  : t("updates.readinessPlansBlocked", {
+                      count: readiness.dispatchingPlans,
+                    })}
+              </small>
+            </div>
+          </li>
+        </ul>
+      </section>
       {updates.status.detail === undefined ? null : (
         <p className="squad-warning">
           {updates.status.errorCode === undefined
@@ -4639,12 +4739,7 @@ function UpdateCenter({
         </button>
         <button
           type="button"
-          disabled={
-            busy !== undefined ||
-            updates.automation === undefined ||
-            updates.status.available !== true ||
-            updates.installRequested
-          }
+          disabled={busy !== undefined || !readiness.ready}
           onClick={() => void requestInstall()}
         >
           {t("updates.installNow")}
@@ -5281,6 +5376,7 @@ const css = `
 .squad-setup-fields hr{border:0;border-top:1px solid var(--dsw-alias-border-l2,#ddd);margin:16px 0}.squad-connection-required{display:grid;align-content:center;justify-items:start;max-width:620px}.squad-connection-required h2{margin-bottom:0}
 @media(max-width:700px){.squad-onboarding{padding:10px 16px 24px}.squad-mode-picker{grid-template-columns:1fr}.squad-node-setup>header h2{font-size:22px}}
 .squad-updates{overflow:auto;padding:22px 26px;max-width:760px}.squad-updates>header{display:flex;align-items:flex-start;justify-content:space-between;gap:16px}.squad-updates h2{margin:0}.squad-updates h3{font-size:14px;margin:24px 0 8px}.squad-updates label{display:grid;gap:6px;margin:12px 0;font-size:13px}.squad-updates select{box-sizing:border-box;width:100%;max-width:360px;border:1px solid var(--dsw-alias-border-l2,#ccc);border-radius:9px;background:var(--dsw-specific-dialog-fill,#fff);color:inherit;padding:9px;font:inherit}.squad-updates button{border:0;border-radius:9px;padding:8px 12px;background:#315ee8;color:#fff;cursor:pointer}.squad-updates button:disabled{opacity:.5;cursor:not-allowed}.squad-updates a{color:#315ee8}.squad-update-summary{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:10px;margin:18px 0}.squad-update-summary>div{display:grid;gap:5px;padding:13px;border:1px solid var(--dsw-alias-border-l2,#ddd);border-radius:11px}.squad-update-summary span{font-size:11px;color:var(--dsw-alias-label-secondary,#666)}.squad-update-summary strong{overflow-wrap:anywhere}.squad-update-status-failed,.squad-update-status-rolled_back{background:#fde4e1;color:#a52a24}.squad-update-status-available,.squad-update-status-requested,.squad-update-status-blocked{background:#fff0c7;color:#755400}.squad-update-status-installed,.squad-update-status-up_to_date{background:#dff5e6;color:#176c35}@media(max-width:700px){.squad-updates{padding:16px}.squad-update-summary{grid-template-columns:1fr}}
+.squad-update-readiness{margin-top:22px;padding:15px;border:1px solid var(--dsw-alias-border-l2,#ddd);border-radius:13px}.squad-update-readiness>header{display:flex;align-items:flex-start;justify-content:space-between;gap:12px}.squad-update-readiness>header h3{margin:0 0 4px}.squad-update-readiness>header p{margin:0}.squad-update-readiness ul{display:grid;gap:8px;margin:14px 0 0;padding:0;list-style:none}.squad-update-readiness li{display:flex;align-items:flex-start;gap:9px;padding:9px;border-radius:9px}.squad-update-readiness li>span{display:grid;place-items:center;flex:0 0 20px;width:20px;height:20px;border-radius:50%;font-weight:700}.squad-update-readiness li>div{display:grid;gap:2px}.squad-update-readiness li small{color:inherit;opacity:.82}.squad-update-readiness li.ready{background:#edf8f0;color:#176c35}.squad-update-readiness li.ready>span,.squad-update-ready{background:#d3efdc;color:#176c35}.squad-update-readiness li.blocked{background:#fff8e5;color:#755400}.squad-update-readiness li.blocked>span,.squad-update-not-ready{background:#fff0c7;color:#755400}@media(max-width:700px){.squad-update-readiness>header{display:grid}}
 .squad-trigger{position:relative}.squad-trigger-badge,.squad-tab-count{display:inline-flex;align-items:center;justify-content:center;box-sizing:border-box;min-width:18px;height:18px;padding:0 5px;border-radius:999px;background:#b13c35;color:#fff;font-size:10px;font-weight:700;line-height:1}.squad-trigger:not(.squad-trigger-wide) .squad-trigger-badge{position:absolute;right:0;top:-2px}.squad-tabs button{display:inline-flex;align-items:center;gap:6px}.squad-tabs button.active .squad-tab-count{background:#315ee8}.squad-overview{overflow:auto;padding:24px 28px;flex:1}.squad-overview>header h2{margin:4px 0}.squad-attention-grid{display:grid;grid-template-columns:repeat(4,minmax(0,1fr));gap:10px;margin:20px 0}.squad-attention-grid button{display:grid;gap:5px;text-align:left;border:1px solid var(--dsw-alias-border-l2,#ddd);border-radius:12px;background:transparent;color:inherit;padding:14px;cursor:pointer}.squad-attention-grid button.needs-attention{border-color:#d59b1b;background:#fff8e5;color:#5d470a}.squad-attention-grid strong{font-size:24px}.squad-attention-grid span{font-size:12px;color:var(--dsw-alias-label-secondary,#666)}.squad-next-step{margin-top:18px;padding:18px;border:1px solid var(--dsw-alias-border-l2,#ddd);border-radius:14px}.squad-next-step h3{margin:0 0 7px}.squad-next-step code{display:block;padding:10px;border-radius:9px;background:var(--dsw-alias-interactive-bg-hover,#f4f5f7);overflow-wrap:anywhere}.squad-next-step button,.squad-update-callout{border:0;border-radius:9px;padding:8px 12px;margin-top:12px;background:#315ee8;color:#fff;cursor:pointer}.squad-update-callout{display:block;width:100%;text-align:left;background:#fff0c7;color:#755400}@media(max-width:700px){.squad-attention-grid{grid-template-columns:1fr 1fr}.squad-overview{padding:18px 16px}}
 .squad-tabs{align-items:stretch}.squad-tab-group{display:flex;align-items:center;gap:4px;padding-right:10px;border-right:1px solid var(--dsw-alias-border-l2,#ddd)}.squad-tab-group:last-child{border-right:0}.squad-tab-group-label{align-self:center;color:var(--dsw-alias-label-secondary,#666);font-size:10px;letter-spacing:.08em;text-transform:uppercase;white-space:nowrap}.squad-loading{display:grid;place-items:center;align-content:center;gap:12px;min-height:260px;flex:1;padding:24px;text-align:center}.squad-loading button{border:0;border-radius:9px;padding:8px 12px;background:#315ee8;color:#fff;cursor:pointer}.squad-spinner{width:24px;height:24px;border:3px solid var(--dsw-alias-border-l2,#ddd);border-top-color:#315ee8;border-radius:50%;animation:squad-spin .8s linear infinite}@keyframes squad-spin{to{transform:rotate(360deg)}}@media(max-width:700px){.squad-tab-group-label{display:none}.squad-tab-group{padding-right:4px}}
 .squad-diagnostics{overflow:auto;padding:22px 26px;flex:1}.squad-diagnostics>header{display:flex;align-items:flex-start;justify-content:space-between;gap:16px}.squad-diagnostics>header h2{margin:0}.squad-diagnostics button{border:0;border-radius:9px;padding:8px 12px;background:#315ee8;color:#fff;cursor:pointer}.squad-diagnostics button:disabled{opacity:.5}.squad-diagnostic-grid{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:12px;margin-top:18px}.squad-diagnostic-grid article{min-width:0;border:1px solid var(--dsw-alias-border-l2,#ddd);border-radius:13px;padding:14px}.squad-diagnostic-grid article>header{display:flex;align-items:center;justify-content:space-between;gap:10px}.squad-diagnostic-grid h3{margin:0;font-size:14px}.squad-diagnostic-grid code{display:block;margin:10px 0;overflow-wrap:anywhere;font-size:11px}.squad-diagnostic-grid p,.squad-diagnostic-grid dl{font-size:12px}.squad-diagnostic-grid dl div{display:grid;gap:3px}.squad-diagnostic-grid dt{color:var(--dsw-alias-label-secondary,#666)}.squad-diagnostic-grid dd{margin:0}.squad-connection-unreachable{background:#fde4e1;color:#a52a24}.squad-connection-unverified{background:#fff0c7;color:#755400}.squad-connection-connected,.squad-connection-ready,.squad-connection-serving{background:#dff5e6;color:#176c35}@media(max-width:800px){.squad-diagnostic-grid{grid-template-columns:1fr}.squad-diagnostics{padding:16px}}

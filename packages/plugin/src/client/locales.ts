@@ -484,6 +484,26 @@ export const zh = {
   "updates.updaterNotConfigured": "尚未配置",
   "updates.updaterSetupHint":
     "服务器上的 Relay 需要先运行 dsh-squad-update install-systemd；配置完成前仍可检查，但不能从界面安装。",
+  "updates.readinessTitle": "安装前检查",
+  "updates.readinessHint":
+    "所有项目通过后才能提交安装请求；外部更新器执行前还会再次检查。",
+  "updates.ready": "可以安装",
+  "updates.notReady": "暂不能安装",
+  "updates.readinessUpdater": "外部更新器",
+  "updates.readinessUpdaterReady": "已配置，可以接收安装请求。",
+  "updates.readinessUpdaterBlocked": "尚未配置，请先完成 systemd 更新器安装。",
+  "updates.readinessRelease": "已验证版本",
+  "updates.readinessReleaseReady": "v{version} 已通过签名与哈希验证。",
+  "updates.readinessReleaseBlocked": "没有待安装的已验证版本；请先检查更新。",
+  "updates.readinessRequest": "安装请求",
+  "updates.readinessRequestReady": "当前没有待处理的安装请求。",
+  "updates.readinessRequestBlocked": "已有安装请求，等待外部更新器处理。",
+  "updates.readinessDelegations": "正在执行的委派",
+  "updates.readinessDelegationsReady": "没有处于分析或执行阶段的委派。",
+  "updates.readinessDelegationsBlocked": "仍有 {count} 项委派正在分析或执行。",
+  "updates.readinessPlans": "正在分派的计划",
+  "updates.readinessPlansReady": "没有处于分派过程中的计划。",
+  "updates.readinessPlansBlocked": "仍有 {count} 个计划正在分派。",
   "updates.requestPending": "安装请求已提交；更新器会在节点空闲后处理。",
   "updates.checkNow": "立即检查",
   "updates.checking": "正在检查…",
@@ -1203,6 +1223,32 @@ export const en = {
   "updates.updaterNotConfigured": "Not configured",
   "updates.updaterSetupHint":
     "A server Relay must first run dsh-squad-update install-systemd. Checks work before setup, but installation from this screen does not.",
+  "updates.readinessTitle": "Installation preflight",
+  "updates.readinessHint":
+    "Every item must pass before a request can be submitted. The external updater checks again before changing anything.",
+  "updates.ready": "Ready to install",
+  "updates.notReady": "Not ready",
+  "updates.readinessUpdater": "External updater",
+  "updates.readinessUpdaterReady": "Configured and ready to receive a request.",
+  "updates.readinessUpdaterBlocked":
+    "Not configured; install the systemd updater first.",
+  "updates.readinessRelease": "Verified release",
+  "updates.readinessReleaseReady":
+    "v{version} passed signature and hash verification.",
+  "updates.readinessReleaseBlocked":
+    "No verified release is waiting; check for updates first.",
+  "updates.readinessRequest": "Install request",
+  "updates.readinessRequestReady": "No install request is pending.",
+  "updates.readinessRequestBlocked":
+    "A request is already waiting for the external updater.",
+  "updates.readinessDelegations": "Active delegations",
+  "updates.readinessDelegationsReady":
+    "No delegation is being triaged or executed.",
+  "updates.readinessDelegationsBlocked":
+    "{count} delegation(s) are still being triaged or executed.",
+  "updates.readinessPlans": "Dispatching plans",
+  "updates.readinessPlansReady": "No plan is currently dispatching.",
+  "updates.readinessPlansBlocked": "{count} plan(s) are still dispatching.",
   "updates.requestPending":
     "The installation request is queued; the updater will process it when this Node is idle.",
   "updates.checkNow": "Check now",

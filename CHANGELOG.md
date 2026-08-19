@@ -7,6 +7,7 @@ All notable changes to this project are documented in this file. The format is b
 ### Added
 
 - Relay hosts now expose a local-only operations dashboard with aggregate enrolled-node, live mailbox connection, durable backlog/oldest item, organization/join/invitation, startup, capacity, and rate-limit metrics. It never exposes task payloads or remote-node private metrics.
+- The Update Center now explains installation readiness before accepting a request: external-updater setup, verified-release availability, duplicate requests, active Delegations, and dispatching plans appear as one preflight checklist. The Host and external updater share the same active-work rules and both enforce them.
 - Delegation details now show a four-stage created/delivery/execution/result timeline and an explicit next actor, distinguishing local retry, Relay persistence, peer receipt, local human input, execution, and terminal outcomes.
 - The Squad workbench now reports whether its local server-sent event stream is live, reconnecting, or stale, records the latest successful state read, and offers a `Sync now` action that runs a complete organization/outbox/mailbox/update pump before returning state.
 - Delegation and Team Planner lists now paginate independently in batches of 25, preserve each tab's position, clamp safely when data shrinks, and jump to the page containing a delegation opened from a plan.

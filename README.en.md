@@ -234,6 +234,8 @@ Each Node has three policies, editable under `Agent Inbox → Updates`:
 - `AUTOMATIC`: back up and install while the Node is idle, then restart it.
 - `DISABLED`: disable periodic checks and unattended installation; explicit manual checks remain available.
 
+Before accepting an install request, the page shows a complete preflight checklist: external-updater setup, a verified newer release, any existing request, Delegations being triaged or executed, and plans currently dispatching. A failed item keeps installation disabled and explains why; the external updater applies the same active-work rule again before stopping the service.
+
 v0.5.0 itself must be installed manually; it provides self-update for later releases. First manage the Relay with an existing systemd service and configure one update-state directory shared by the plugin and updater:
 
 ```yaml

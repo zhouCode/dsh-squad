@@ -91,6 +91,70 @@ export interface UpdateSnapshot {
   installRequested: boolean;
 }
 
+export const updateReadinessBlockers = [
+  "UPDATER_NOT_CONFIGURED",
+  "NO_VERIFIED_RELEASE",
+  "INSTALL_ALREADY_REQUESTED",
+  "ACTIVE_DELEGATIONS",
+  "DISPATCHING_PLANS",
+] as const;
+export type UpdateReadinessBlocker = (typeof updateReadinessBlockers)[number];
+
+export interface UpdateActiveWork {
+  activeDelegations: number;
+  dispatchingPlans: number;
+}
+
+export interface UpdateReadiness extends UpdateActiveWork {
+  ready: boolean;
+  updaterConfigured: boolean;
+  verifiedReleaseAvailable: boolean;
+  installRequested: boolean;
+  blockers: UpdateReadinessBlocker[];
+}
+
+export function countUpdateActiveWork(source: {
+  delegations: readonly { status?: string | undefined }[];
+  plans: readonly { status?: string | undefined }[];
+}): UpdateActiveWork {
+  return {
+    activeDelegations: source.delegations.filter((item) =>
+      ["TRIAGING", "RUNNING"].includes(item.status ?? ""),
+    ).length,
+    dispatchingPlans: source.plans.filter(
+      (item) => item.status === "DISPATCHING",
+    ).length,
+  };
+}
+
+export function summarizeUpdateReadiness(
+  snapshot: UpdateSnapshot,
+  source: {
+    delegations: readonly { status?: string | undefined }[];
+    plans: readonly { status?: string | undefined }[];
+  },
+): UpdateReadiness {
+  const activeWork = countUpdateActiveWork(source);
+  const updaterConfigured = snapshot.automation !== undefined;
+  const verifiedReleaseAvailable =
+    snapshot.status.available === true &&
+    snapshot.status.latestVersion !== undefined;
+  const blockers: UpdateReadinessBlocker[] = [];
+  if (!updaterConfigured) blockers.push("UPDATER_NOT_CONFIGURED");
+  if (!verifiedReleaseAvailable) blockers.push("NO_VERIFIED_RELEASE");
+  if (snapshot.installRequested) blockers.push("INSTALL_ALREADY_REQUESTED");
+  if (activeWork.activeDelegations > 0) blockers.push("ACTIVE_DELEGATIONS");
+  if (activeWork.dispatchingPlans > 0) blockers.push("DISPATCHING_PLANS");
+  return {
+    ...activeWork,
+    ready: blockers.length === 0,
+    updaterConfigured,
+    verifiedReleaseAvailable,
+    installRequested: snapshot.installRequested,
+    blockers,
+  };
+}
+
 interface Semver {
   major: number;
   minor: number;

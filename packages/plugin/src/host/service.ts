@@ -90,7 +90,12 @@ import {
   type SquadAttentionSummary,
   type RelayOperationsSnapshot,
 } from "../shared/state.ts";
-import type { UpdateMode, UpdateSnapshot } from "../shared/updates.ts";
+import {
+  summarizeUpdateReadiness,
+  type UpdateMode,
+  type UpdateReadiness,
+  type UpdateSnapshot,
+} from "../shared/updates.ts";
 import { SQUAD_VERSION } from "../shared/version.ts";
 import {
   resolveDirectBaseUrl,
@@ -195,6 +200,7 @@ export interface SquadLocalState {
   plans: TeamPlan[];
   delegations: DelegationRecord[];
   updates: UpdateSnapshot;
+  updateReadiness: UpdateReadiness;
   connection: SquadConnectionDiagnostics;
 }
 
@@ -2932,6 +2938,9 @@ export class SquadService extends Service {
   }
 
   localState(): SquadLocalState {
+    const plans = this.database.listTeamPlans();
+    const delegations = this.database.listDelegations();
+    const updates = this.updates.snapshot();
     return {
       setup: {
         required: this.#nodeSettings.setupRequired,
@@ -2970,9 +2979,13 @@ export class SquadService extends Service {
       organizations: this.database.listOrganizations(this.identity.nodeId),
       sessionOrganizations: this.database.sessionOrganizations(),
       revision: this.#stateRevision,
-      plans: this.database.listTeamPlans(),
-      delegations: this.database.listDelegations(),
-      updates: this.updates.snapshot(),
+      plans,
+      delegations,
+      updates,
+      updateReadiness: summarizeUpdateReadiness(updates, {
+        delegations,
+        plans,
+      }),
       connection: this.connectionDiagnostics(),
     };
   }
@@ -3012,6 +3025,14 @@ export class SquadService extends Service {
   }
 
   async requestUpdateInstall(): Promise<UpdateSnapshot> {
+    const state = this.localState();
+    if (!state.updateReadiness.ready) {
+      throw new Error(
+        `the Squad update is not ready to install: ${state.updateReadiness.blockers.join(
+          ", ",
+        )}`,
+      );
+    }
     const snapshot = await this.updates.requestInstall();
     this.touchLocalState();
     return snapshot;
