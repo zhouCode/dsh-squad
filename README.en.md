@@ -80,6 +80,8 @@ The Node that creates an organization is its sole `Owner`. The Owner may appoint
 
 Owners and Admins can also inspect the latest 200 invitations as active, used, expired, or revoked and revoke an unused invitation from the WebUI. A token is shown only once at creation; the history returns an independent random ID and audit timestamps, never the token or its hash.
 
+The Owner can rename the organization directly in the WebUI. A rename does not overwrite the pinned organization root; it appends an Owner-signed event that binds the previous and new names, and every Node verifies and replays the same directory to derive the current name. The resulting directory revision automatically makes any unaccepted ownership-transfer proposal stale.
+
 An active Admin or Member can leave an organization from the WebUI. Leaving appends a self-signed disable event and clears every local Session context that points to the organization; it neither deletes history nor impersonates a manager action. The Owner must safely transfer ownership before leaving, preventing an ownerless organization.
 
 A dedicated Authority key signs the organization root, and authorized Owner/Admin Nodes sign later member events. Relay and every Node verify the complete append-only chain, pinned public-key identity, continuous revisions, issuer role, and exactly one active Owner. A disabled member can no longer send organization-scoped Delegations.

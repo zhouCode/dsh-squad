@@ -26,14 +26,17 @@ import {
   organizationOwnershipTransferAcceptance,
   organizationOwnershipTransferEventSchema,
   organizationOwnershipTransferProposalSchema,
+  organizationRenameEventSchema,
   unsignedOrganizationDocument,
   unsignedOrganizationMembershipCertificate,
   unsignedOrganizationOwnershipTransferProposal,
+  unsignedOrganizationRenameEvent,
   type OrganizationDirectoryEvent,
   type OrganizationDocument,
   type OrganizationMembershipCertificate,
   type OrganizationOwnershipTransferEvent,
   type OrganizationOwnershipTransferProposal,
+  type OrganizationRenameEvent,
 } from "../shared/organizations.ts";
 import { nodeIdFromPublicKey, verifySignature } from "./identity.ts";
 
@@ -165,6 +168,7 @@ export function verifyOrganizationDocument(
 
 export interface VerifiedOrganizationDirectory {
   document: OrganizationDocument;
+  name: string;
   revision: number;
   members: Map<string, OrganizationMembershipCertificate>;
 }
@@ -410,12 +414,52 @@ export function applyOrganizationOwnershipTransfer(
   );
 }
 
+export function applyOrganizationRename(
+  documentCandidate: OrganizationDocument,
+  members: Map<string, OrganizationMembershipCertificate>,
+  currentRevision: number,
+  currentName: string,
+  candidate: OrganizationRenameEvent,
+): string {
+  const document = verifyOrganizationDocument(documentCandidate);
+  const event = organizationRenameEventSchema.parse(candidate);
+  if (event.organizationId !== document.organizationId) {
+    throw new Error("organization rename belongs to another organization");
+  }
+  if (event.organizationRevision !== currentRevision + 1) {
+    throw new Error("organization rename revision is not contiguous");
+  }
+  if (event.previousName !== currentName || event.name === currentName) {
+    throw new Error("organization rename does not match the current name");
+  }
+  const owner = members.get(event.issuer.membershipId);
+  if (
+    owner === undefined ||
+    owner.nodeId !== event.issuer.nodeId ||
+    owner.status !== "ACTIVE" ||
+    owner.role !== "OWNER"
+  ) {
+    throw new Error("organization rename requires the active owner");
+  }
+  if (
+    !verifySignature(
+      unsignedOrganizationRenameEvent(event),
+      event.signature,
+      owner.publicKey,
+    )
+  ) {
+    throw new Error("organization rename signature is invalid");
+  }
+  return event.name;
+}
+
 export function applyOrganizationDirectoryEvent(
   document: OrganizationDocument,
   members: Map<string, OrganizationMembershipCertificate>,
   currentRevision: number,
   candidate: OrganizationDirectoryEvent,
-): void {
+  currentName = document.name,
+): string | undefined {
   const event = organizationDirectoryEventSchema.parse(candidate);
   if ("transferId" in event) {
     applyOrganizationOwnershipTransfer(
@@ -426,7 +470,17 @@ export function applyOrganizationDirectoryEvent(
     );
     return;
   }
+  if ("eventId" in event) {
+    return applyOrganizationRename(
+      document,
+      members,
+      currentRevision,
+      currentName,
+      event,
+    );
+  }
   applyOrganizationCertificate(document, members, currentRevision, event);
+  return undefined;
 }
 
 export function verifyOrganizationDirectory(
@@ -436,8 +490,16 @@ export function verifyOrganizationDirectory(
   const document = verifyOrganizationDocument(documentCandidate);
   const members = new Map<string, OrganizationMembershipCertificate>();
   let revision = 0;
+  let name = document.name;
   for (const event of eventCandidates) {
-    applyOrganizationDirectoryEvent(document, members, revision, event);
+    name =
+      applyOrganizationDirectoryEvent(
+        document,
+        members,
+        revision,
+        event,
+        name,
+      ) ?? name;
     revision = event.organizationRevision;
   }
   if (revision === 0) throw new Error("organization directory has no owner");
@@ -447,5 +509,5 @@ export function verifyOrganizationDirectory(
   if (owners.length !== 1) {
     throw new Error("organization directory must contain one active owner");
   }
-  return { document, revision, members };
+  return { document, name, revision, members };
 }

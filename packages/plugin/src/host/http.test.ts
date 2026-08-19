@@ -287,14 +287,16 @@ describe("Squad host health", () => {
     expect(leaveOrganization).toHaveBeenCalledWith(organizationId);
   });
 
-  it("proposes, accepts, and declines ownership transfers through the local API", async () => {
+  it("renames organizations and manages ownership transfers through the local API", async () => {
     const organizationId = "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa";
     const transferId = "bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb";
     const targetMembershipId = "cccccccc-cccc-4ccc-8ccc-cccccccccccc";
+    const renameOrganization = vi.fn(async () => undefined);
     const proposeOrganizationOwnershipTransfer = vi.fn(async () => undefined);
     const acceptOrganizationOwnershipTransfer = vi.fn(async () => undefined);
     const declineOrganizationOwnershipTransfer = vi.fn(async () => undefined);
     const squad = {
+      renameOrganization,
       proposeOrganizationOwnershipTransfer,
       acceptOrganizationOwnershipTransfer,
       declineOrganizationOwnershipTransfer,
@@ -306,6 +308,20 @@ describe("Squad host health", () => {
     );
     const address = server.address() as AddressInfo;
     const base = `http://127.0.0.1:${address.port}/squad/v1/local/organizations/${organizationId}/owner-transfers`;
+
+    const renamed = await fetch(
+      `http://127.0.0.1:${address.port}/squad/v1/local/organizations/${organizationId}/name`,
+      {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({ name: "Product Core" }),
+      },
+    );
+    expect(renamed.status).toBe(200);
+    expect(renameOrganization).toHaveBeenCalledWith(
+      organizationId,
+      "Product Core",
+    );
 
     const proposed = await fetch(base, {
       method: "POST",

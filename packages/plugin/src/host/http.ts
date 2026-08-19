@@ -486,6 +486,19 @@ export function createHttpHandler(squad: SquadService) {
         reply(res, 200, { ok: true });
         return;
       }
+      const renameOrganization =
+        /^\/squad\/v1\/local\/organizations\/([0-9a-f-]{36})\/name$/u.exec(
+          url.pathname,
+        );
+      if (req.method === "POST" && renameOrganization?.[1] !== undefined) {
+        const body = (await readJson(req, 8 * 1024)) as Record<string, unknown>;
+        await squad.renameOrganization(
+          renameOrganization[1],
+          String(body.name ?? ""),
+        );
+        reply(res, 200, { ok: true });
+        return;
+      }
       const ownershipTransferCollection =
         /^\/squad\/v1\/local\/organizations\/([0-9a-f-]{36})\/owner-transfers$/u.exec(
           url.pathname,

@@ -133,6 +133,7 @@ export interface OutboxDiagnostics {
 
 export interface OrganizationDirectoryRecord {
   document: OrganizationDocument;
+  name: string;
   revision: number;
   events: OrganizationDirectoryEvent[];
   members: Map<string, OrganizationMembershipCertificate>;
@@ -1126,7 +1127,7 @@ export class SquadDatabase {
         )
         .run(
           bundle.document.organizationId,
-          bundle.document.name,
+          verified.name,
           JSON.stringify(bundle.document),
           bundle.selfStatus,
           bundle.revision,
@@ -1143,15 +1144,31 @@ export class SquadDatabase {
         ) VALUES (?, ?, ?, ?, ?, ?)
       `);
       for (const event of bundle.events) {
-        const eventMember =
-          "transferId" in event ? event.newOwnerCertificate : event;
+        const membershipId =
+          "transferId" in event
+            ? event.newOwnerCertificate.membershipId
+            : "eventId" in event
+              ? event.eventId
+              : event.membershipId;
+        const memberRevision =
+          "transferId" in event
+            ? event.newOwnerCertificate.memberRevision
+            : "eventId" in event
+              ? 1
+              : event.memberRevision;
+        const issuedAt =
+          "transferId" in event
+            ? event.acceptedAt
+            : "eventId" in event
+              ? event.renamedAt
+              : event.issuedAt;
         insertEvent.run(
           bundle.document.organizationId,
           event.organizationRevision,
-          eventMember.membershipId,
-          eventMember.memberRevision,
+          membershipId,
+          memberRevision,
           JSON.stringify(event),
-          "transferId" in event ? event.acceptedAt : event.issuedAt,
+          issuedAt,
         );
       }
       const upsertMember = this.#db.prepare(`
@@ -1255,7 +1272,10 @@ export class SquadDatabase {
       ),
     );
     const verified = verifyOrganizationDirectory(document, events);
-    if (verified.revision !== Number(row.highest_revision)) {
+    if (
+      verified.revision !== Number(row.highest_revision) ||
+      verified.name !== String(row.name)
+    ) {
       throw new Error("local organization revision is inconsistent");
     }
     const pendingJoinRequests = (
@@ -1277,6 +1297,7 @@ export class SquadDatabase {
           );
     return {
       document,
+      name: verified.name,
       revision: verified.revision,
       events,
       members: verified.members,

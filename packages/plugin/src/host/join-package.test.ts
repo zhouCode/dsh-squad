@@ -171,11 +171,17 @@ describe("one-step team join package", () => {
         transferToAlice.transferId,
       );
       expect((await alice.listOrganizations())[0]?.role).toBe("OWNER");
+      await alice.renameOrganization(
+        organization.organizationId,
+        "Product Core",
+      );
+      expect((await alice.listOrganizations())[0]?.name).toBe("Product Core");
 
       await bob.leaveOrganization(organization.organizationId);
       expect(bob.sessionOrganization("leave-session")).toBeUndefined();
       expect(bob.localState().organizations[0]).toMatchObject({
         organizationId: organization.organizationId,
+        name: "Product Core",
         membershipStatus: "DISABLED",
       });
     } finally {

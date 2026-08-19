@@ -128,8 +128,35 @@ export type OrganizationOwnershipTransferEvent = z.infer<
   typeof organizationOwnershipTransferEventSchema
 >;
 
+export const unsignedOrganizationRenameEventSchema = z.strictObject({
+  version: z.literal(ORGANIZATION_DIRECTORY_VERSION),
+  kind: z.literal("ORGANIZATION_RENAME"),
+  eventId: idSchema,
+  organizationId: idSchema,
+  organizationRevision: z.number().int().positive(),
+  previousName: z.string().trim().min(1).max(120),
+  name: z.string().trim().min(1).max(120),
+  issuer: z.strictObject({
+    membershipId: idSchema,
+    nodeId: nodeIdSchema,
+  }),
+  renamedAt: timestampSchema,
+});
+export type UnsignedOrganizationRenameEvent = z.infer<
+  typeof unsignedOrganizationRenameEventSchema
+>;
+
+export const organizationRenameEventSchema =
+  unsignedOrganizationRenameEventSchema
+    .extend({ signature: signatureSchema })
+    .strict();
+export type OrganizationRenameEvent = z.infer<
+  typeof organizationRenameEventSchema
+>;
+
 export const organizationDirectoryEventSchema = z.union([
   organizationOwnershipTransferEventSchema,
+  organizationRenameEventSchema,
   organizationMembershipCertificateSchema,
 ]);
 export type OrganizationDirectoryEvent = z.infer<
@@ -271,6 +298,13 @@ export function organizationOwnershipTransferAcceptance(
     proposal,
     acceptedAt,
   });
+}
+
+export function unsignedOrganizationRenameEvent(
+  event: OrganizationRenameEvent,
+): UnsignedOrganizationRenameEvent {
+  const { signature: _signature, ...unsigned } = event;
+  return unsigned;
 }
 
 export function unsignedOrganizationJoinRequest(

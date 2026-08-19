@@ -63,6 +63,7 @@ import {
   unsignedOrganizationJoinRequestSchema,
   unsignedOrganizationMembershipCertificateSchema,
   unsignedOrganizationOwnershipTransferProposalSchema,
+  unsignedOrganizationRenameEventSchema,
   type OrganizationDocument,
   type OrganizationJoinRequest,
   type OrganizationInvitationView,
@@ -1547,6 +1548,45 @@ export class SquadService extends Service {
       organizationId,
       proposal,
     );
+    await this.syncOrganizations();
+  }
+
+  async renameOrganization(
+    organizationId: string,
+    nameCandidate: string,
+  ): Promise<void> {
+    const name = nameCandidate.trim();
+    if (name.length < 1 || name.length > 120) {
+      throw new Error("organization name must contain 1 to 120 characters");
+    }
+    await this.syncOrganizations();
+    const directory = this.database.organizationDirectory(organizationId);
+    if (directory === undefined) throw new Error("unknown organization");
+    const owner = this.selfOrganizationMember(directory);
+    if (owner.role !== "OWNER") {
+      throw new Error("only the Owner can rename the organization");
+    }
+    if (name === directory.name) {
+      throw new Error("organization already has that name");
+    }
+    const unsigned = unsignedOrganizationRenameEventSchema.parse({
+      version: 1,
+      kind: "ORGANIZATION_RENAME",
+      eventId: randomUUID(),
+      organizationId,
+      organizationRevision: directory.revision + 1,
+      previousName: directory.name,
+      name,
+      issuer: {
+        membershipId: owner.membershipId,
+        nodeId: owner.nodeId,
+      },
+      renamedAt: new Date().toISOString(),
+    });
+    await this.requireRelayClient().renameOrganization(organizationId, {
+      ...unsigned,
+      signature: this.identity.sign(unsigned),
+    });
     await this.syncOrganizations();
   }
 

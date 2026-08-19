@@ -113,6 +113,7 @@ export const zh = {
   "action.createOrganization": "创建组织",
   "action.joinOrganization": "申请加入",
   "action.leaveOrganization": "退出组织",
+  "action.renameOrganization": "保存新名称",
   "action.transferOwnership": "转让所有权",
   "action.acceptOwnership": "接受并成为 Owner",
   "action.declineOwnership": "拒绝转让",
@@ -168,6 +169,9 @@ export const zh = {
   "confirm.leaveOrganizationTitle": "退出此组织？",
   "confirm.leaveOrganization":
     "退出“{organization}”后，本节点将不再出现在活动成员目录中，也无法通过该组织收发新任务；历史记录会保留。",
+  "confirm.renameOrganizationTitle": "更改组织名称？",
+  "confirm.renameOrganization":
+    "将组织名称从“{from}”改为“{to}”。这会追加一条 Owner 签名的目录事件；尚未接受的所有权转让提案会失效。",
   "confirm.transferOwnershipTitle": "发起所有权转让？",
   "confirm.transferOwnership":
     "“{name}”需要在自己的节点明确接受，才会成为“{organization}”的唯一 Owner；接受后你将变为 Admin。转让完成前可以取消。",
@@ -601,6 +605,8 @@ export const zh = {
   "errorCode.ORGANIZATION_INVITATION_NOT_FOUND": "找不到组织邀请",
   "errorCode.OWNER_TRANSFER_REQUIRED": "Owner 必须先转让所有权",
   "errorCode.LEAVE_CERTIFICATE_MISMATCH": "退出组织的签名凭证不匹配",
+  "errorCode.ORGANIZATION_RENAME_MISMATCH": "组织改名事件与当前 Owner 不匹配",
+  "errorCode.ORGANIZATION_RENAME_INVALID": "组织改名签名或名称变化无效",
   "errorCode.ORGANIZATION_OWNER_REQUIRED": "只有当前 Owner 可以发起转让",
   "errorCode.OWNERSHIP_TRANSFER_MISMATCH": "所有权转让与当前组织不匹配",
   "errorCode.OWNERSHIP_TRANSFER_EXPIRY_INVALID": "所有权转让的有效期无效",
@@ -732,6 +738,7 @@ export const en = {
   "action.createOrganization": "Create organization",
   "action.joinOrganization": "Request to join",
   "action.leaveOrganization": "Leave organization",
+  "action.renameOrganization": "Save new name",
   "action.transferOwnership": "Transfer ownership",
   "action.acceptOwnership": "Accept and become Owner",
   "action.declineOwnership": "Decline transfer",
@@ -787,6 +794,9 @@ export const en = {
   "confirm.leaveOrganizationTitle": "Leave this organization?",
   "confirm.leaveOrganization":
     "After leaving “{organization}”, this Node disappears from the active directory and cannot send or receive new organization tasks. History is retained.",
+  "confirm.renameOrganizationTitle": "Rename this organization?",
+  "confirm.renameOrganization":
+    "Rename “{from}” to “{to}”. This appends an Owner-signed directory event and makes any unaccepted ownership-transfer proposal stale.",
   "confirm.transferOwnershipTitle": "Propose an ownership transfer?",
   "confirm.transferOwnership":
     "“{name}” must explicitly accept on their own Node before becoming the sole Owner of “{organization}”. You then become an Admin. The proposal can be canceled until acceptance.",
@@ -1249,6 +1259,10 @@ export const en = {
     "The Owner must transfer ownership first",
   "errorCode.LEAVE_CERTIFICATE_MISMATCH":
     "The signed organization-leave certificate does not match",
+  "errorCode.ORGANIZATION_RENAME_MISMATCH":
+    "The organization rename does not match the current Owner",
+  "errorCode.ORGANIZATION_RENAME_INVALID":
+    "The organization rename signature or name transition is invalid",
   "errorCode.ORGANIZATION_OWNER_REQUIRED":
     "Only the current Owner can propose a transfer",
   "errorCode.OWNERSHIP_TRANSFER_MISMATCH":
@@ -1437,6 +1451,8 @@ const errorCodeKeys = {
     "errorCode.ORGANIZATION_INVITATION_NOT_FOUND",
   OWNER_TRANSFER_REQUIRED: "errorCode.OWNER_TRANSFER_REQUIRED",
   LEAVE_CERTIFICATE_MISMATCH: "errorCode.LEAVE_CERTIFICATE_MISMATCH",
+  ORGANIZATION_RENAME_MISMATCH: "errorCode.ORGANIZATION_RENAME_MISMATCH",
+  ORGANIZATION_RENAME_INVALID: "errorCode.ORGANIZATION_RENAME_INVALID",
   ORGANIZATION_OWNER_REQUIRED: "errorCode.ORGANIZATION_OWNER_REQUIRED",
   OWNERSHIP_TRANSFER_MISMATCH: "errorCode.OWNERSHIP_TRANSFER_MISMATCH",
   OWNERSHIP_TRANSFER_EXPIRY_INVALID:

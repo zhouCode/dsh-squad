@@ -68,6 +68,8 @@ Active Admins and Members can leave from the WebUI through a self-signed directo
 
 Ownership transfer is a two-party signed operation: the current Owner proposes it, the target explicitly accepts on their own Node, and Relay atomically demotes the previous Owner to Admin while establishing exactly one new Owner. Either side can cancel or decline before acceptance.
 
+Owners can rename an organization through an append-only signed metadata event; the pinned root and prior names remain verifiable.
+
 After dispatch, the plan rolls up live execution progress and collects only the result summaries and outputs explicitly published by recipients; each item links to its full delegation record.
 
 Chat triggering stays unobtrusive: use natural language or `@member`, or use namespaced `/squad-*` commands for tasks, plans, status, organizations, members, invitations, and roles. They are discovered through DSH's native `/` menu; this package adds no command buttons.

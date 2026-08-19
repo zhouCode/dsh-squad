@@ -30,6 +30,7 @@ import {
   organizationMembershipCertificateSchema,
   organizationOwnershipTransferEventSchema,
   organizationOwnershipTransferProposalSchema,
+  organizationRenameEventSchema,
   type OrganizationDirectoryEvent,
   unsignedOrganizationJoinRequest,
   type OrganizationDirectoryBundle,
@@ -89,6 +90,10 @@ const proposeOwnershipTransferSchema = z.strictObject({
 const acceptOwnershipTransferSchema = z.strictObject({
   acceptedAt: timestampSchema,
   acceptanceSignature: signatureSchema,
+});
+
+const renameOrganizationSchema = z.strictObject({
+  event: organizationRenameEventSchema,
 });
 
 const createOrganizationInvitationSchema = z.strictObject({
@@ -615,13 +620,14 @@ export class RelayServer {
 
   private organizationDirectory(organizationId: string): {
     document: OrganizationDocument;
+    name: string;
     revision: number;
     events: OrganizationDirectoryEvent[];
     members: Map<string, OrganizationMembershipCertificate>;
   } {
     const row = this.#db
       .prepare(
-        "SELECT document_json, revision FROM relay_organizations WHERE organization_id = ?",
+        "SELECT document_json, name, revision FROM relay_organizations WHERE organization_id = ?",
       )
       .get(organizationId) as SqlRow | undefined;
     if (row === undefined) throw new HttpError(404, "ORGANIZATION_NOT_FOUND");
@@ -640,11 +646,15 @@ export class RelayServer {
       ),
     );
     const verified = verifyOrganizationDirectory(document, events);
-    if (verified.revision !== Number(row.revision)) {
+    if (
+      verified.revision !== Number(row.revision) ||
+      verified.name !== String(row.name)
+    ) {
       throw new Error("Relay organization revision is inconsistent");
     }
     return {
       document,
+      name: verified.name,
       revision: verified.revision,
       events,
       members: verified.members,
@@ -920,12 +930,86 @@ export class RelayServer {
     return { organizationId, transferId, status };
   }
 
+  private renameOrganization(
+    organizationId: string,
+    value: unknown,
+    authenticatedNodeId: string,
+  ): { organizationId: string; revision: number; name: string } {
+    const { event } = renameOrganizationSchema.parse(value);
+    const directory = this.organizationDirectory(organizationId);
+    const owner = this.organizationMemberForNode(
+      directory,
+      authenticatedNodeId,
+    );
+    if (
+      owner === undefined ||
+      owner.status !== "ACTIVE" ||
+      owner.role !== "OWNER"
+    ) {
+      throw new HttpError(403, "ORGANIZATION_OWNER_REQUIRED");
+    }
+    if (
+      event.organizationId !== organizationId ||
+      event.issuer.membershipId !== owner.membershipId ||
+      event.issuer.nodeId !== authenticatedNodeId
+    ) {
+      throw new HttpError(400, "ORGANIZATION_RENAME_MISMATCH");
+    }
+    let name: string;
+    try {
+      name =
+        applyOrganizationDirectoryEvent(
+          directory.document,
+          directory.members,
+          directory.revision,
+          event,
+          directory.name,
+        ) ?? directory.name;
+    } catch (error) {
+      throw new HttpError(
+        400,
+        "ORGANIZATION_RENAME_INVALID",
+        error instanceof Error ? error.message : String(error),
+      );
+    }
+    this.#db.exec("BEGIN IMMEDIATE");
+    try {
+      this.insertOrganizationEventUnsafe(event);
+      this.#db.exec("COMMIT");
+    } catch (error) {
+      this.#db.exec("ROLLBACK");
+      throw error;
+    }
+    return { organizationId, revision: event.organizationRevision, name };
+  }
+
   private insertOrganizationEventUnsafe(
     event: OrganizationDirectoryEvent,
   ): void {
-    const eventMember =
-      "transferId" in event ? event.newOwnerCertificate : event;
-    const issuedAt = "transferId" in event ? event.acceptedAt : event.issuedAt;
+    const membershipId =
+      "transferId" in event
+        ? event.newOwnerCertificate.membershipId
+        : "eventId" in event
+          ? event.eventId
+          : event.membershipId;
+    const memberRevision =
+      "transferId" in event
+        ? event.newOwnerCertificate.memberRevision
+        : "eventId" in event
+          ? 1
+          : event.memberRevision;
+    const nodeId =
+      "transferId" in event
+        ? event.newOwnerCertificate.nodeId
+        : "eventId" in event
+          ? event.issuer.nodeId
+          : event.nodeId;
+    const issuedAt =
+      "transferId" in event
+        ? event.acceptedAt
+        : "eventId" in event
+          ? event.renamedAt
+          : event.issuedAt;
     this.#db
       .prepare(
         `
@@ -938,9 +1022,9 @@ export class RelayServer {
       .run(
         event.organizationId,
         event.organizationRevision,
-        eventMember.membershipId,
-        eventMember.memberRevision,
-        eventMember.nodeId,
+        membershipId,
+        memberRevision,
+        nodeId,
         JSON.stringify(event),
         issuedAt,
       );
@@ -962,7 +1046,9 @@ export class RelayServer {
     const members =
       "transferId" in event
         ? [event.previousOwnerCertificate, event.newOwnerCertificate]
-        : [event];
+        : "eventId" in event
+          ? []
+          : [event];
     for (const certificate of members) {
       upsertMember.run(
         certificate.organizationId,
@@ -998,6 +1084,13 @@ export class RelayServer {
         )
         .run(new Date().toISOString(), event.organizationId, event.transferId);
     } else {
+      if ("eventId" in event) {
+        this.#db
+          .prepare(
+            "UPDATE relay_organizations SET name = ? WHERE organization_id = ?",
+          )
+          .run(event.name, event.organizationId);
+      }
       this.#db
         .prepare(
           "UPDATE relay_organization_owner_transfers SET status = 'STALE', resolved_at = ? WHERE organization_id = ? AND status = 'PENDING'",
@@ -1026,14 +1119,17 @@ export class RelayServer {
     }
     const existing = this.#db
       .prepare(
-        "SELECT document_json FROM relay_organizations WHERE organization_id = ?",
+        "SELECT document_json, revision FROM relay_organizations WHERE organization_id = ?",
       )
       .get(document.organizationId) as SqlRow | undefined;
     if (existing !== undefined) {
       if (String(existing.document_json) !== JSON.stringify(document)) {
         throw new HttpError(409, "ORGANIZATION_ID_CONFLICT");
       }
-      return { organizationId: document.organizationId, revision: 1 };
+      return {
+        organizationId: document.organizationId,
+        revision: Number(existing.revision),
+      };
     }
     const now = new Date().toISOString();
     this.#db.exec("BEGIN IMMEDIATE");
@@ -2023,6 +2119,24 @@ export class RelayServer {
           this.rejectOrganizationJoin(
             rejectOrganizationJoinRoute[1],
             rejectOrganizationJoinRoute[2],
+            auth.nodeId,
+          ),
+        );
+        return true;
+      }
+      const renameOrganizationRoute =
+        /^\/squad\/v1\/organizations\/([0-9a-f-]{36})\/name$/u.exec(
+          url.pathname,
+        );
+      if (req.method === "POST" && renameOrganizationRoute?.[1] !== undefined) {
+        const body = await readBody(req, 32 * 1024);
+        const auth = this.authenticate(req, path, body);
+        reply(
+          res,
+          200,
+          this.renameOrganization(
+            renameOrganizationRoute[1],
+            jsonBody(body),
             auth.nodeId,
           ),
         );

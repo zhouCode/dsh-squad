@@ -8,6 +8,7 @@ import {
   unsignedOrganizationDocumentSchema,
   unsignedOrganizationMembershipCertificateSchema,
   unsignedOrganizationOwnershipTransferProposalSchema,
+  unsignedOrganizationRenameEventSchema,
 } from "../shared/organizations.ts";
 import { NodeIdentity } from "./identity.ts";
 import {
@@ -196,6 +197,24 @@ describe("organization signed directory", () => {
         organizationOwnershipTransferAcceptance(proposal, acceptedAt),
       ),
     };
+    const renameUnsigned = unsignedOrganizationRenameEventSchema.parse({
+      version: 1,
+      kind: "ORGANIZATION_RENAME",
+      eventId: randomUUID(),
+      organizationId,
+      organizationRevision: 7,
+      previousName: "Product",
+      name: "Product Platform",
+      issuer: {
+        membershipId: promotedAdmin.membershipId,
+        nodeId: admin.nodeId,
+      },
+      renamedAt: acceptedAt,
+    });
+    const rename = {
+      ...renameUnsigned,
+      signature: admin.sign(renameUnsigned),
+    };
     const verified = verifyOrganizationDirectory(document, [
       ownerCertificate,
       adminMember,
@@ -203,8 +222,10 @@ describe("organization signed directory", () => {
       memberCertificate,
       leftMember,
       transfer,
+      rename,
     ]);
-    expect(verified.revision).toBe(6);
+    expect(verified.revision).toBe(7);
+    expect(verified.name).toBe("Product Platform");
     expect(verified.members.get(promotedAdmin.membershipId)?.role).toBe(
       "OWNER",
     );
@@ -223,6 +244,18 @@ describe("organization signed directory", () => {
         { ...transfer, acceptanceSignature: owner.sign(transferUnsigned) },
       ]),
     ).toThrow("acceptance signature is invalid");
+
+    expect(() =>
+      verifyOrganizationDirectory(document, [
+        ownerCertificate,
+        adminMember,
+        promotedAdmin,
+        memberCertificate,
+        leftMember,
+        transfer,
+        { ...rename, signature: owner.sign(renameUnsigned) },
+      ]),
+    ).toThrow("rename signature is invalid");
   });
 
   it("does not let an owner leave before ownership is transferred", () => {

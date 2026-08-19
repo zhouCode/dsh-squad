@@ -8,6 +8,7 @@ import {
   type OrganizationInvitationView,
   type OrganizationMembershipCertificate,
   type OrganizationOwnershipTransferProposal,
+  type OrganizationRenameEvent,
 } from "../shared/organizations.ts";
 import type { NodeIdentity } from "./identity.ts";
 import { signedRequest } from "./relay.ts";
@@ -407,6 +408,17 @@ export class RelayClient {
       "POST",
       `/squad/v1/organizations/${organizationId}/owner-transfers`,
       { proposal },
+    );
+  }
+
+  async renameOrganization(
+    organizationId: string,
+    event: OrganizationRenameEvent,
+  ): Promise<void> {
+    await this.request(
+      "POST",
+      `/squad/v1/organizations/${organizationId}/name`,
+      { event },
     );
   }
 
