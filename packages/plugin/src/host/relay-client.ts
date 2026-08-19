@@ -66,6 +66,36 @@ export class RelayClient {
     return parseResponse(response);
   }
 
+  async health(): Promise<{
+    version: string;
+    nodeId: string;
+    protocolVersions: number[];
+  }> {
+    const response = await fetch(`${this.baseUrl}/squad/v1/health`, {
+      signal: AbortSignal.timeout(10_000),
+      headers: { accept: "application/json" },
+    });
+    const body = (await parseResponse(response)) as Record<string, unknown>;
+    if (
+      body.ok !== true ||
+      typeof body.version !== "string" ||
+      typeof body.nodeId !== "string" ||
+      !Array.isArray(body.protocolVersions) ||
+      !body.protocolVersions.every((value) => Number.isSafeInteger(value))
+    ) {
+      throw new RelayClientError(
+        502,
+        "INVALID_RESPONSE",
+        "Relay health response is invalid",
+      );
+    }
+    return {
+      version: body.version,
+      nodeId: body.nodeId,
+      protocolVersions: body.protocolVersions as number[],
+    };
+  }
+
   async enroll(invitation: string, displayName: string): Promise<void> {
     const response = await fetch(`${this.baseUrl}/squad/v1/enrollment`, {
       method: "POST",

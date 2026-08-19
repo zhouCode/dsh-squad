@@ -118,6 +118,7 @@ describe("guided Node setup", () => {
       }),
     );
     await node.start();
+    const nodeHttp = await listen(createHttpHandler(node));
     try {
       await expect(
         node.configureNode({
@@ -133,7 +134,7 @@ describe("guided Node setup", () => {
         relayUrl: `${http.url}/`,
         invitation,
         directEnabled: true,
-        directPublicUrl: "http://127.0.0.1:37100",
+        directPublicUrl: nodeHttp.url,
       });
       expect(node.localState()).toMatchObject({
         setup: { required: false, mode: "RELAY", source: "INTERFACE" },
@@ -141,7 +142,7 @@ describe("guided Node setup", () => {
         relay: { configured: true, url: http.url },
         direct: {
           serving: true,
-          publicUrl: "http://127.0.0.1:37100",
+          publicUrl: nodeHttp.url,
         },
       });
       expect(JSON.stringify(node.database.nodeSetup())).not.toContain(
@@ -153,11 +154,17 @@ describe("guided Node setup", () => {
         displayName: "Alice workstation",
         relayUrl: http.url,
         directEnabled: true,
-        directPublicUrl: "http://127.0.0.1:37100",
+        directPublicUrl: nodeHttp.url,
       });
       expect(node.localState().identity.displayName).toBe("Alice workstation");
+      await expect(node.checkConnections()).resolves.toMatchObject({
+        relay: { status: "CONNECTED", remoteVersion: "0.7.0" },
+        direct: { status: "READY" },
+        queue: { pending: 0, retrying: 0 },
+      });
     } finally {
       await node.close();
+      await nodeHttp.close();
       await http.close();
       await relay.close();
     }

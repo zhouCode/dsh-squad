@@ -7,7 +7,7 @@ import type {
   OrganizationMemberStatus,
   OrganizationRole,
 } from "../shared/organizations.ts";
-import type { DelegationStatus } from "../shared/state.ts";
+import type { ConnectionStatus, DelegationStatus } from "../shared/state.ts";
 import type { UpdateMode, UpdatePhase } from "../shared/updates.ts";
 
 export const SQUAD_LOCALE_NS = "dsh-squad";
@@ -28,6 +28,7 @@ export const zh = {
   "tab.sent": "已发送",
   "tab.completed": "已完成",
   "tab.organizations": "组织",
+  "tab.diagnostics": "连接诊断",
   "tab.updates": "更新",
   "tab.settings": "设置",
   "overview.title": "团队行动中心",
@@ -151,6 +152,37 @@ export const zh = {
     "“受信目标”会跳过人工确认并在本机运行；仅对你充分信任的成员启用。",
   "settings.languageHint":
     "界面语言由 DSH 全局设置统一控制；首次使用时跟随系统语言。",
+  "diagnostics.title": "连接诊断",
+  "diagnostics.intro":
+    "检查实际连接、事件通道和本地待投递队列；配置存在不等于端点可达。",
+  "diagnostics.checkNow": "立即检查连接",
+  "diagnostics.checking": "正在检查…",
+  "diagnostics.lastChecked": "检查时间：{time}",
+  "diagnostics.notChecked": "尚未主动检查",
+  "diagnostics.relay": "Relay",
+  "diagnostics.direct": "Direct 接收",
+  "diagnostics.queue": "待投递队列",
+  "diagnostics.eventStream": "实时事件通道",
+  "diagnostics.event.CONNECTED": "已连接",
+  "diagnostics.event.POLLING": "轮询回退",
+  "diagnostics.event.DISABLED": "未启用",
+  "diagnostics.lastSuccess": "最近成功：{time}",
+  "diagnostics.lastReceived": "最近直连接收：{time}",
+  "diagnostics.remoteVersion": "远端 Squad v{version}",
+  "diagnostics.protocols": "协议：{versions}",
+  "diagnostics.pending": "{count} 个信封等待投递",
+  "diagnostics.retrying": "其中 {count} 个正在重试",
+  "diagnostics.nextAttempt": "下次尝试：{time}",
+  "diagnostics.selfCheckHint":
+    "Direct 检查证明本机能够通过公共地址访问并命中同一节点；它不能替代从外部网络进行的入站可达性测试。",
+  "diagnostics.lastError": "最近错误：{error}",
+  "connectionStatus.NOT_CONFIGURED": "未配置",
+  "connectionStatus.CHECKING": "检查中",
+  "connectionStatus.CONNECTED": "已连接",
+  "connectionStatus.SERVING": "正在提供服务",
+  "connectionStatus.READY": "可达且身份匹配",
+  "connectionStatus.UNVERIFIED": "尚未验证",
+  "connectionStatus.UNREACHABLE": "不可达",
   "updates.title": "更新中心",
   "updates.securityHint":
     "只接受由 Squad 发布密钥签名且哈希匹配的版本；安装由插件进程之外的更新器完成，并在停服后备份、健康检查失败时回滚。",
@@ -281,6 +313,7 @@ export const zh = {
   "error.policyUpdateFailed": "无法更新自动执行策略",
   "error.sessionOrganizationFailed": "无法切换会话组织",
   "error.updateActionFailed": "更新操作失败",
+  "error.connectionCheckFailed": "连接检查失败",
   "error.setupFailed": "无法保存节点配置",
   "error.withCode": "{message}（{code}）",
   "error.withDetail": "{message}：{detail}",
@@ -352,6 +385,7 @@ export const en = {
   "tab.sent": "Sent",
   "tab.completed": "Completed",
   "tab.organizations": "Organizations",
+  "tab.diagnostics": "Connection",
   "tab.updates": "Updates",
   "tab.settings": "Settings",
   "overview.title": "Team action center",
@@ -478,6 +512,37 @@ export const en = {
     "Trusted objectives skip human approval and run on this computer. Enable this only for members you fully trust.",
   "settings.languageHint":
     "The DSH global language setting controls this interface; first use follows the system language.",
+  "diagnostics.title": "Connection diagnostics",
+  "diagnostics.intro":
+    "Check actual endpoints, the event channel, and the local delivery queue; configured does not necessarily mean reachable.",
+  "diagnostics.checkNow": "Check connections now",
+  "diagnostics.checking": "Checking…",
+  "diagnostics.lastChecked": "Checked at {time}",
+  "diagnostics.notChecked": "No active check yet",
+  "diagnostics.relay": "Relay",
+  "diagnostics.direct": "Direct receiving",
+  "diagnostics.queue": "Delivery queue",
+  "diagnostics.eventStream": "Live event channel",
+  "diagnostics.event.CONNECTED": "Connected",
+  "diagnostics.event.POLLING": "Polling fallback",
+  "diagnostics.event.DISABLED": "Disabled",
+  "diagnostics.lastSuccess": "Last success: {time}",
+  "diagnostics.lastReceived": "Last Direct receipt: {time}",
+  "diagnostics.remoteVersion": "Remote Squad v{version}",
+  "diagnostics.protocols": "Protocols: {versions}",
+  "diagnostics.pending": "{count} envelopes pending delivery",
+  "diagnostics.retrying": "{count} of them are retrying",
+  "diagnostics.nextAttempt": "Next attempt: {time}",
+  "diagnostics.selfCheckHint":
+    "The Direct check proves this machine can reach its public URL and that it resolves to this Node. It does not replace an inbound test from an external network.",
+  "diagnostics.lastError": "Last error: {error}",
+  "connectionStatus.NOT_CONFIGURED": "Not configured",
+  "connectionStatus.CHECKING": "Checking",
+  "connectionStatus.CONNECTED": "Connected",
+  "connectionStatus.SERVING": "Serving",
+  "connectionStatus.READY": "Reachable and identity matched",
+  "connectionStatus.UNVERIFIED": "Not verified",
+  "connectionStatus.UNREACHABLE": "Unreachable",
   "updates.title": "Update center",
   "updates.securityHint":
     "Only releases signed by the pinned Squad release key with a matching hash are accepted. A separate updater backs up after shutdown and rolls back when health checks fail.",
@@ -614,6 +679,7 @@ export const en = {
   "error.policyUpdateFailed": "Could not update automatic execution policy",
   "error.sessionOrganizationFailed": "Could not change session organization",
   "error.updateActionFailed": "Update action failed",
+  "error.connectionCheckFailed": "Connection check failed",
   "error.setupFailed": "Could not save Node settings",
   "error.withCode": "{message} ({code})",
   "error.withDetail": "{message}: {detail}",
@@ -764,6 +830,16 @@ const updatePhaseKeys = {
   FAILED: "updatePhase.FAILED",
 } as const satisfies Record<UpdatePhase, SquadLocaleKey>;
 
+const connectionStatusKeys = {
+  NOT_CONFIGURED: "connectionStatus.NOT_CONFIGURED",
+  CHECKING: "connectionStatus.CHECKING",
+  CONNECTED: "connectionStatus.CONNECTED",
+  SERVING: "connectionStatus.SERVING",
+  READY: "connectionStatus.READY",
+  UNVERIFIED: "connectionStatus.UNVERIFIED",
+  UNREACHABLE: "connectionStatus.UNREACHABLE",
+} as const satisfies Record<ConnectionStatus, SquadLocaleKey>;
+
 const errorCodeKeys = {
   EXECUTION_INTERRUPTED: "errorCode.EXECUTION_INTERRUPTED",
   REJECTED_BY_OWNER: "errorCode.REJECTED_BY_OWNER",
@@ -823,6 +899,13 @@ export function formatStatus(
   status: DelegationStatus,
 ): string {
   return t(statusKeys[status]);
+}
+
+export function formatConnectionStatus(
+  t: SquadTranslate,
+  status: ConnectionStatus,
+): string {
+  return t(connectionStatusKeys[status]);
 }
 
 export function formatDelivery(t: SquadTranslate, status: string): string {

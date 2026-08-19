@@ -18,6 +18,7 @@ import type { TeamPlan, TeamPlanStatus } from "../shared/contracts.ts";
 import type { OrganizationView } from "../shared/organizations.ts";
 import {
   summarizeAttention,
+  type SquadConnectionDiagnostics,
   type DelegationStatus,
   type SquadAttentionSummary,
 } from "../shared/state.ts";
@@ -25,6 +26,7 @@ import type { UpdateMode, UpdateSnapshot } from "../shared/updates.ts";
 import {
   SQUAD_LOCALE_NS,
   en,
+  formatConnectionStatus,
   formatDelivery,
   formatErrorCode,
   formatOrganizationRole,
@@ -119,6 +121,7 @@ interface LocalState {
   plans: TeamPlan[];
   delegations: DelegationView[];
   updates: UpdateSnapshot;
+  connection: SquadConnectionDiagnostics;
 }
 
 let panelOpen = false;
@@ -288,6 +291,7 @@ type Tab =
   | "sent"
   | "completed"
   | "organizations"
+  | "diagnostics"
   | "updates"
   | "settings";
 
@@ -299,6 +303,7 @@ const tabKeys = {
   sent: "tab.sent",
   completed: "tab.completed",
   organizations: "tab.organizations",
+  diagnostics: "tab.diagnostics",
   updates: "tab.updates",
   settings: "tab.settings",
 } as const satisfies Record<Tab, SquadLocaleKey>;
@@ -312,7 +317,7 @@ const tabGroups: readonly {
     tabs: ["overview", "waiting", "running", "sent", "completed", "plans"],
   },
   { label: "nav.team", tabs: ["organizations"] },
-  { label: "nav.system", tabs: ["updates", "settings"] },
+  { label: "nav.system", tabs: ["diagnostics", "updates", "settings"] },
 ];
 
 function localAttention(state: LocalState): SquadAttentionSummary {
@@ -1535,6 +1540,160 @@ function NodeSetupForm({
   );
 }
 
+function ConnectionDiagnostics({
+  state,
+  refresh,
+  t,
+}: {
+  state: LocalState;
+  refresh: () => Promise<void>;
+  t: SquadTranslate;
+}) {
+  const [busy, setBusy] = useState(false);
+  const [error, setError] = useState<string>();
+  const diagnostics = state.connection;
+  const check = async () => {
+    setBusy(true);
+    setError(undefined);
+    try {
+      await api("/connections/check", { method: "POST", body: "{}" });
+      await refresh();
+    } catch (cause) {
+      setError(describeError(cause, t, "error.connectionCheckFailed"));
+    } finally {
+      setBusy(false);
+    }
+  };
+  return (
+    <div className="squad-diagnostics">
+      <header>
+        <div>
+          <h2>{t("diagnostics.title")}</h2>
+          <p className="squad-muted">{t("diagnostics.intro")}</p>
+        </div>
+        <button disabled={busy} onClick={() => void check()}>
+          {busy ? t("diagnostics.checking") : t("diagnostics.checkNow")}
+        </button>
+      </header>
+      <p className="squad-muted">
+        {diagnostics.checkedAt
+          ? t("diagnostics.lastChecked", {
+              time: new Date(diagnostics.checkedAt).toLocaleString(),
+            })
+          : t("diagnostics.notChecked")}
+      </p>
+      <div className="squad-diagnostic-grid">
+        <article>
+          <header>
+            <h3>{t("diagnostics.relay")}</h3>
+            <span
+              className={`squad-status squad-connection-${diagnostics.relay.status.toLowerCase()}`}
+            >
+              {formatConnectionStatus(t, diagnostics.relay.status)}
+            </span>
+          </header>
+          {diagnostics.relay.url ? <code>{diagnostics.relay.url}</code> : null}
+          <dl>
+            <div>
+              <dt>{t("diagnostics.eventStream")}</dt>
+              <dd>{t(`diagnostics.event.${diagnostics.relay.eventStream}`)}</dd>
+            </div>
+          </dl>
+          {diagnostics.relay.lastSuccessfulAt ? (
+            <p>
+              {t("diagnostics.lastSuccess", {
+                time: new Date(
+                  diagnostics.relay.lastSuccessfulAt,
+                ).toLocaleString(),
+              })}
+            </p>
+          ) : null}
+          {diagnostics.relay.remoteVersion ? (
+            <p>
+              {t("diagnostics.remoteVersion", {
+                version: diagnostics.relay.remoteVersion,
+              })}
+            </p>
+          ) : null}
+          {diagnostics.relay.protocolVersions ? (
+            <p>
+              {t("diagnostics.protocols", {
+                versions: diagnostics.relay.protocolVersions.join(", "),
+              })}
+            </p>
+          ) : null}
+          {diagnostics.relay.lastError ? (
+            <p className="squad-error">
+              {t("diagnostics.lastError", {
+                error: diagnostics.relay.lastError,
+              })}
+            </p>
+          ) : null}
+        </article>
+        <article>
+          <header>
+            <h3>{t("diagnostics.direct")}</h3>
+            <span
+              className={`squad-status squad-connection-${diagnostics.direct.status.toLowerCase()}`}
+            >
+              {formatConnectionStatus(t, diagnostics.direct.status)}
+            </span>
+          </header>
+          {diagnostics.direct.publicUrl ? (
+            <code>{diagnostics.direct.publicUrl}</code>
+          ) : null}
+          {diagnostics.direct.lastReceivedAt ? (
+            <p>
+              {t("diagnostics.lastReceived", {
+                time: new Date(
+                  diagnostics.direct.lastReceivedAt,
+                ).toLocaleString(),
+              })}
+            </p>
+          ) : null}
+          {diagnostics.direct.lastError ? (
+            <p className="squad-error">
+              {t("diagnostics.lastError", {
+                error: diagnostics.direct.lastError,
+              })}
+            </p>
+          ) : null}
+          <p className="squad-muted">{t("diagnostics.selfCheckHint")}</p>
+        </article>
+        <article>
+          <header>
+            <h3>{t("diagnostics.queue")}</h3>
+            <strong>{diagnostics.queue.pending}</strong>
+          </header>
+          <p>
+            {t("diagnostics.pending", { count: diagnostics.queue.pending })}
+          </p>
+          <p>
+            {t("diagnostics.retrying", { count: diagnostics.queue.retrying })}
+          </p>
+          {diagnostics.queue.nextAttemptAt ? (
+            <p>
+              {t("diagnostics.nextAttempt", {
+                time: new Date(
+                  diagnostics.queue.nextAttemptAt,
+                ).toLocaleString(),
+              })}
+            </p>
+          ) : null}
+          {diagnostics.queue.lastError ? (
+            <p className="squad-error">
+              {t("diagnostics.lastError", {
+                error: diagnostics.queue.lastError,
+              })}
+            </p>
+          ) : null}
+        </article>
+      </div>
+      {error ? <p className="squad-error">{error}</p> : null}
+    </div>
+  );
+}
+
 function Settings({
   state,
   refresh,
@@ -2133,6 +2292,8 @@ function SquadPanel({
           />
         ) : tab === "organizations" && state ? (
           <OrganizationCenter state={state} refresh={refresh} t={t} />
+        ) : tab === "diagnostics" && state ? (
+          <ConnectionDiagnostics state={state} refresh={refresh} t={t} />
         ) : tab === "updates" && state ? (
           <UpdateCenter state={state} refresh={refresh} t={t} />
         ) : tab === "settings" && state ? (
@@ -2224,6 +2385,7 @@ const css = `
 .squad-updates{overflow:auto;padding:22px 26px;max-width:760px}.squad-updates>header{display:flex;align-items:flex-start;justify-content:space-between;gap:16px}.squad-updates h2{margin:0}.squad-updates h3{font-size:14px;margin:24px 0 8px}.squad-updates label{display:grid;gap:6px;margin:12px 0;font-size:13px}.squad-updates select{box-sizing:border-box;width:100%;max-width:360px;border:1px solid var(--dsw-alias-border-l2,#ccc);border-radius:9px;background:var(--dsw-specific-dialog-fill,#fff);color:inherit;padding:9px;font:inherit}.squad-updates button{border:0;border-radius:9px;padding:8px 12px;background:#315ee8;color:#fff;cursor:pointer}.squad-updates button:disabled{opacity:.5;cursor:not-allowed}.squad-updates a{color:#315ee8}.squad-update-summary{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:10px;margin:18px 0}.squad-update-summary>div{display:grid;gap:5px;padding:13px;border:1px solid var(--dsw-alias-border-l2,#ddd);border-radius:11px}.squad-update-summary span{font-size:11px;color:var(--dsw-alias-label-secondary,#666)}.squad-update-summary strong{overflow-wrap:anywhere}.squad-update-status-failed,.squad-update-status-rolled_back{background:#fde4e1;color:#a52a24}.squad-update-status-available,.squad-update-status-requested,.squad-update-status-blocked{background:#fff0c7;color:#755400}.squad-update-status-installed,.squad-update-status-up_to_date{background:#dff5e6;color:#176c35}@media(max-width:700px){.squad-updates{padding:16px}.squad-update-summary{grid-template-columns:1fr}}
 .squad-trigger{position:relative}.squad-trigger-badge,.squad-tab-count{display:inline-flex;align-items:center;justify-content:center;box-sizing:border-box;min-width:18px;height:18px;padding:0 5px;border-radius:999px;background:#b13c35;color:#fff;font-size:10px;font-weight:700;line-height:1}.squad-trigger:not(.squad-trigger-wide) .squad-trigger-badge{position:absolute;right:0;top:-2px}.squad-tabs button{display:inline-flex;align-items:center;gap:6px}.squad-tabs button.active .squad-tab-count{background:#315ee8}.squad-overview{overflow:auto;padding:24px 28px;flex:1}.squad-overview>header h2{margin:4px 0}.squad-attention-grid{display:grid;grid-template-columns:repeat(4,minmax(0,1fr));gap:10px;margin:20px 0}.squad-attention-grid button{display:grid;gap:5px;text-align:left;border:1px solid var(--dsw-alias-border-l2,#ddd);border-radius:12px;background:transparent;color:inherit;padding:14px;cursor:pointer}.squad-attention-grid button.needs-attention{border-color:#d59b1b;background:#fff8e5;color:#5d470a}.squad-attention-grid strong{font-size:24px}.squad-attention-grid span{font-size:12px;color:var(--dsw-alias-label-secondary,#666)}.squad-next-step{margin-top:18px;padding:18px;border:1px solid var(--dsw-alias-border-l2,#ddd);border-radius:14px}.squad-next-step h3{margin:0 0 7px}.squad-next-step code{display:block;padding:10px;border-radius:9px;background:var(--dsw-alias-interactive-bg-hover,#f4f5f7);overflow-wrap:anywhere}.squad-next-step button,.squad-update-callout{border:0;border-radius:9px;padding:8px 12px;margin-top:12px;background:#315ee8;color:#fff;cursor:pointer}.squad-update-callout{display:block;width:100%;text-align:left;background:#fff0c7;color:#755400}@media(max-width:700px){.squad-attention-grid{grid-template-columns:1fr 1fr}.squad-overview{padding:18px 16px}}
 .squad-tabs{align-items:stretch}.squad-tab-group{display:flex;align-items:center;gap:4px;padding-right:10px;border-right:1px solid var(--dsw-alias-border-l2,#ddd)}.squad-tab-group:last-child{border-right:0}.squad-tab-group-label{align-self:center;color:var(--dsw-alias-label-secondary,#666);font-size:10px;letter-spacing:.08em;text-transform:uppercase;white-space:nowrap}.squad-loading{display:grid;place-items:center;align-content:center;gap:12px;min-height:260px;flex:1;padding:24px;text-align:center}.squad-loading button{border:0;border-radius:9px;padding:8px 12px;background:#315ee8;color:#fff;cursor:pointer}.squad-spinner{width:24px;height:24px;border:3px solid var(--dsw-alias-border-l2,#ddd);border-top-color:#315ee8;border-radius:50%;animation:squad-spin .8s linear infinite}@keyframes squad-spin{to{transform:rotate(360deg)}}@media(max-width:700px){.squad-tab-group-label{display:none}.squad-tab-group{padding-right:4px}}
+.squad-diagnostics{overflow:auto;padding:22px 26px;flex:1}.squad-diagnostics>header{display:flex;align-items:flex-start;justify-content:space-between;gap:16px}.squad-diagnostics>header h2{margin:0}.squad-diagnostics button{border:0;border-radius:9px;padding:8px 12px;background:#315ee8;color:#fff;cursor:pointer}.squad-diagnostics button:disabled{opacity:.5}.squad-diagnostic-grid{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:12px;margin-top:18px}.squad-diagnostic-grid article{min-width:0;border:1px solid var(--dsw-alias-border-l2,#ddd);border-radius:13px;padding:14px}.squad-diagnostic-grid article>header{display:flex;align-items:center;justify-content:space-between;gap:10px}.squad-diagnostic-grid h3{margin:0;font-size:14px}.squad-diagnostic-grid code{display:block;margin:10px 0;overflow-wrap:anywhere;font-size:11px}.squad-diagnostic-grid p,.squad-diagnostic-grid dl{font-size:12px}.squad-diagnostic-grid dl div{display:grid;gap:3px}.squad-diagnostic-grid dt{color:var(--dsw-alias-label-secondary,#666)}.squad-diagnostic-grid dd{margin:0}.squad-connection-unreachable{background:#fde4e1;color:#a52a24}.squad-connection-unverified{background:#fff0c7;color:#755400}.squad-connection-connected,.squad-connection-ready,.squad-connection-serving{background:#dff5e6;color:#176c35}@media(max-width:800px){.squad-diagnostic-grid{grid-template-columns:1fr}.squad-diagnostics{padding:16px}}
 `;
 
 function installStyles(): () => void {

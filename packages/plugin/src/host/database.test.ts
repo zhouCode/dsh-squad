@@ -242,6 +242,11 @@ describe("SquadDatabase", () => {
       envelope.envelopeId,
       new Error("token=hidden"),
     );
+    expect(db.outboxDiagnostics()).toMatchObject({
+      pending: 1,
+      retrying: 1,
+      lastError: "token=[REDACTED]",
+    });
     expect(db.pendingEnvelopes()).toHaveLength(0);
     db.retryEnvelopeNow(envelope.envelopeId);
     expect(db.pendingEnvelopes()).toHaveLength(1);
@@ -276,6 +281,8 @@ describe("SquadDatabase", () => {
       completedAt: new Date().toISOString(),
     });
     expect(db.getDelegation(delegationId)?.status).toBe("COMPLETED");
+    db.markEnvelopeDelivered(envelope.envelopeId, "RECEIVED_BY_NODE");
+    expect(db.outboxDiagnostics()).toEqual({ pending: 0, retrying: 0 });
     db.close();
   });
 

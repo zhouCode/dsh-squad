@@ -116,6 +116,13 @@ export interface PendingEnvelope {
   lastError?: string;
 }
 
+export interface OutboxDiagnostics {
+  pending: number;
+  retrying: number;
+  nextAttemptAt?: string;
+  lastError?: string;
+}
+
 export interface OrganizationDirectoryRecord {
   document: OrganizationDocument;
   revision: number;
@@ -2177,6 +2184,36 @@ export class SquadDatabase {
         ...(lastError === undefined ? {} : { lastError }),
       };
     });
+  }
+
+  outboxDiagnostics(): OutboxDiagnostics {
+    const row = this.#db
+      .prepare(
+        `
+        SELECT count(*) AS pending,
+               sum(CASE WHEN attempts > 0 THEN 1 ELSE 0 END) AS retrying,
+               min(next_attempt_at) AS next_attempt_at
+        FROM local_outbox WHERE delivered_at IS NULL
+      `,
+      )
+      .get() as SqlRow;
+    const lastErrorRow = this.#db
+      .prepare(
+        `
+        SELECT last_error FROM local_outbox
+        WHERE delivered_at IS NULL AND last_error IS NOT NULL
+        ORDER BY next_attempt_at DESC, created_at DESC LIMIT 1
+      `,
+      )
+      .get() as SqlRow | undefined;
+    const nextAttemptAt = optionalString(row.next_attempt_at);
+    const lastError = optionalString(lastErrorRow?.last_error);
+    return {
+      pending: Number(row.pending ?? 0),
+      retrying: Number(row.retrying ?? 0),
+      ...(nextAttemptAt === undefined ? {} : { nextAttemptAt }),
+      ...(lastError === undefined ? {} : { lastError }),
+    };
   }
 
   markEnvelopeDelivered(

@@ -54,6 +54,7 @@ import {
 import {
   isTerminalStatus,
   summarizeAttention,
+  type SquadConnectionDiagnostics,
   type SquadAttentionSummary,
 } from "../shared/state.ts";
 import type { UpdateMode, UpdateSnapshot } from "../shared/updates.ts";
@@ -151,6 +152,7 @@ export interface SquadLocalState {
   plans: TeamPlan[];
   delegations: DelegationRecord[];
   updates: UpdateSnapshot;
+  connection: SquadConnectionDiagnostics;
 }
 
 class PermanentEnvelopeError extends Error {
@@ -218,6 +220,15 @@ export class SquadService extends Service {
   #flushing: Promise<void> | undefined;
   #relayEventsAbort: AbortController | undefined = undefined;
   #relayEventsTask: Promise<void> | undefined = undefined;
+  #relayEventStream: "CONNECTED" | "POLLING" | "DISABLED" = "DISABLED";
+  #relayLastSuccessfulAt: string | undefined = undefined;
+  #relayLastError: string | undefined = undefined;
+  #relayRemoteVersion: string | undefined = undefined;
+  #relayProtocolVersions: number[] | undefined = undefined;
+  #directLastReceivedAt: string | undefined = undefined;
+  #directVerifiedAt: string | undefined = undefined;
+  #directLastError: string | undefined = undefined;
+  #connectionsCheckedAt: string | undefined = undefined;
   #configurationTask: Promise<SquadLocalState> | undefined = undefined;
   #reconfiguring = false;
   #started = false;
@@ -382,6 +393,126 @@ export class SquadService extends Service {
     }
   }
 
+  private connectionError(error: unknown): string {
+    return shareableText(
+      error instanceof Error ? error.message : String(error),
+    ).slice(0, 2_000);
+  }
+
+  private markRelaySuccess(): void {
+    const recovered = this.#relayLastError !== undefined;
+    this.#relayLastSuccessfulAt = new Date().toISOString();
+    this.#relayLastError = undefined;
+    if (recovered) this.touchLocalState();
+  }
+
+  private markRelayFailure(error: unknown): void {
+    const next = this.connectionError(error);
+    if (next === this.#relayLastError) return;
+    this.#relayLastError = next;
+    this.touchLocalState();
+  }
+
+  connectionDiagnostics(): SquadConnectionDiagnostics {
+    const queue = this.database.outboxDiagnostics();
+    const relayConfigured = this.relayClient !== undefined;
+    const relayServing = this.relayServer !== undefined;
+    const relayStatus = relayConfigured
+      ? this.#relayLastError !== undefined
+        ? "UNREACHABLE"
+        : this.#relayLastSuccessfulAt !== undefined
+          ? "CONNECTED"
+          : "UNVERIFIED"
+      : relayServing
+        ? "SERVING"
+        : "NOT_CONFIGURED";
+    const directStatus = !this.#nodeSettings.directEnabled
+      ? "NOT_CONFIGURED"
+      : this.#directLastError !== undefined
+        ? "UNREACHABLE"
+        : this.#directVerifiedAt !== undefined
+          ? "READY"
+          : "UNVERIFIED";
+    return {
+      ...(this.#connectionsCheckedAt === undefined
+        ? {}
+        : { checkedAt: this.#connectionsCheckedAt }),
+      relay: {
+        status: relayStatus,
+        configured: relayConfigured,
+        serving: relayServing,
+        ...(this.#nodeSettings.relayUrl === undefined
+          ? {}
+          : { url: this.#nodeSettings.relayUrl }),
+        ...(this.#relayLastSuccessfulAt === undefined
+          ? {}
+          : { lastSuccessfulAt: this.#relayLastSuccessfulAt }),
+        ...(this.#relayLastError === undefined
+          ? {}
+          : { lastError: this.#relayLastError }),
+        eventStream: relayConfigured ? this.#relayEventStream : "DISABLED",
+        ...(this.#relayRemoteVersion === undefined
+          ? {}
+          : { remoteVersion: this.#relayRemoteVersion }),
+        ...(this.#relayProtocolVersions === undefined
+          ? {}
+          : { protocolVersions: this.#relayProtocolVersions }),
+      },
+      direct: {
+        status: directStatus,
+        serving: this.#nodeSettings.directEnabled,
+        ...(this.#nodeSettings.directPublicUrl === undefined
+          ? {}
+          : { publicUrl: this.#nodeSettings.directPublicUrl }),
+        ...(this.#directLastReceivedAt === undefined
+          ? {}
+          : { lastReceivedAt: this.#directLastReceivedAt }),
+        ...(this.#directLastError === undefined
+          ? {}
+          : { lastError: this.#directLastError }),
+      },
+      queue,
+    };
+  }
+
+  async checkConnections(): Promise<SquadConnectionDiagnostics> {
+    const relay = this.relayClient;
+    if (relay !== undefined) {
+      try {
+        const health = await relay.health();
+        await relay.mailbox(
+          this.database.mailboxCursor(
+            this.#nodeSettings.relayUrl ?? relay.baseUrl,
+          ),
+          1,
+        );
+        this.#relayRemoteVersion = health.version;
+        this.#relayProtocolVersions = health.protocolVersions;
+        this.markRelaySuccess();
+      } catch (error) {
+        this.markRelayFailure(error);
+      }
+    }
+    const directUrl = this.#nodeSettings.directPublicUrl;
+    if (this.#nodeSettings.directEnabled && directUrl !== undefined) {
+      try {
+        const health = await new RelayClient(directUrl, this.identity).health();
+        if (health.nodeId !== this.identity.nodeId) {
+          throw new Error(
+            "Direct public URL resolves to a different Squad Node identity",
+          );
+        }
+        this.#directVerifiedAt = new Date().toISOString();
+        this.#directLastError = undefined;
+      } catch (error) {
+        this.#directLastError = this.connectionError(error);
+      }
+    }
+    this.#connectionsCheckedAt = new Date().toISOString();
+    this.touchLocalState();
+    return this.connectionDiagnostics();
+  }
+
   async configureNode(input: NodeSetupInput): Promise<SquadLocalState> {
     if (this.#closed) {
       throw new SquadConfigurationError(
@@ -455,6 +586,8 @@ export class SquadService extends Service {
           await nextRelayClient.enroll(input.invitation, input.displayName);
         }
         await nextRelayClient.mailbox(this.database.mailboxCursor(relayUrl), 1);
+        this.#relayLastSuccessfulAt = new Date().toISOString();
+        this.#relayLastError = undefined;
       } catch (error) {
         if (
           input.invitation === undefined &&
@@ -537,6 +670,15 @@ export class SquadService extends Service {
       this.#nodeSettings = nextSettings;
       this.relayClient = nextRelayClient;
       this.relayTransport = nextRelayTransport;
+      this.#relayEventStream = nextRelayClient ? "POLLING" : "DISABLED";
+      if (nextRelayClient === undefined) {
+        this.#relayLastSuccessfulAt = undefined;
+        this.#relayLastError = undefined;
+        this.#relayRemoteVersion = undefined;
+        this.#relayProtocolVersions = undefined;
+      }
+      this.#directVerifiedAt = undefined;
+      this.#directLastError = undefined;
       this.#startupInvitation = undefined;
     } finally {
       this.#reconfiguring = false;
@@ -1815,6 +1957,8 @@ export class SquadService extends Service {
       );
     }
     await this.processEnvelope(envelope);
+    this.#directLastReceivedAt = new Date().toISOString();
+    this.#directLastError = undefined;
     const unsigned = unsignedNodeReceiptSchema.parse({
       version: 1,
       envelopeId: envelope.envelopeId,
@@ -1921,7 +2065,14 @@ export class SquadService extends Service {
     const relayUrl = this.#nodeSettings.relayUrl;
     if (relayClient === undefined || relayUrl === undefined) return;
     const after = this.database.mailboxCursor(relayUrl);
-    const mailbox = await relayClient.mailbox(after);
+    let mailbox: Awaited<ReturnType<RelayClient["mailbox"]>>;
+    try {
+      mailbox = await relayClient.mailbox(after);
+      this.markRelaySuccess();
+    } catch (error) {
+      this.markRelayFailure(error);
+      throw error;
+    }
     for (const item of mailbox.items) {
       let permanentFailure = false;
       try {
@@ -1951,6 +2102,7 @@ export class SquadService extends Service {
     if (relayClient === undefined || this.#relayEventsTask !== undefined)
       return;
     const controller = new AbortController();
+    this.#relayEventStream = "POLLING";
     this.#relayEventsAbort = controller;
     this.#relayEventsTask = this.watchRelayEvents(
       relayClient,
@@ -1965,6 +2117,7 @@ export class SquadService extends Service {
     this.#relayEventsTask = undefined;
     controller?.abort();
     await task?.catch(() => undefined);
+    this.#relayEventStream = this.relayClient ? "POLLING" : "DISABLED";
   }
 
   private async watchRelayEvents(
@@ -1976,14 +2129,22 @@ export class SquadService extends Service {
     while (!signal.aborted && !this.#closed) {
       try {
         await relayClient.watchMailbox(signal, () => {
+          if (this.#relayEventStream !== "CONNECTED") {
+            this.#relayEventStream = "CONNECTED";
+            this.touchLocalState();
+          }
+          this.markRelaySuccess();
           void this.pump();
         });
+        this.#relayEventStream = "POLLING";
         retryAfterMs = 1_000;
       } catch (error) {
         if (signal.aborted || this.#closed) return;
         if (error instanceof RelayClientError && error.status === 404) {
+          this.#relayEventStream = "POLLING";
           return;
         }
+        this.#relayEventStream = "POLLING";
         if (!reportedFailure) {
           reportedFailure = true;
           this.database.diagnostic(
@@ -2066,6 +2227,7 @@ export class SquadService extends Service {
       plans: this.database.listTeamPlans(),
       delegations: this.database.listDelegations(),
       updates: this.updates.snapshot(),
+      connection: this.connectionDiagnostics(),
     };
   }
 
@@ -2083,6 +2245,10 @@ export class SquadService extends Service {
 
   version(): string {
     return SQUAD_VERSION;
+  }
+
+  nodeId(): string {
+    return this.identity.nodeId;
   }
 
   async setUpdateMode(mode: UpdateMode): Promise<UpdateSnapshot> {

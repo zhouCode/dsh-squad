@@ -114,6 +114,7 @@ export function createHttpHandler(squad: SquadService) {
       reply(res, 200, {
         ok: true,
         version: squad.version(),
+        nodeId: squad.nodeId(),
         protocolVersions: [1, 2],
       });
       return;
@@ -154,6 +155,14 @@ export function createHttpHandler(squad: SquadService) {
       ) {
         const envelope = await readJson(req, 256 * 1024);
         reply(res, 200, await squad.receiveDirectEnvelope(envelope));
+        return;
+      }
+      if (
+        req.method === "POST" &&
+        url.pathname === "/squad/v1/local/connections/check"
+      ) {
+        await readJson(req, 1_024);
+        reply(res, 200, await squad.checkConnections());
         return;
       }
       if (

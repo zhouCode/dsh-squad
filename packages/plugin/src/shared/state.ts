@@ -27,6 +27,43 @@ export interface SquadAttentionSummary {
   total: number;
 }
 
+export type ConnectionStatus =
+  | "NOT_CONFIGURED"
+  | "CHECKING"
+  | "CONNECTED"
+  | "SERVING"
+  | "READY"
+  | "UNVERIFIED"
+  | "UNREACHABLE";
+
+export interface SquadConnectionDiagnostics {
+  checkedAt?: string;
+  relay: {
+    status: ConnectionStatus;
+    configured: boolean;
+    serving: boolean;
+    url?: string;
+    lastSuccessfulAt?: string;
+    lastError?: string;
+    eventStream: "CONNECTED" | "POLLING" | "DISABLED";
+    remoteVersion?: string;
+    protocolVersions?: number[];
+  };
+  direct: {
+    status: ConnectionStatus;
+    serving: boolean;
+    publicUrl?: string;
+    lastReceivedAt?: string;
+    lastError?: string;
+  };
+  queue: {
+    pending: number;
+    retrying: number;
+    nextAttemptAt?: string;
+    lastError?: string;
+  };
+}
+
 export interface SquadAttentionSource {
   revision: number;
   setupRequired: boolean;

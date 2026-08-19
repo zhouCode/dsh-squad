@@ -23,6 +23,7 @@ describe("Squad host health", () => {
   it("reports the running plugin version even when Relay also handles health", async () => {
     const squad = {
       version: () => "0.6.0",
+      nodeId: () => "node_test-health-identity",
       relayServer: {
         handle: async () => {
           throw new Error("Relay handler must not shadow host health");
@@ -42,6 +43,7 @@ describe("Squad host health", () => {
     expect(await response.json()).toEqual({
       ok: true,
       version: "0.6.0",
+      nodeId: "node_test-health-identity",
       protocolVersions: [1, 2],
     });
   });
@@ -112,5 +114,36 @@ describe("Squad host health", () => {
         server.close((error) => (error ? reject(error) : resolve())),
       );
     }
+  });
+
+  it("runs connection diagnostics through the loopback management API", async () => {
+    const checkConnections = vi.fn(async () => ({
+      checkedAt: new Date().toISOString(),
+      relay: {
+        status: "CONNECTED",
+        configured: true,
+        serving: false,
+        eventStream: "CONNECTED",
+      },
+      direct: { status: "NOT_CONFIGURED", serving: false },
+      queue: { pending: 0, retrying: 0 },
+    }));
+    const squad = { checkConnections } as unknown as SquadService;
+    const server = createServer(createHttpHandler(squad));
+    servers.push(server);
+    await new Promise<void>((resolve) =>
+      server.listen(0, "127.0.0.1", resolve),
+    );
+    const address = server.address() as AddressInfo;
+    const response = await fetch(
+      `http://127.0.0.1:${address.port}/squad/v1/local/connections/check`,
+      { method: "POST", body: "{}" },
+    );
+    expect(response.status).toBe(200);
+    expect(await response.json()).toMatchObject({
+      relay: { status: "CONNECTED" },
+      queue: { pending: 0 },
+    });
+    expect(checkConnections).toHaveBeenCalledOnce();
   });
 });
