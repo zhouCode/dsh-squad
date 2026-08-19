@@ -52,6 +52,15 @@ import {
   type OrganizationView,
 } from "../shared/organizations.ts";
 import {
+  decodePairingBundle,
+  encodePairingBundle,
+  unsignedPairingBundle,
+  unsignedPairingBundleSchema,
+  type ImportPairingBundle,
+  type PairingBundle,
+  type UpdatePeerConnection,
+} from "../shared/pairing.ts";
+import {
   isTerminalStatus,
   summarizeAttention,
   type SquadConnectionDiagnostics,
@@ -723,6 +732,146 @@ export class SquadService extends Service {
     if (peer === undefined) throw new Error("peer was not persisted");
     this.touchLocalState();
     return Promise.resolve(peer);
+  }
+
+  createPairingBundle(expiresInMinutes = 10_080): {
+    bundle: string;
+    expiresAt: string;
+  } {
+    if (
+      !Number.isInteger(expiresInMinutes) ||
+      expiresInMinutes < 5 ||
+      expiresInMinutes > 43_200
+    ) {
+      throw new Error("pairing bundle lifetime must be 5 to 43200 minutes");
+    }
+    const issuedAt = new Date();
+    const expiresAt = new Date(
+      issuedAt.getTime() + expiresInMinutes * 60_000,
+    ).toISOString();
+    const unsigned = unsignedPairingBundleSchema.parse({
+      version: 1,
+      nodeId: this.identity.nodeId,
+      displayName: this.#nodeSettings.displayName,
+      publicKey: this.identity.publicKey,
+      ...(this.#nodeSettings.relayUrl === undefined
+        ? {}
+        : { relayUrl: this.#nodeSettings.relayUrl }),
+      ...(!this.#nodeSettings.directEnabled ||
+      this.#nodeSettings.directPublicUrl === undefined
+        ? {}
+        : { directUrl: this.#nodeSettings.directPublicUrl }),
+      issuedAt: issuedAt.toISOString(),
+      expiresAt,
+    });
+    const signed: PairingBundle = {
+      ...unsigned,
+      signature: this.identity.sign(unsigned),
+    };
+    return { bundle: encodePairingBundle(signed), expiresAt };
+  }
+
+  async importPairingBundle(input: ImportPairingBundle): Promise<PeerRecord> {
+    const bundle = decodePairingBundle(input.bundle);
+    if (bundle.nodeId === this.identity.nodeId) {
+      throw new Error("cannot pair this Node with itself");
+    }
+    if (nodeIdFromPublicKey(bundle.publicKey) !== bundle.nodeId) {
+      throw new Error("pairing bundle public key does not match its Node ID");
+    }
+    if (
+      !verifySignature(
+        unsignedPairingBundle(bundle),
+        bundle.signature,
+        bundle.publicKey,
+      )
+    ) {
+      throw new Error("pairing bundle signature is invalid");
+    }
+    const issuedAt = Date.parse(bundle.issuedAt);
+    const expiresAt = Date.parse(bundle.expiresAt);
+    if (issuedAt > Date.now() + 5 * 60_000 || expiresAt <= issuedAt) {
+      throw new Error("pairing bundle timestamps are invalid");
+    }
+    if (expiresAt <= Date.now()) throw new Error("pairing bundle has expired");
+
+    const requestedDirectUrl = input.directUrl ?? bundle.directUrl;
+    const transport =
+      input.transport ??
+      (requestedDirectUrl !== undefined ? "DIRECT" : "RELAY");
+    if (transport === "RELAY") {
+      if (this.relayClient === undefined) {
+        throw new Error("a Relay connection is required for Relay pairing");
+      }
+      if (
+        bundle.relayUrl !== undefined &&
+        resolveRelayBaseUrl(bundle.relayUrl, "pairing Relay URL") !==
+          this.#nodeSettings.relayUrl
+      ) {
+        throw new Error(
+          "the peer uses a different Relay; choose Direct or connect both Nodes to the same Relay",
+        );
+      }
+    }
+    const directUrl = resolveDirectBaseUrl(
+      requestedDirectUrl,
+      `pairing bundle for ${bundle.displayName}`,
+    );
+    if (transport === "DIRECT" && directUrl === undefined) {
+      throw new Error("the pairing bundle has no Direct URL");
+    }
+    return await this.addPeer({
+      nodeId: bundle.nodeId,
+      displayName: bundle.displayName,
+      publicKey: bundle.publicKey,
+      enabled: true,
+      transport,
+      ...(directUrl === undefined ? {} : { directUrl }),
+      policy: peerPolicySchema.parse({
+        canMessage: true,
+        canDelegate: true,
+        autoExecute: "NEVER",
+        maxConcurrent: 1,
+        maxDelegationDepth: 1,
+        maxRuntimeMinutes: 30,
+        ...input.policy,
+      }),
+    });
+  }
+
+  updatePeerConnection(
+    nodeId: string,
+    input: UpdatePeerConnection,
+  ): Promise<PeerRecord> {
+    const parsedNodeId = nodeIdSchema.parse(nodeId);
+    const current = this.database.findPeer(parsedNodeId);
+    if (current === undefined) throw new Error("unknown direct peer");
+    if (
+      (input.transport ?? current.transport) === "RELAY" &&
+      this.relayClient === undefined
+    ) {
+      throw new Error("a Relay connection is required for Relay peers");
+    }
+    const directUrl =
+      input.directUrl === undefined || input.directUrl === null
+        ? input.directUrl
+        : resolveDirectBaseUrl(input.directUrl, "peer Direct URL");
+    const peer = this.database.updatePeerConnection(parsedNodeId, {
+      ...(input.displayName === undefined
+        ? {}
+        : { displayName: input.displayName.trim() }),
+      ...(input.enabled === undefined ? {} : { enabled: input.enabled }),
+      ...(input.transport === undefined ? {} : { transport: input.transport }),
+      ...(directUrl === undefined ? {} : { directUrl }),
+    });
+    this.touchLocalState();
+    return Promise.resolve(peer);
+  }
+
+  removePeer(nodeId: string): Promise<void> {
+    this.database.removePeer(nodeIdSchema.parse(nodeId));
+    this.touchLocalState();
+    return Promise.resolve();
   }
 
   updatePeerPolicy(

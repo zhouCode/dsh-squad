@@ -5,6 +5,10 @@ import {
   type CreateTeamPlanInput,
 } from "../shared/contracts.ts";
 import { updateModeSchema } from "../shared/updates.ts";
+import {
+  importPairingBundleSchema,
+  updatePeerConnectionSchema,
+} from "../shared/pairing.ts";
 import { nodeSetupInputSchema } from "./config.ts";
 import { RelayClientError } from "./relay-client.ts";
 import { SquadConfigurationError, type SquadService } from "./service.ts";
@@ -139,7 +143,9 @@ export function createHttpHandler(squad: SquadService) {
         streamLocalState(req, res, squad);
         return;
       }
-      if (req.method === "POST") assertSameOrigin(req);
+      if (req.method === "POST" || req.method === "DELETE") {
+        assertSameOrigin(req);
+      }
       if (req.method === "POST" && url.pathname === "/squad/v1/local/setup") {
         const body = await readJson(req, 8 * 1024);
         reply(
@@ -228,6 +234,54 @@ export function createHttpHandler(squad: SquadService) {
           policy: peerPolicySchema.parse(body.policy ?? {}),
         });
         reply(res, 201, peer);
+        return;
+      }
+      if (
+        req.method === "POST" &&
+        url.pathname === "/squad/v1/local/peers/pairing-bundle"
+      ) {
+        const body = (await readJson(req, 8 * 1024)) as Record<string, unknown>;
+        const expiresInMinutes = Number(body.expiresInMinutes ?? 10_080);
+        reply(res, 201, squad.createPairingBundle(expiresInMinutes));
+        return;
+      }
+      if (
+        req.method === "POST" &&
+        url.pathname === "/squad/v1/local/peers/import"
+      ) {
+        const body = await readJson(req, 40 * 1024);
+        reply(
+          res,
+          201,
+          await squad.importPairingBundle(
+            importPairingBundleSchema.parse(body),
+          ),
+        );
+        return;
+      }
+      const peerConnection =
+        /^\/squad\/v1\/local\/peers\/(node_[A-Za-z0-9_-]{43})\/connection$/u.exec(
+          url.pathname,
+        );
+      if (req.method === "POST" && peerConnection?.[1] !== undefined) {
+        const body = await readJson(req, 8 * 1024);
+        reply(
+          res,
+          200,
+          await squad.updatePeerConnection(
+            peerConnection[1],
+            updatePeerConnectionSchema.parse(body),
+          ),
+        );
+        return;
+      }
+      const removePeer =
+        /^\/squad\/v1\/local\/peers\/(node_[A-Za-z0-9_-]{43})$/u.exec(
+          url.pathname,
+        );
+      if (req.method === "DELETE" && removePeer?.[1] !== undefined) {
+        await squad.removePeer(removePeer[1]);
+        reply(res, 200, { ok: true });
         return;
       }
       const directPeerPolicy =

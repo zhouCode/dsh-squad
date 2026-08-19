@@ -223,6 +223,7 @@ export class SquadDatabase {
         max_delegation_depth INTEGER NOT NULL,
         max_runtime_minutes INTEGER NOT NULL,
         max_tokens INTEGER,
+        removed_at TEXT,
         created_at TEXT NOT NULL,
         updated_at TEXT NOT NULL
       );
@@ -518,7 +519,17 @@ export class SquadDatabase {
       this.#db.exec("UPDATE schema_meta SET version = 7 WHERE singleton = 1");
       currentVersion = 7;
     }
-    if (currentVersion !== 7) {
+    if (currentVersion === 7) {
+      const peerColumns = this.#db
+        .prepare("PRAGMA table_info(peer_policies)")
+        .all() as SqlRow[];
+      if (!peerColumns.some((column) => column.name === "removed_at")) {
+        this.#db.exec("ALTER TABLE peer_policies ADD COLUMN removed_at TEXT");
+      }
+      this.#db.exec("UPDATE schema_meta SET version = 8 WHERE singleton = 1");
+      currentVersion = 8;
+    }
+    if (currentVersion !== 8) {
       throw new Error(
         `unsupported Squad database version ${String(currentVersion)}`,
       );
@@ -677,6 +688,7 @@ export class SquadDatabase {
           max_delegation_depth = excluded.max_delegation_depth,
           max_runtime_minutes = excluded.max_runtime_minutes,
           max_tokens = excluded.max_tokens,
+          removed_at = NULL,
           updated_at = excluded.updated_at
       `,
       )
@@ -733,7 +745,7 @@ export class SquadDatabase {
     return (
       this.#db
         .prepare(
-          "SELECT * FROM peer_policies WHERE directory_only = 0 ORDER BY lower(display_name), node_id",
+          "SELECT * FROM peer_policies WHERE directory_only = 0 AND removed_at IS NULL ORDER BY lower(display_name), node_id",
         )
         .all() as SqlRow[]
     ).map((row) => this.peerFromRow(row));
@@ -742,7 +754,7 @@ export class SquadDatabase {
   findPeer(selector: string): PeerRecord | undefined {
     const rows = this.#db
       .prepare(
-        "SELECT * FROM peer_policies WHERE directory_only = 0 AND (node_id = ? OR lower(display_name) = lower(?)) ORDER BY node_id",
+        "SELECT * FROM peer_policies WHERE directory_only = 0 AND removed_at IS NULL AND (node_id = ? OR lower(display_name) = lower(?)) ORDER BY node_id",
       )
       .all(selector, selector) as SqlRow[];
     if (rows.length > 1) {
@@ -766,6 +778,45 @@ export class SquadDatabase {
     const updated = this.findPeer(nodeId);
     if (updated === undefined) throw new Error("direct peer disappeared");
     return updated;
+  }
+
+  updatePeerConnection(
+    nodeId: string,
+    candidate: {
+      displayName?: string;
+      enabled?: boolean;
+      transport?: PeerTransport;
+      directUrl?: string | null;
+    },
+  ): PeerRecord {
+    const peer = this.findPeer(nodeId);
+    if (peer === undefined) throw new Error("unknown direct peer");
+    const transport = candidate.transport ?? peer.transport;
+    const directUrl =
+      candidate.directUrl === undefined
+        ? peer.directUrl
+        : (candidate.directUrl ?? undefined);
+    this.upsertPeer({
+      nodeId: peer.nodeId,
+      displayName: candidate.displayName ?? peer.displayName,
+      publicKey: peer.publicKey,
+      enabled: candidate.enabled ?? peer.enabled,
+      transport,
+      ...(directUrl === undefined ? {} : { directUrl }),
+      policy: peer.policy,
+    });
+    const updated = this.findPeer(nodeId);
+    if (updated === undefined) throw new Error("direct peer disappeared");
+    return updated;
+  }
+
+  removePeer(nodeId: string): void {
+    const result = this.#db
+      .prepare(
+        "UPDATE peer_policies SET enabled = 0, removed_at = ?, updated_at = ? WHERE node_id = ? AND directory_only = 0 AND removed_at IS NULL",
+      )
+      .run(new Date().toISOString(), new Date().toISOString(), nodeId);
+    if (result.changes !== 1) throw new Error("unknown direct peer");
   }
 
   private ensureOrganizationNodeIdentity(

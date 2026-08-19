@@ -1705,7 +1705,13 @@ function Settings({
 }) {
   const [error, setError] = useState<string>();
   const [busyPeer, setBusyPeer] = useState<string>();
-  const submit = async (event: FormEvent<HTMLFormElement>) => {
+  const [pairingBusy, setPairingBusy] = useState<"create" | "import">();
+  const [pairingBundle, setPairingBundle] = useState<{
+    bundle: string;
+    expiresAt: string;
+  }>();
+  const [copied, setCopied] = useState(false);
+  const submitManualPeer = async (event: FormEvent<HTMLFormElement>) => {
     event.preventDefault();
     const form = new FormData(event.currentTarget);
     setError(undefined);
@@ -1754,6 +1760,113 @@ function Settings({
       setBusyPeer(undefined);
     }
   };
+  const createPairingBundle = async () => {
+    setPairingBusy("create");
+    setError(undefined);
+    setCopied(false);
+    try {
+      setPairingBundle(
+        await api<{ bundle: string; expiresAt: string }>(
+          "/peers/pairing-bundle",
+          {
+            method: "POST",
+            body: JSON.stringify({ expiresInMinutes: 10_080 }),
+          },
+        ),
+      );
+    } catch (cause) {
+      setError(describeError(cause, t, "error.pairingExportFailed"));
+    } finally {
+      setPairingBusy(undefined);
+    }
+  };
+  const copyPairingBundle = async () => {
+    if (pairingBundle === undefined) return;
+    setError(undefined);
+    try {
+      await navigator.clipboard.writeText(pairingBundle.bundle);
+      setCopied(true);
+    } catch (cause) {
+      setError(describeError(cause, t, "error.copyFailed"));
+    }
+  };
+  const importPairingBundle = async (event: FormEvent<HTMLFormElement>) => {
+    event.preventDefault();
+    const formElement = event.currentTarget;
+    const form = new FormData(formElement);
+    const transport = form.get("pairingTransport");
+    setPairingBusy("import");
+    setError(undefined);
+    try {
+      await api("/peers/import", {
+        method: "POST",
+        body: JSON.stringify({
+          bundle: form.get("pairingBundle"),
+          ...(transport === "RELAY" || transport === "DIRECT"
+            ? { transport }
+            : {}),
+          policy: {
+            autoExecute: form.get("pairingAutoExecute"),
+          },
+        }),
+      });
+      formElement.reset();
+      await refresh();
+    } catch (cause) {
+      setError(describeError(cause, t, "error.pairingFailed"));
+    } finally {
+      setPairingBusy(undefined);
+    }
+  };
+  const updatePeerConnection = async (
+    nodeId: string,
+    input: Record<string, unknown>,
+  ) => {
+    setBusyPeer(nodeId);
+    setError(undefined);
+    try {
+      await api(`/peers/${nodeId}/connection`, {
+        method: "POST",
+        body: JSON.stringify(input),
+      });
+      await refresh();
+    } catch (cause) {
+      setError(describeError(cause, t, "error.peerUpdateFailed"));
+    } finally {
+      setBusyPeer(undefined);
+    }
+  };
+  const submitPeerConnection = async (
+    nodeId: string,
+    event: FormEvent<HTMLFormElement>,
+  ) => {
+    event.preventDefault();
+    const form = new FormData(event.currentTarget);
+    await updatePeerConnection(nodeId, {
+      displayName: form.get("displayName"),
+      transport: form.get("transport"),
+      directUrl: String(form.get("directUrl") ?? "").trim() || null,
+    });
+  };
+  const removePeer = async (peer: PeerView) => {
+    if (
+      !window.confirm(
+        t("settings.removeConfirmation", { name: peer.displayName }),
+      )
+    ) {
+      return;
+    }
+    setBusyPeer(peer.nodeId);
+    setError(undefined);
+    try {
+      await api(`/peers/${peer.nodeId}`, { method: "DELETE" });
+      await refresh();
+    } catch (cause) {
+      setError(describeError(cause, t, "error.peerRemoveFailed"));
+    } finally {
+      setBusyPeer(undefined);
+    }
+  };
   return (
     <div className="squad-settings">
       <NodeSetupForm state={state} onConfigured={refresh} t={t} />
@@ -1772,82 +1885,237 @@ function Settings({
       {state.direct.publicUrl ? <code>{state.direct.publicUrl}</code> : null}
       <p className="squad-muted">{t("settings.languageHint")}</p>
       <h2>{t("settings.peers")}</h2>
-      {state.peers.map((peer) => (
-        <div className="squad-peer" key={peer.nodeId}>
-          <div>
-            <strong>{peer.displayName}</strong>
+      {state.peers.length === 0 ? (
+        <p className="squad-muted">{t("settings.noPeers")}</p>
+      ) : null}
+      {state.peers.map((peer) => {
+        const busy = busyPeer === peer.nodeId;
+        return (
+          <article
+            className={`squad-peer${peer.enabled ? "" : " squad-peer-disabled"}`}
+            key={peer.nodeId}
+          >
+            <header>
+              <div>
+                <strong>{peer.displayName}</strong>
+                <span>
+                  {peer.transport === "DIRECT"
+                    ? t("transport.DIRECT")
+                    : t("transport.RELAY")}
+                  {peer.enabled ? "" : ` · ${t("settings.peerDisabled")}`}
+                </span>
+              </div>
+              <button
+                type="button"
+                className="squad-secondary"
+                disabled={busyPeer !== undefined}
+                onClick={() =>
+                  void updatePeerConnection(peer.nodeId, {
+                    enabled: !peer.enabled,
+                  })
+                }
+              >
+                {peer.enabled
+                  ? t("action.disablePeer")
+                  : t("action.enablePeer")}
+              </button>
+            </header>
             <code>{peer.nodeId}</code>
-            <span>
-              {peer.transport === "DIRECT"
-                ? t("transport.DIRECT")
-                : t("transport.RELAY")}
-            </span>
             {peer.directUrl ? <code>{peer.directUrl}</code> : null}
-          </div>
-          {peer.enabled ? (
-            <PolicySelect
-              value={peer.policy.autoExecute}
-              disabled={busyPeer !== undefined}
-              t={t}
-              onChange={(autoExecute) =>
-                void updatePeerPolicy(peer.nodeId, autoExecute)
-              }
-            />
-          ) : (
-            <span>{t("settings.peerDisabled")}</span>
-          )}
-        </div>
-      ))}
+            <label>
+              {t("settings.autoExecute")}
+              <PolicySelect
+                value={peer.policy.autoExecute}
+                disabled={busyPeer !== undefined || !peer.enabled}
+                t={t}
+                onChange={(autoExecute) =>
+                  void updatePeerPolicy(peer.nodeId, autoExecute)
+                }
+              />
+            </label>
+            <details>
+              <summary>{t("settings.editPeer")}</summary>
+              <form
+                onSubmit={(event) =>
+                  void submitPeerConnection(peer.nodeId, event)
+                }
+              >
+                <label>
+                  {t("settings.displayName")}
+                  <input
+                    name="displayName"
+                    defaultValue={peer.displayName}
+                    required
+                    maxLength={120}
+                  />
+                </label>
+                <label>
+                  {t("settings.transport")}
+                  <select name="transport" defaultValue={peer.transport}>
+                    <option value="RELAY" disabled={!state.relay.configured}>
+                      {t("transport.RELAY")}
+                    </option>
+                    <option value="DIRECT">{t("transport.DIRECT")}</option>
+                  </select>
+                </label>
+                <label>
+                  {t("settings.directUrl")}
+                  <input
+                    name="directUrl"
+                    type="url"
+                    defaultValue={peer.directUrl ?? ""}
+                    placeholder="https://bob.example.com"
+                  />
+                </label>
+                <div className="squad-actions">
+                  <button type="submit" disabled={busy}>
+                    {busy ? t("action.saving") : t("action.saveChanges")}
+                  </button>
+                  <button
+                    type="button"
+                    className="squad-danger"
+                    disabled={busyPeer !== undefined}
+                    onClick={() => void removePeer(peer)}
+                  >
+                    {t("action.removePeer")}
+                  </button>
+                </div>
+              </form>
+            </details>
+          </article>
+        );
+      })}
       {state.peers.some(
         (peer) => peer.enabled && peer.policy.autoExecute === "TRUSTED",
       ) ? (
         <p className="squad-warning">{t("settings.trustedWarning")}</p>
       ) : null}
-      <h3>{t("settings.pairPeer")}</h3>
-      <form onSubmit={submit}>
-        <label>
-          {t("settings.displayName")}
-          <input name="displayName" required maxLength={120} />
-        </label>
-        <label>
-          {t("settings.nodeId")}
-          <input name="nodeId" required />
-        </label>
-        <label>
-          {t("settings.publicKey")}
-          <textarea name="publicKey" required rows={5} />
-        </label>
-        <label>
-          {t("settings.transport")}
-          <select
-            name="transport"
-            defaultValue={state.relay.configured ? "RELAY" : "DIRECT"}
-          >
-            <option value="RELAY" disabled={!state.relay.configured}>
-              {t("transport.RELAY")}
-            </option>
-            <option value="DIRECT">{t("transport.DIRECT")}</option>
-          </select>
-        </label>
-        <label>
-          {t("settings.directUrl")}
-          <input
-            name="directUrl"
-            type="url"
-            placeholder="https://bob.example.com"
-          />
-          <small>{t("settings.directUrlHint")}</small>
-        </label>
-        <label>
-          {t("settings.autoExecute")}
-          <select name="autoExecute" defaultValue="NEVER">
-            <option value="NEVER">{formatPolicy(t, "NEVER")}</option>
-            <option value="SAFE">{formatPolicy(t, "SAFE")}</option>
-            <option value="TRUSTED">{formatPolicy(t, "TRUSTED")}</option>
-          </select>
-        </label>
-        <button type="submit">{t("action.savePeer")}</button>
-      </form>
+      <section className="squad-pairing">
+        <h3>{t("pairing.title")}</h3>
+        <p className="squad-muted">{t("pairing.intro")}</p>
+        <div className="squad-pairing-grid">
+          <div>
+            <h4>{t("pairing.shareTitle")}</h4>
+            <p className="squad-muted">{t("pairing.shareHint")}</p>
+            <button
+              type="button"
+              disabled={
+                pairingBusy !== undefined ||
+                (!state.relay.configured &&
+                  state.direct.publicUrl === undefined)
+              }
+              onClick={() => void createPairingBundle()}
+            >
+              {pairingBusy === "create"
+                ? t("pairing.creating")
+                : t("pairing.create")}
+            </button>
+            {!state.relay.configured && state.direct.publicUrl === undefined ? (
+              <p className="squad-warning">{t("pairing.unreachable")}</p>
+            ) : null}
+            {pairingBundle ? (
+              <div className="squad-pairing-result">
+                <label>
+                  {t("pairing.bundle")}
+                  <textarea readOnly rows={5} value={pairingBundle.bundle} />
+                </label>
+                <small>
+                  {t("pairing.expires", {
+                    time: new Date(pairingBundle.expiresAt).toLocaleString(),
+                  })}
+                </small>
+                <button type="button" onClick={() => void copyPairingBundle()}>
+                  {copied ? t("action.copied") : t("action.copy")}
+                </button>
+              </div>
+            ) : null}
+          </div>
+          <form onSubmit={importPairingBundle}>
+            <h4>{t("pairing.importTitle")}</h4>
+            <label>
+              {t("pairing.bundle")}
+              <textarea
+                name="pairingBundle"
+                required
+                rows={5}
+                maxLength={32 * 1024}
+                placeholder={t("pairing.bundlePlaceholder")}
+              />
+            </label>
+            <label>
+              {t("pairing.transport")}
+              <select name="pairingTransport" defaultValue="AUTO">
+                <option value="AUTO">{t("pairing.transportAuto")}</option>
+                <option value="DIRECT">{t("transport.DIRECT")}</option>
+                <option value="RELAY" disabled={!state.relay.configured}>
+                  {t("transport.RELAY")}
+                </option>
+              </select>
+            </label>
+            <label>
+              {t("settings.autoExecute")}
+              <select name="pairingAutoExecute" defaultValue="NEVER">
+                <option value="NEVER">{formatPolicy(t, "NEVER")}</option>
+                <option value="SAFE">{formatPolicy(t, "SAFE")}</option>
+                <option value="TRUSTED">{formatPolicy(t, "TRUSTED")}</option>
+              </select>
+            </label>
+            <button type="submit" disabled={pairingBusy !== undefined}>
+              {pairingBusy === "import"
+                ? t("pairing.importing")
+                : t("pairing.import")}
+            </button>
+          </form>
+        </div>
+      </section>
+      <details className="squad-advanced-pairing">
+        <summary>{t("settings.manualPairing")}</summary>
+        <p className="squad-muted">{t("settings.manualPairingHint")}</p>
+        <form onSubmit={submitManualPeer}>
+          <label>
+            {t("settings.displayName")}
+            <input name="displayName" required maxLength={120} />
+          </label>
+          <label>
+            {t("settings.nodeId")}
+            <input name="nodeId" required />
+          </label>
+          <label>
+            {t("settings.publicKey")}
+            <textarea name="publicKey" required rows={5} />
+          </label>
+          <label>
+            {t("settings.transport")}
+            <select
+              name="transport"
+              defaultValue={state.relay.configured ? "RELAY" : "DIRECT"}
+            >
+              <option value="RELAY" disabled={!state.relay.configured}>
+                {t("transport.RELAY")}
+              </option>
+              <option value="DIRECT">{t("transport.DIRECT")}</option>
+            </select>
+          </label>
+          <label>
+            {t("settings.directUrl")}
+            <input
+              name="directUrl"
+              type="url"
+              placeholder="https://bob.example.com"
+            />
+            <small>{t("settings.directUrlHint")}</small>
+          </label>
+          <label>
+            {t("settings.autoExecute")}
+            <select name="autoExecute" defaultValue="NEVER">
+              <option value="NEVER">{formatPolicy(t, "NEVER")}</option>
+              <option value="SAFE">{formatPolicy(t, "SAFE")}</option>
+              <option value="TRUSTED">{formatPolicy(t, "TRUSTED")}</option>
+            </select>
+          </label>
+          <button type="submit">{t("action.savePeer")}</button>
+        </form>
+      </details>
       {error ? <p className="squad-error">{error}</p> : null}
     </div>
   );
@@ -2386,6 +2654,7 @@ const css = `
 .squad-trigger{position:relative}.squad-trigger-badge,.squad-tab-count{display:inline-flex;align-items:center;justify-content:center;box-sizing:border-box;min-width:18px;height:18px;padding:0 5px;border-radius:999px;background:#b13c35;color:#fff;font-size:10px;font-weight:700;line-height:1}.squad-trigger:not(.squad-trigger-wide) .squad-trigger-badge{position:absolute;right:0;top:-2px}.squad-tabs button{display:inline-flex;align-items:center;gap:6px}.squad-tabs button.active .squad-tab-count{background:#315ee8}.squad-overview{overflow:auto;padding:24px 28px;flex:1}.squad-overview>header h2{margin:4px 0}.squad-attention-grid{display:grid;grid-template-columns:repeat(4,minmax(0,1fr));gap:10px;margin:20px 0}.squad-attention-grid button{display:grid;gap:5px;text-align:left;border:1px solid var(--dsw-alias-border-l2,#ddd);border-radius:12px;background:transparent;color:inherit;padding:14px;cursor:pointer}.squad-attention-grid button.needs-attention{border-color:#d59b1b;background:#fff8e5;color:#5d470a}.squad-attention-grid strong{font-size:24px}.squad-attention-grid span{font-size:12px;color:var(--dsw-alias-label-secondary,#666)}.squad-next-step{margin-top:18px;padding:18px;border:1px solid var(--dsw-alias-border-l2,#ddd);border-radius:14px}.squad-next-step h3{margin:0 0 7px}.squad-next-step code{display:block;padding:10px;border-radius:9px;background:var(--dsw-alias-interactive-bg-hover,#f4f5f7);overflow-wrap:anywhere}.squad-next-step button,.squad-update-callout{border:0;border-radius:9px;padding:8px 12px;margin-top:12px;background:#315ee8;color:#fff;cursor:pointer}.squad-update-callout{display:block;width:100%;text-align:left;background:#fff0c7;color:#755400}@media(max-width:700px){.squad-attention-grid{grid-template-columns:1fr 1fr}.squad-overview{padding:18px 16px}}
 .squad-tabs{align-items:stretch}.squad-tab-group{display:flex;align-items:center;gap:4px;padding-right:10px;border-right:1px solid var(--dsw-alias-border-l2,#ddd)}.squad-tab-group:last-child{border-right:0}.squad-tab-group-label{align-self:center;color:var(--dsw-alias-label-secondary,#666);font-size:10px;letter-spacing:.08em;text-transform:uppercase;white-space:nowrap}.squad-loading{display:grid;place-items:center;align-content:center;gap:12px;min-height:260px;flex:1;padding:24px;text-align:center}.squad-loading button{border:0;border-radius:9px;padding:8px 12px;background:#315ee8;color:#fff;cursor:pointer}.squad-spinner{width:24px;height:24px;border:3px solid var(--dsw-alias-border-l2,#ddd);border-top-color:#315ee8;border-radius:50%;animation:squad-spin .8s linear infinite}@keyframes squad-spin{to{transform:rotate(360deg)}}@media(max-width:700px){.squad-tab-group-label{display:none}.squad-tab-group{padding-right:4px}}
 .squad-diagnostics{overflow:auto;padding:22px 26px;flex:1}.squad-diagnostics>header{display:flex;align-items:flex-start;justify-content:space-between;gap:16px}.squad-diagnostics>header h2{margin:0}.squad-diagnostics button{border:0;border-radius:9px;padding:8px 12px;background:#315ee8;color:#fff;cursor:pointer}.squad-diagnostics button:disabled{opacity:.5}.squad-diagnostic-grid{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:12px;margin-top:18px}.squad-diagnostic-grid article{min-width:0;border:1px solid var(--dsw-alias-border-l2,#ddd);border-radius:13px;padding:14px}.squad-diagnostic-grid article>header{display:flex;align-items:center;justify-content:space-between;gap:10px}.squad-diagnostic-grid h3{margin:0;font-size:14px}.squad-diagnostic-grid code{display:block;margin:10px 0;overflow-wrap:anywhere;font-size:11px}.squad-diagnostic-grid p,.squad-diagnostic-grid dl{font-size:12px}.squad-diagnostic-grid dl div{display:grid;gap:3px}.squad-diagnostic-grid dt{color:var(--dsw-alias-label-secondary,#666)}.squad-diagnostic-grid dd{margin:0}.squad-connection-unreachable{background:#fde4e1;color:#a52a24}.squad-connection-unverified{background:#fff0c7;color:#755400}.squad-connection-connected,.squad-connection-ready,.squad-connection-serving{background:#dff5e6;color:#176c35}@media(max-width:800px){.squad-diagnostic-grid{grid-template-columns:1fr}.squad-diagnostics{padding:16px}}
+.squad-settings>.squad-peer{display:grid;grid-template-columns:1fr;gap:8px;margin:10px 0;padding:14px;border:1px solid var(--dsw-alias-border-l2,#ddd);border-radius:12px}.squad-peer>header{display:flex;align-items:flex-start;justify-content:space-between;gap:12px}.squad-peer>header span{display:block;margin-top:4px;color:var(--dsw-alias-label-secondary,#666);font-size:12px}.squad-peer-disabled{opacity:.72}.squad-peer details,.squad-advanced-pairing{margin-top:8px}.squad-peer summary,.squad-advanced-pairing summary{cursor:pointer;color:#315ee8;font-size:13px}.squad-settings .squad-secondary{border:1px solid var(--dsw-alias-border-l2,#ccc);background:transparent;color:inherit}.squad-settings button:disabled{opacity:.5;cursor:not-allowed}.squad-pairing{margin-top:24px;padding-top:2px}.squad-pairing-grid{display:grid;grid-template-columns:1fr 1fr;gap:12px}.squad-pairing-grid>div,.squad-pairing-grid>form{min-width:0;border:1px solid var(--dsw-alias-border-l2,#ddd);border-radius:12px;padding:14px}.squad-pairing-grid h4{margin:0 0 7px}.squad-pairing-result{display:grid;gap:8px;margin-top:12px}.squad-pairing-result textarea{font-family:monospace;font-size:11px}.squad-advanced-pairing{margin:20px 0;padding:14px;border:1px dashed var(--dsw-alias-border-l2,#ccc);border-radius:12px}@media(max-width:700px){.squad-pairing-grid{grid-template-columns:1fr}}
 `;
 
 function installStyles(): () => void {

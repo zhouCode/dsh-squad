@@ -79,7 +79,7 @@ describe("SquadDatabase", () => {
     const schema = migrated
       .prepare("SELECT version FROM schema_meta WHERE singleton = 1")
       .get();
-    expect(schema?.version).toBe(7);
+    expect(schema?.version).toBe(8);
     migrated.close();
   });
 
