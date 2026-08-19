@@ -8,7 +8,7 @@ import {
 const root = new URL("../", import.meta.url);
 const expectedDsh = "0.1.0-rc.6";
 const expectedCordis = "4.0.1";
-const expectedSquad = "0.6.0";
+const expectedSquad = "0.7.0";
 const dependencyFields = [
   "dependencies",
   "devDependencies",

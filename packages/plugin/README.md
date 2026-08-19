@@ -24,11 +24,13 @@ The package contains one Cordis Host plugin, six native Agent tools, a DSH Web C
 ## Install
 
 ```bash
-dsh plugin --profile web add ./dsh-squad-plugin-0.6.0.tgz --offline
+dsh plugin --profile web add ./dsh-squad-plugin-0.7.0.tgz --offline
 dsh web
 ```
 
-The bundled `cordis.patch.yml` inserts the `dsh-squad` entry. Override it in `$DSH_HOME/profiles/web/cordis.patch.yml`:
+The bundled `cordis.patch.yml` inserts the `dsh-squad` entry. A fresh installation shows a short guide the first time `Agent Inbox` opens: name the Node, then join a Relay or choose Direct peer-to-peer. Relay settings are saved only after the one-time invitation and signed identity are validated, and the invitation is never written to the Node database. Change the connection later under `Settings → Team connection`; no manual YAML edit is required.
+
+Unattended deployments, Relay Server hosting, and advanced runtime policy may still override configuration in `$DSH_HOME/profiles/web/cordis.patch.yml`:
 
 ```yaml
 - id: dsh-squad

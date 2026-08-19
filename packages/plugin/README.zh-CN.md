@@ -24,11 +24,13 @@ DSH Squad 把运行在不同电脑、网络和地点上的个人 Agent 组成任
 ## 安装
 
 ```bash
-dsh plugin --profile web add ./dsh-squad-plugin-0.6.0.tgz --offline
+dsh plugin --profile web add ./dsh-squad-plugin-0.7.0.tgz --offline
 dsh web
 ```
 
-包内的 `cordis.patch.yml` 会插入 `dsh-squad` 条目。可以在 `$DSH_HOME/profiles/web/cordis.patch.yml` 中覆盖配置：
+包内的 `cordis.patch.yml` 会插入 `dsh-squad` 条目。全新安装首次打开`智能体收件箱`时会显示简短向导：设置节点名称，然后选择加入 Relay 或使用 Direct 点对点。Relay 会在验证一次性邀请和签名身份后保存连接；邀请不会写入节点数据库。完成后可在`设置 → 团队连接`重新修改，无需手工编辑 YAML。
+
+无人值守部署、Relay Server 和高级运行策略仍可在 `$DSH_HOME/profiles/web/cordis.patch.yml` 中覆盖配置：
 
 ```yaml
 - id: dsh-squad

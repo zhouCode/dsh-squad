@@ -79,8 +79,33 @@ describe("SquadDatabase", () => {
     const schema = migrated
       .prepare("SELECT version FROM schema_meta WHERE singleton = 1")
       .get();
-    expect(schema?.version).toBe(6);
+    expect(schema?.version).toBe(7);
     migrated.close();
+  });
+
+  it("persists guided Node settings without an enrollment secret", () => {
+    const root = mkdtempSync(join(tmpdir(), "dsh-squad-setup-db-"));
+    const path = join(root, "node.sqlite");
+    const db = new SquadDatabase(path);
+    expect(db.nodeSetup()).toBeUndefined();
+    const saved = db.saveNodeSetup({
+      mode: "RELAY",
+      displayName: "Alice",
+      relayUrl: "https://relay.example.com",
+      directEnabled: false,
+    });
+    expect(saved).toMatchObject({
+      mode: "RELAY",
+      displayName: "Alice",
+      relayUrl: "https://relay.example.com",
+      directEnabled: false,
+    });
+    db.close();
+
+    const reopened = new SquadDatabase(path);
+    expect(reopened.nodeSetup()).toEqual(saved);
+    expect(JSON.stringify(reopened.nodeSetup())).not.toContain("invitation");
+    reopened.close();
   });
 
   it("commits selected HumanTodos and resumes only after every item is done", () => {

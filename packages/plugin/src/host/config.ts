@@ -1,6 +1,7 @@
 import { resolve } from "node:path";
 import { isIP } from "node:net";
 import { dshHomePath } from "@deepseek-ai/dsh-home-paths";
+import { z } from "zod";
 import {
   peerPolicySchema,
   peerTransportSchema,
@@ -56,9 +57,28 @@ export interface SquadConfig {
   };
 }
 
+export const nodeSetupInputSchema = z.discriminatedUnion("mode", [
+  z.strictObject({
+    mode: z.literal("RELAY"),
+    displayName: z.string().trim().min(1).max(120),
+    relayUrl: z.string().trim().min(1).max(2_048),
+    invitation: z.string().trim().min(16).max(512).optional(),
+  }),
+  z.strictObject({
+    mode: z.literal("DIRECT"),
+    displayName: z.string().trim().min(1).max(120),
+    directEnabled: z.boolean().default(true),
+    directPublicUrl: z.string().trim().min(1).max(2_048).optional(),
+  }),
+]);
+
+export type NodeSetupInput = z.infer<typeof nodeSetupInputSchema>;
+export type NodeSetupMode = NodeSetupInput["mode"];
+
 export interface ResolvedSquadConfig {
   dataDir: string;
   displayName: string;
+  setupRequired: boolean;
   pollIntervalMs: number;
   envelopeTtlMinutes: number;
   peers: Array<
@@ -100,7 +120,7 @@ function optionalNonEmpty(value: string | undefined): string | undefined {
   return trimmed ? trimmed : undefined;
 }
 
-export function resolveDirectBaseUrl(
+function resolveTransportBaseUrl(
   candidate: string | undefined,
   label: string,
 ): string | undefined {
@@ -136,9 +156,23 @@ export function resolveDirectBaseUrl(
   return url.origin;
 }
 
+export function resolveRelayBaseUrl(
+  candidate: string | undefined,
+  label = "squad relay.url",
+): string | undefined {
+  return resolveTransportBaseUrl(candidate, label);
+}
+
+export function resolveDirectBaseUrl(
+  candidate: string | undefined,
+  label: string,
+): string | undefined {
+  return resolveTransportBaseUrl(candidate, label);
+}
+
 export function resolveConfig(config: SquadConfig = {}): ResolvedSquadConfig {
   const dataDir = resolve(config.dataDir ?? dshHomePath("squad"));
-  const relayUrl = optionalNonEmpty(config.relay?.url);
+  const relayUrl = resolveRelayBaseUrl(config.relay?.url);
   const preset = optionalNonEmpty(config.execution?.preset);
   const invitation = optionalNonEmpty(config.relay?.invitation);
   const directPublicUrl = resolveDirectBaseUrl(
@@ -152,18 +186,14 @@ export function resolveConfig(config: SquadConfig = {}): ResolvedSquadConfig {
       "squad updates.repository must use the GitHub owner/repository form",
     );
   }
-  if (
-    relayUrl !== undefined &&
-    !relayUrl.startsWith("https://") &&
-    !/^http:\/\/(127\.0\.0\.1|localhost)(:\d+)?$/u.test(relayUrl)
-  ) {
-    throw new Error(
-      "squad relay.url must use HTTPS (loopback HTTP is allowed for local development)",
-    );
-  }
   return {
     dataDir,
     displayName: optionalNonEmpty(config.displayName) ?? "Personal Agent",
+    setupRequired:
+      config.relay?.enabled !== true &&
+      relayUrl === undefined &&
+      config.direct?.enabled !== true &&
+      (config.peers?.length ?? 0) === 0,
     pollIntervalMs: Math.max(1_000, config.pollIntervalMs ?? 5_000),
     envelopeTtlMinutes: Math.min(
       24 * 60,
@@ -199,7 +229,7 @@ export function resolveConfig(config: SquadConfig = {}): ResolvedSquadConfig {
     },
     relay: {
       enabled: config.relay?.enabled ?? false,
-      ...(relayUrl === undefined ? {} : { url: relayUrl.replace(/\/$/u, "") }),
+      ...(relayUrl === undefined ? {} : { url: relayUrl }),
       ...(invitation === undefined ? {} : { invitation }),
       databasePath: resolve(
         config.relay?.databasePath ?? `${dataDir}/relay.sqlite`,

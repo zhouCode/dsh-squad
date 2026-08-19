@@ -16,6 +16,7 @@ DSH Squad turns personal Agents running on different computers, networks, and lo
 - **Delivery is observable in real time**: an authenticated Relay event stream wakes recipients immediately with polling as fallback, while Direct returns a signed durable-receipt from the receiving Node. Senders can distinguish local queueing, waiting for peer reachability, Relay persistence, and receipt by the peer Node.
 - **A Relay can maintain itself safely**: a separate updater verifies signed releases and, while the Node is idle, backs up, installs, restarts, and checks the reported version. Notify-only is the default and failures roll back.
 - **Trust is configured per person**: every direct Peer or organization member has an independent local `NEVER`, `SAFE`, or `TRUSTED` automatic-execution policy, editable from a dropdown in the WebUI.
+- **No YAML edit for first-time setup**: open `Agent Inbox` to choose Relay or Direct, validate the connection, and save it locally through the Simplified Chinese or English guide; change it later in Settings.
 - **Native to DSH**: work runs in the recipient's existing Agent, Session, Skill catalog, tools, and Permission/Approval flow, without a second runtime or standalone management platform.
 
 ## Two team modes
@@ -104,15 +105,23 @@ Build and install the tarball from this repository:
 ```bash
 pnpm install --frozen-lockfile
 pnpm run pack
-dsh plugin --profile web add ./artifacts/dsh-squad-plugin-0.6.0.tgz --offline
+dsh plugin --profile web add ./artifacts/dsh-squad-plugin-0.7.0.tgz --offline
 dsh web
 ```
 
 The bundled `cordis.patch.yml` mounts both the Host Plugin and Web Client Module. After startup, `Agent Inbox` appears in the native DSH sidebar (`智能体收件箱` in Chinese). Its header shows the Node identity and current Session organization in real time; Organizations manages signed membership, while Settings retains direct-Peer compatibility.
 
-## Configure a Node
+## First-run guide and Node configuration
 
-Override the `dsh-squad` configuration in `$DSH_HOME/profiles/web/cordis.patch.yml`. Production Relay URLs must use HTTPS; loopback HTTP is allowed only for local development.
+A fresh installation no longer requires editing a configuration file. On the first opening of `Agent Inbox`, a guide asks for a Node name and either `Join a Relay` or `Direct peer-to-peer`:
+
+- Relay mode asks for the Relay URL and, for a new Node, the one-time Node invitation issued by an administrator. Squad enrolls and verifies signed mailbox access before saving the URL. The invitation exists only for that request; it is not written to the Node SQLite database or returned by the state API.
+- Direct mode can enable this Node's inbound endpoint and record its public URL. The guide validates the origin but does not create DNS, TLS, port mapping, or a reverse proxy.
+- `Set up later` writes no placeholder configuration, so the guide returns the next time the panel opens. After completion, use `Agent Inbox → Settings → Team connection` to validate and change it again.
+
+Nodes already configured through YAML, Nodes with existing direct Peers or organization data, and upgraded installations are not forced through onboarding. Node name, team mode, Relay URL, and Direct receiving settings saved in the interface persist locally and take precedence over those YAML fields; other runtime policies continue to come from YAML.
+
+Unattended deployments and advanced options can still override `dsh-squad` in `$DSH_HOME/profiles/web/cordis.patch.yml`. Production Relay URLs must use HTTPS; loopback HTTP is allowed only for local development.
 
 ```yaml
 - id: dsh-squad
@@ -309,7 +318,7 @@ DSH_SQUAD_RELEASE_SIGNING_KEY=/secure/path/release-signing-key.pem \
   pnpm release:prepare
 ```
 
-A `v0.6.0` GitHub Release must upload all four files from `artifacts/`: `dsh-squad-plugin-0.6.0.tgz`, its `.sha256`, `dsh-squad-update-manifest-0.6.0.json`, and its `.sig`. Clients reject an update when any asset is missing, the signature fails, or the Release tag does not match.
+A `v0.7.0` GitHub Release must upload all four files from `artifacts/`: `dsh-squad-plugin-0.7.0.tgz`, its `.sha256`, `dsh-squad-update-manifest-0.7.0.json`, and its `.sig`. Clients reject an update when any asset is missing, the signature fails, or the Release tag does not match.
 
 `smoke:delegation` builds a real tarball, installs it into isolated Alice, Bob, and Relay DSH homes, and uses real Chromium to verify WebUI pairing, Team Planner approval and idempotent dispatch, delivery while Bob is offline, Relay and Node restarts, a recipient-only Skill, partial HumanTodo completion, same-Session resume, Outcome privacy boundaries, and reversible plugin disablement. Signed-directory, Relay-authorization, and local-persistence integration tests separately cover organizations. Dedicated end-to-end tests cover Direct signed receipts, forged-receipt rejection, offline queueing, automatic retry after reconnect, and idempotent receipt.
 

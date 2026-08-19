@@ -16,6 +16,7 @@ DSH Squad 把运行在不同电脑、网络和地点上的个人 Agent，组成�
 - **投递状态可实时观察**：Relay 用认证事件流即时唤醒收件节点并保留轮询兜底；Direct 返回接收节点签名的持久化回执。发送方可以区分“本地排队”“等待对方可达”“中继已保存”和“对方节点已接收”。
 - **Relay 可安全自维护**：独立更新器验证签名 Release，在节点空闲时备份、安装、重启并做版本健康检查；默认只通知，失败自动回滚。
 - **信任可以逐人配置**：每个直接 Peer 或组织成员都有独立的本机 `NEVER`、`SAFE`、`TRUSTED` 自动执行策略，可直接在界面下拉修改。
+- **首次配置无需编辑 YAML**：首次打开`智能体收件箱`即可通过简体中文或英文向导选择 Relay / Direct、验证连接并本地保存；以后在设置页直接修改。
 - **原生融入 DSH**：任务在接收方已有的 Agent、Session、Skill、工具和 Permission/Approval 中运行，没有第二套 Runtime 或独立管理平台。
 
 ## 两种组队模式
@@ -104,15 +105,23 @@ Agent 会调用 `propose_team_plan`。负责人确认后，Squad 才为每个计
 ```bash
 pnpm install --frozen-lockfile
 pnpm run pack
-dsh plugin --profile web add ./artifacts/dsh-squad-plugin-0.6.0.tgz --offline
+dsh plugin --profile web add ./artifacts/dsh-squad-plugin-0.7.0.tgz --offline
 dsh web
 ```
 
 安装通过插件内的 `cordis.patch.yml` 同时挂载 Host Plugin 和 Web Client Module。启动后，原生 DSH 侧边栏出现 `智能体收件箱`（英文界面为 `Agent Inbox`）；面板顶部实时显示本 Node 身份和当前 Session 组织，`组织`页管理成员目录，`设置`页保留直接 Peer 兼容配置。
 
-## 配置 Node
+## 首次引导与配置 Node
 
-在 `$DSH_HOME/profiles/web/cordis.patch.yml` 中覆盖 `dsh-squad` 配置。生产 Relay URL 必须使用 HTTPS；仅本机开发允许 loopback HTTP。
+全新安装无需编辑配置文件。首次打开`智能体收件箱`时，向导会要求设置节点名称，并选择`加入 Relay`或`Direct 点对点`：
+
+- Relay 模式填写 Relay URL；新节点再填写管理员发放的一次性节点邀请。插件会先完成登记和签名身份验证，成功后才保存 URL；邀请只存在于本次请求中，不写入节点 SQLite，也不出现在状态接口。
+- Direct 模式可启用本节点的接收入口并填写公共 URL。向导只验证地址格式，不会代替用户创建 DNS、TLS、端口映射或反向代理。
+- 选择`稍后配置`不会写入占位配置；下次打开仍会显示向导。完成后可在`智能体收件箱 → 设置 → 团队连接`重新验证和修改。
+
+已经通过 YAML 配置、已有直接 Peer/组织数据或从旧版本升级的节点不会被强制重新引导。界面保存的节点名称、组队模式、Relay URL 和 Direct 接收设置会持久化在本机，并优先于这些字段的 YAML 值；其他运行策略仍从 YAML 读取。
+
+无人值守部署和高级参数仍可在 `$DSH_HOME/profiles/web/cordis.patch.yml` 中覆盖 `dsh-squad`。生产 Relay URL 必须使用 HTTPS；仅本机开发允许 loopback HTTP。
 
 ```yaml
 - id: dsh-squad
@@ -308,7 +317,7 @@ DSH_SQUAD_RELEASE_SIGNING_KEY=/secure/path/release-signing-key.pem \
   pnpm release:prepare
 ```
 
-发布 `v0.6.0` 时需要把 `artifacts/` 中的 `dsh-squad-plugin-0.6.0.tgz`、同名 `.sha256`、`dsh-squad-update-manifest-0.6.0.json` 和 `.sig` 四个文件全部作为 GitHub Release assets 上传。缺少任意一个、签名不符或 Release tag 不一致时，客户端都会拒绝更新。
+发布 `v0.7.0` 时需要把 `artifacts/` 中的 `dsh-squad-plugin-0.7.0.tgz`、同名 `.sha256`、`dsh-squad-update-manifest-0.7.0.json` 和 `.sig` 四个文件全部作为 GitHub Release assets 上传。缺少任意一个、签名不符或 Release tag 不一致时，客户端都会拒绝更新。
 
 `smoke:delegation` 会构建真实 tarball，安装到 Alice、Bob、Relay 三套隔离 DSH Home，并用真实 Chromium 验证：WebUI 配对、Team Planner 草案审批与幂等分派、Bob 离线投递、Relay/Node 重启、接收端专属 Skill、HumanTodo 部分完成、相同 Session 恢复、Outcome 隐私边界和插件可逆禁用；组织协议另由签名目录、Relay 权限与本地持久化集成测试覆盖。Direct 的签名回执、伪造回执拒绝、离线排队、恢复在线自动重投和幂等接收由独立端到端测试覆盖。
 

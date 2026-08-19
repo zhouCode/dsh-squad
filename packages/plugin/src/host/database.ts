@@ -46,6 +46,7 @@ import {
   isTerminalStatus,
   type DelegationStatus,
 } from "../shared/state.ts";
+import type { NodeSetupMode } from "./config.ts";
 import { verifyOrganizationDirectory } from "./organization.ts";
 
 export type DelegationDirection = "INCOMING" | "OUTGOING";
@@ -66,6 +67,16 @@ export interface PeerRecord {
   directUrl?: string;
   policy: PeerPolicy;
   createdAt: string;
+  updatedAt: string;
+}
+
+export interface NodeSetupRecord {
+  mode: NodeSetupMode;
+  displayName: string;
+  relayUrl?: string;
+  directEnabled: boolean;
+  directPublicUrl?: string;
+  completedAt: string;
   updatedAt: string;
 }
 
@@ -177,6 +188,17 @@ export class SquadDatabase {
         node_id TEXT NOT NULL UNIQUE,
         public_key TEXT NOT NULL,
         created_at TEXT NOT NULL
+      );
+
+      CREATE TABLE IF NOT EXISTS node_settings (
+        singleton INTEGER PRIMARY KEY CHECK (singleton = 1),
+        mode TEXT NOT NULL CHECK (mode IN ('RELAY', 'DIRECT')),
+        display_name TEXT NOT NULL,
+        relay_url TEXT,
+        direct_enabled INTEGER NOT NULL CHECK (direct_enabled IN (0, 1)),
+        direct_public_url TEXT,
+        completed_at TEXT NOT NULL,
+        updated_at TEXT NOT NULL
       );
 
       CREATE TABLE IF NOT EXISTS peer_policies (
@@ -485,7 +507,11 @@ export class SquadDatabase {
       this.#db.exec("UPDATE schema_meta SET version = 6 WHERE singleton = 1");
       currentVersion = 6;
     }
-    if (currentVersion !== 6) {
+    if (currentVersion === 6) {
+      this.#db.exec("UPDATE schema_meta SET version = 7 WHERE singleton = 1");
+      currentVersion = 7;
+    }
+    if (currentVersion !== 7) {
       throw new Error(
         `unsupported Squad database version ${String(currentVersion)}`,
       );
@@ -532,6 +558,69 @@ export class SquadDatabase {
         "INSERT INTO node_identity(singleton, node_id, public_key, created_at) VALUES (1, ?, ?, ?)",
       )
       .run(nodeId, publicKey, createdAt);
+  }
+
+  nodeSetup(): NodeSetupRecord | undefined {
+    const row = this.#db
+      .prepare("SELECT * FROM node_settings WHERE singleton = 1")
+      .get() as SqlRow | undefined;
+    if (row === undefined) return undefined;
+    const mode = String(row.mode);
+    if (mode !== "RELAY" && mode !== "DIRECT") {
+      throw new Error("invalid persisted Squad setup mode");
+    }
+    return {
+      mode,
+      displayName: String(row.display_name),
+      ...(optionalString(row.relay_url) === undefined
+        ? {}
+        : { relayUrl: String(row.relay_url) }),
+      directEnabled: asBoolean(row.direct_enabled),
+      ...(optionalString(row.direct_public_url) === undefined
+        ? {}
+        : { directPublicUrl: String(row.direct_public_url) }),
+      completedAt: String(row.completed_at),
+      updatedAt: String(row.updated_at),
+    };
+  }
+
+  saveNodeSetup(input: {
+    mode: NodeSetupMode;
+    displayName: string;
+    relayUrl?: string;
+    directEnabled: boolean;
+    directPublicUrl?: string;
+  }): NodeSetupRecord {
+    const now = new Date().toISOString();
+    const completedAt = this.nodeSetup()?.completedAt ?? now;
+    this.#db
+      .prepare(
+        `
+        INSERT INTO node_settings(
+          singleton, mode, display_name, relay_url, direct_enabled,
+          direct_public_url, completed_at, updated_at
+        ) VALUES (1, ?, ?, ?, ?, ?, ?, ?)
+        ON CONFLICT(singleton) DO UPDATE SET
+          mode = excluded.mode,
+          display_name = excluded.display_name,
+          relay_url = excluded.relay_url,
+          direct_enabled = excluded.direct_enabled,
+          direct_public_url = excluded.direct_public_url,
+          updated_at = excluded.updated_at
+      `,
+      )
+      .run(
+        input.mode,
+        input.displayName,
+        input.relayUrl ?? null,
+        input.directEnabled ? 1 : 0,
+        input.directPublicUrl ?? null,
+        completedAt,
+        now,
+      );
+    const saved = this.nodeSetup();
+    if (saved === undefined) throw new Error("Squad setup was not persisted");
+    return saved;
   }
 
   upsertPeer(input: {

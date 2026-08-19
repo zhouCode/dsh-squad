@@ -4,6 +4,22 @@ All notable changes to this project are documented in this file. The format is b
 
 ## [Unreleased]
 
+## [0.7.0] - 2026-08-19
+
+### Added
+
+- A bilingual first-run guide that configures the Node display name and selects either Relay or Direct mode without requiring users to edit `cordis.patch.yml`.
+- A reusable `Team connection` settings form for validating and changing the persisted Node connection after onboarding.
+
+### Changed
+
+- Existing YAML deployments and upgraded Nodes with team data bypass onboarding. Interface-managed Node connection fields persist in the local SQLite database and are restored across restarts.
+
+### Security
+
+- Relay setup enrolls the Node and verifies signed mailbox access before saving. One-time enrollment invitations are bounded, used only for that request, and never stored in Node settings or returned through local state.
+- Guided Relay and Direct origins accept HTTPS only, with loopback HTTP retained solely for local development. The setup API remains protected by the existing loopback and same-origin checks.
+
 ## [0.6.0] - 2026-08-19
 
 ### Added
@@ -117,7 +133,8 @@ All notable changes to this project are documented in this file. The format is b
 - Production Relay URLs require HTTPS; loopback HTTP is accepted only for local development.
 - The Relay is explicitly documented as a trusted content intermediary without end-to-end payload encryption.
 
-[Unreleased]: https://github.com/zhouCode/dsh-squad/compare/v0.6.0...HEAD
+[Unreleased]: https://github.com/zhouCode/dsh-squad/compare/v0.7.0...HEAD
+[0.7.0]: https://github.com/zhouCode/dsh-squad/compare/v0.6.0...v0.7.0
 [0.6.0]: https://github.com/zhouCode/dsh-squad/compare/v0.5.0...v0.6.0
 [0.5.0]: https://github.com/zhouCode/dsh-squad/compare/v0.4.0...v0.5.0
 [0.4.0]: https://github.com/zhouCode/dsh-squad/compare/v0.2.0...v0.4.0

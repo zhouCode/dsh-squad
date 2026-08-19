@@ -50,6 +50,14 @@ function peerPolicy() {
 
 describe("Direct peer transport", () => {
   it("accepts loopback development origins and rejects unsafe Direct origins", () => {
+    expect(resolveConfig({}).setupRequired).toBe(true);
+    expect(
+      resolveConfig({ relay: { url: "https://relay.example.com/" } })
+        .setupRequired,
+    ).toBe(false);
+    expect(resolveConfig({ direct: { enabled: true } }).setupRequired).toBe(
+      false,
+    );
     expect(
       resolveConfig({
         direct: { enabled: true, publicUrl: "http://127.0.0.1:37100/" },
@@ -87,6 +95,12 @@ describe("Direct peer transport", () => {
         ],
       }),
     ).toThrow(/requires directUrl/u);
+    expect(() =>
+      resolveConfig({ relay: { url: "https://relay.example.com/path" } }),
+    ).toThrow(/only an origin/u);
+    expect(() =>
+      resolveConfig({ relay: { url: "http://relay.example.com" } }),
+    ).toThrow(/must use HTTPS/u);
   });
 
   it("persists at the receiving Node and returns a signed node receipt", async () => {

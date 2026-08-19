@@ -61,6 +61,37 @@ export const zh = {
     "确认后，每个计划项会通过现有签名委派发送；接收方仍按自己的 Peer 策略决定是否执行。",
   "plan.itemCount": "共 {count} 个计划项",
   "plan.dispatchedCount": "已创建 {sent}/{total} 个委派",
+  "setup.firstRun": "首次设置",
+  "setup.title": "把这个节点加入团队",
+  "setup.intro":
+    "设置一个便于成员识别的名称，再选择 Relay 或 Direct。验证通过后配置会保存在本机，无需编辑 YAML。",
+  "setup.chooseMode": "选择组队方式",
+  "setup.relayTitle": "加入 Relay（推荐）",
+  "setup.relayDescription":
+    "适合跨地域和离线协作；个人电脑只需主动连接持续在线的中继。",
+  "setup.directTitle": "Direct 点对点",
+  "setup.directDescription":
+    "适合局域网、VPN 或已有 HTTPS 可达地址的小团队；不需要 Relay。",
+  "setup.relayUrl": "Relay 地址",
+  "setup.relayUrlHint":
+    "生产环境必须使用 HTTPS；本机开发可使用 loopback HTTP。",
+  "setup.invitation": "一次性节点邀请（可选）",
+  "setup.invitationHint":
+    "首次登记此节点时填写；已登记节点可留空。只用于本次验证，不保存在节点数据库。",
+  "setup.directReceive": "允许其他已配对节点向我直连投递",
+  "setup.directPublicUrl": "本节点的 Direct 公共地址",
+  "setup.directPublicUrlHint":
+    "启用接收时必填。Squad 不会自动配置 DNS、TLS、端口映射或反向代理。",
+  "setup.securityHint":
+    "本地管理接口只接受 loopback 和同源请求；Relay 邀请不会出现在状态接口或持久配置中。",
+  "setup.switchWarning":
+    "保存后会立即切换连接方式。现有身份、组织和任务不会被删除，但当前传输无法投递的任务会继续留在本地队列。",
+  "setup.complete": "验证并完成设置",
+  "setup.save": "验证并保存",
+  "setup.saving": "正在验证…",
+  "setup.later": "稍后配置",
+  "setup.saved": "节点配置已保存。",
+  "settings.connection": "团队连接",
   "settings.nodeIdentity": "节点身份",
   "settings.relay": "中继",
   "settings.relayServing": "中继服务运行中",
@@ -207,6 +238,7 @@ export const zh = {
   "error.policyUpdateFailed": "无法更新自动执行策略",
   "error.sessionOrganizationFailed": "无法切换会话组织",
   "error.updateActionFailed": "更新操作失败",
+  "error.setupFailed": "无法保存节点配置",
   "error.withCode": "{message}（{code}）",
   "error.withDetail": "{message}：{detail}",
   "errorCode.EXECUTION_INTERRUPTED": "执行被中断",
@@ -233,6 +265,19 @@ export const zh = {
   "errorCode.UPDATE_ROLLBACK_FAILED": "更新回滚失败",
   "errorCode.UPDATE_FINALIZATION_WARNING": "更新已安装，但收尾操作有警告",
   "errorCode.UPDATE_RUN_FAILED": "更新任务失败",
+  "errorCode.SQUAD_SERVICE_CLOSED": "Squad 服务已停止",
+  "errorCode.SQUAD_CONFIGURATION_IN_PROGRESS": "另一项节点配置正在验证",
+  "errorCode.INVALID_RELAY_URL": "Relay 地址必须是 HTTPS 原点",
+  "errorCode.INVALID_DIRECT_URL": "Direct 地址必须是 HTTPS 原点",
+  "errorCode.RELAY_ENROLLMENT_REQUIRED":
+    "此节点尚未在该 Relay 登记，请填写一次性邀请",
+  "errorCode.RELAY_CONNECTION_FAILED": "无法连接 Relay，请检查地址、网络和 TLS",
+  "errorCode.DIRECT_PUBLIC_URL_REQUIRED":
+    "启用 Direct 接收时必须填写本节点公共地址",
+  "errorCode.INVALID_INVITATION": "一次性邀请无效",
+  "errorCode.INVITATION_ALREADY_USED": "一次性邀请已被使用",
+  "errorCode.INVITATION_EXPIRED": "一次性邀请已过期",
+  "errorCode.INVALID_RESPONSE": "Relay 返回了无效响应",
   "summary.executionInterrupted":
     "接收方 DSH 在执行期间停止。可能已经发生的外部副作用不会自动重放。",
   "summary.rejectedByOwner": "接收方已拒绝。",
@@ -297,6 +342,37 @@ export const en = {
     "Approval creates one existing signed delegation per item; each recipient still decides execution through their own Peer policy.",
   "plan.itemCount": "{count} plan items",
   "plan.dispatchedCount": "Created {sent}/{total} delegations",
+  "setup.firstRun": "First-time setup",
+  "setup.title": "Connect this Node to a team",
+  "setup.intro":
+    "Choose a recognizable name and either Relay or Direct. After validation, the settings stay on this computer—no YAML editing required.",
+  "setup.chooseMode": "Choose a team connection",
+  "setup.relayTitle": "Join a Relay (recommended)",
+  "setup.relayDescription":
+    "Best for distributed and offline teams; personal computers make outbound connections to an always-on Relay.",
+  "setup.directTitle": "Direct peer-to-peer",
+  "setup.directDescription":
+    "Best for a LAN, VPN, or small team with reachable HTTPS endpoints; no Relay is required.",
+  "setup.relayUrl": "Relay URL",
+  "setup.relayUrlHint":
+    "Production requires HTTPS; loopback HTTP is accepted for local development.",
+  "setup.invitation": "One-time Node invitation (optional)",
+  "setup.invitationHint":
+    "Enter it when enrolling this Node for the first time; an already enrolled Node may leave it blank. It is used only for validation and is not stored in the Node database.",
+  "setup.directReceive": "Allow paired Nodes to deliver directly to me",
+  "setup.directPublicUrl": "This Node's public Direct URL",
+  "setup.directPublicUrlHint":
+    "Required when receiving is enabled. Squad does not configure DNS, TLS, port mapping, or a reverse proxy.",
+  "setup.securityHint":
+    "The local management API accepts only loopback and same-origin requests. Relay invitations never appear in state responses or persisted setup.",
+  "setup.switchWarning":
+    "Saving switches the active connection immediately. Existing identity, organizations, and tasks are retained, but work that the new transport cannot deliver remains queued locally.",
+  "setup.complete": "Validate and finish",
+  "setup.save": "Validate and save",
+  "setup.saving": "Validating…",
+  "setup.later": "Set up later",
+  "setup.saved": "Node settings saved.",
+  "settings.connection": "Team connection",
   "settings.nodeIdentity": "Node identity",
   "settings.relay": "Relay",
   "settings.relayServing": "relay service is running",
@@ -448,6 +524,7 @@ export const en = {
   "error.policyUpdateFailed": "Could not update automatic execution policy",
   "error.sessionOrganizationFailed": "Could not change session organization",
   "error.updateActionFailed": "Update action failed",
+  "error.setupFailed": "Could not save Node settings",
   "error.withCode": "{message} ({code})",
   "error.withDetail": "{message}: {detail}",
   "errorCode.EXECUTION_INTERRUPTED": "Execution interrupted",
@@ -477,6 +554,22 @@ export const en = {
   "errorCode.UPDATE_FINALIZATION_WARNING":
     "Update installed with finalization warnings",
   "errorCode.UPDATE_RUN_FAILED": "Update run failed",
+  "errorCode.SQUAD_SERVICE_CLOSED": "Squad service has stopped",
+  "errorCode.SQUAD_CONFIGURATION_IN_PROGRESS":
+    "Another Node configuration is being validated",
+  "errorCode.INVALID_RELAY_URL": "Relay URL must be an HTTPS origin",
+  "errorCode.INVALID_DIRECT_URL": "Direct URL must be an HTTPS origin",
+  "errorCode.RELAY_ENROLLMENT_REQUIRED":
+    "This Node is not enrolled at that Relay; enter a one-time invitation",
+  "errorCode.RELAY_CONNECTION_FAILED":
+    "Could not connect to the Relay; check its URL, network, and TLS",
+  "errorCode.DIRECT_PUBLIC_URL_REQUIRED":
+    "This Node's public URL is required when Direct receiving is enabled",
+  "errorCode.INVALID_INVITATION": "The one-time invitation is invalid",
+  "errorCode.INVITATION_ALREADY_USED":
+    "The one-time invitation has already been used",
+  "errorCode.INVITATION_EXPIRED": "The one-time invitation has expired",
+  "errorCode.INVALID_RESPONSE": "The Relay returned an invalid response",
   "summary.executionInterrupted":
     "The receiving DSH process stopped while execution was active. Potential external side effects were not replayed.",
   "summary.rejectedByOwner": "Rejected by the receiving owner.",
@@ -605,6 +698,17 @@ const errorCodeKeys = {
   UPDATE_ROLLBACK_FAILED: "errorCode.UPDATE_ROLLBACK_FAILED",
   UPDATE_FINALIZATION_WARNING: "errorCode.UPDATE_FINALIZATION_WARNING",
   UPDATE_RUN_FAILED: "errorCode.UPDATE_RUN_FAILED",
+  SQUAD_SERVICE_CLOSED: "errorCode.SQUAD_SERVICE_CLOSED",
+  SQUAD_CONFIGURATION_IN_PROGRESS: "errorCode.SQUAD_CONFIGURATION_IN_PROGRESS",
+  INVALID_RELAY_URL: "errorCode.INVALID_RELAY_URL",
+  INVALID_DIRECT_URL: "errorCode.INVALID_DIRECT_URL",
+  RELAY_ENROLLMENT_REQUIRED: "errorCode.RELAY_ENROLLMENT_REQUIRED",
+  RELAY_CONNECTION_FAILED: "errorCode.RELAY_CONNECTION_FAILED",
+  DIRECT_PUBLIC_URL_REQUIRED: "errorCode.DIRECT_PUBLIC_URL_REQUIRED",
+  INVALID_INVITATION: "errorCode.INVALID_INVITATION",
+  INVITATION_ALREADY_USED: "errorCode.INVITATION_ALREADY_USED",
+  INVITATION_EXPIRED: "errorCode.INVITATION_EXPIRED",
+  INVALID_RESPONSE: "errorCode.INVALID_RESPONSE",
 } as const satisfies Record<string, SquadLocaleKey>;
 
 const summaryKeys = {

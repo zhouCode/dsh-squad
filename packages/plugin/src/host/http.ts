@@ -5,7 +5,9 @@ import {
   type CreateTeamPlanInput,
 } from "../shared/contracts.ts";
 import { updateModeSchema } from "../shared/updates.ts";
-import type { SquadService } from "./service.ts";
+import { nodeSetupInputSchema } from "./config.ts";
+import { RelayClientError } from "./relay-client.ts";
+import { SquadConfigurationError, type SquadService } from "./service.ts";
 
 class LocalHttpError extends Error {
   constructor(
@@ -130,6 +132,15 @@ export function createHttpHandler(squad: SquadService) {
         return;
       }
       if (req.method === "POST") assertSameOrigin(req);
+      if (req.method === "POST" && url.pathname === "/squad/v1/local/setup") {
+        const body = await readJson(req, 8 * 1024);
+        reply(
+          res,
+          200,
+          await squad.configureNode(nodeSetupInputSchema.parse(body)),
+        );
+        return;
+      }
       if (
         req.method === "POST" &&
         url.pathname === "/squad/v1/direct/envelopes"
@@ -404,6 +415,28 @@ export function createHttpHandler(squad: SquadService) {
         reply(res, error.status, {
           error: { code: error.code, message: error.message },
         });
+        return;
+      }
+      if (error instanceof SquadConfigurationError) {
+        reply(
+          res,
+          error.code === "SQUAD_SERVICE_CLOSED"
+            ? 503
+            : error.code === "SQUAD_CONFIGURATION_IN_PROGRESS"
+              ? 409
+              : 400,
+          { error: { code: error.code, message: error.message } },
+        );
+        return;
+      }
+      if (error instanceof RelayClientError) {
+        reply(
+          res,
+          error.status >= 400 && error.status < 500 ? error.status : 502,
+          {
+            error: { code: error.code, message: error.message },
+          },
+        );
         return;
       }
       reply(res, 400, {

@@ -54,7 +54,13 @@ import {
 import { isTerminalStatus } from "../shared/state.ts";
 import type { UpdateMode, UpdateSnapshot } from "../shared/updates.ts";
 import { SQUAD_VERSION } from "../shared/version.ts";
-import { resolveDirectBaseUrl, type ResolvedSquadConfig } from "./config.ts";
+import {
+  resolveDirectBaseUrl,
+  resolveRelayBaseUrl,
+  type NodeSetupInput,
+  type NodeSetupMode,
+  type ResolvedSquadConfig,
+} from "./config.ts";
 import {
   SquadDatabase,
   type DelegationRecord,
@@ -93,6 +99,55 @@ declare module "@deepseek-ai/cordis" {
 export interface DelegationView extends DelegationRecord {}
 
 export type HumanInput = HumanInputValue;
+
+type SetupSource = "UNCONFIGURED" | "FILE" | "INTERFACE" | "EXISTING_DATA";
+
+type SquadConfigurationErrorCode =
+  | "SQUAD_SERVICE_CLOSED"
+  | "SQUAD_CONFIGURATION_IN_PROGRESS"
+  | "INVALID_RELAY_URL"
+  | "INVALID_DIRECT_URL"
+  | "RELAY_ENROLLMENT_REQUIRED"
+  | "RELAY_CONNECTION_FAILED"
+  | "DIRECT_PUBLIC_URL_REQUIRED";
+
+export class SquadConfigurationError extends Error {
+  constructor(
+    readonly code: SquadConfigurationErrorCode,
+    message: string,
+    options?: ErrorOptions,
+  ) {
+    super(message, options);
+  }
+}
+
+interface RuntimeNodeSettings {
+  displayName: string;
+  setupRequired: boolean;
+  setupMode?: NodeSetupMode;
+  setupSource: SetupSource;
+  relayUrl?: string;
+  directEnabled: boolean;
+  directPublicUrl?: string;
+}
+
+export interface SquadLocalState {
+  setup: {
+    required: boolean;
+    mode?: NodeSetupMode;
+    source: SetupSource;
+  };
+  identity: { nodeId: string; displayName: string; publicKey: string };
+  relay: { configured: boolean; serving: boolean; url?: string };
+  direct: { serving: boolean; publicUrl?: string };
+  peers: PeerRecord[];
+  organizations: OrganizationView[];
+  sessionOrganizations: Record<string, string>;
+  revision: number;
+  plans: TeamPlan[];
+  delegations: DelegationRecord[];
+  updates: UpdateSnapshot;
+}
 
 class PermanentEnvelopeError extends Error {
   constructor(message: string, options?: ErrorOptions) {
@@ -143,8 +198,8 @@ export class SquadService extends Service {
   readonly database: SquadDatabase;
   readonly identity: NodeIdentity;
   readonly relayServer?: RelayServer;
-  readonly relayClient?: RelayClient;
-  readonly relayTransport?: RelayEnvelopeTransport;
+  relayClient: RelayClient | undefined = undefined;
+  relayTransport: RelayEnvelopeTransport | undefined = undefined;
   readonly directTransport: DirectEnvelopeTransport;
   readonly executor: NativeDelegationExecutor;
   readonly attachments: AttachmentVerifier;
@@ -157,9 +212,14 @@ export class SquadService extends Service {
   #pumping = false;
   #pumpRequested = false;
   #flushing: Promise<void> | undefined;
-  #relayEventsAbort?: AbortController;
-  #relayEventsTask?: Promise<void>;
+  #relayEventsAbort: AbortController | undefined = undefined;
+  #relayEventsTask: Promise<void> | undefined = undefined;
+  #configurationTask: Promise<SquadLocalState> | undefined = undefined;
+  #reconfiguring = false;
+  #started = false;
   #closed = false;
+  #nodeSettings: RuntimeNodeSettings;
+  #startupInvitation: string | undefined = undefined;
 
   constructor(ctx: Context, config: ResolvedSquadConfig) {
     super(ctx, "squad");
@@ -183,6 +243,52 @@ export class SquadService extends Service {
       }
       this.database.upsertPeer(peer);
     }
+    const persistedSetup = this.database.nodeSetup();
+    const hasExistingTeamData =
+      this.database.listPeers().length > 0 ||
+      this.database.listOrganizations(this.identity.nodeId).length > 0;
+    const staticSetupMode =
+      config.relay.url !== undefined
+        ? "RELAY"
+        : config.direct.enabled
+          ? "DIRECT"
+          : undefined;
+    this.#nodeSettings =
+      persistedSetup === undefined
+        ? {
+            displayName: config.displayName,
+            setupRequired: config.setupRequired && !hasExistingTeamData,
+            ...(staticSetupMode === undefined
+              ? {}
+              : { setupMode: staticSetupMode }),
+            setupSource: config.setupRequired
+              ? hasExistingTeamData
+                ? "EXISTING_DATA"
+                : "UNCONFIGURED"
+              : "FILE",
+            ...(config.relay.url === undefined
+              ? {}
+              : { relayUrl: config.relay.url }),
+            directEnabled: config.direct.enabled,
+            ...(config.direct.publicUrl === undefined
+              ? {}
+              : { directPublicUrl: config.direct.publicUrl }),
+          }
+        : {
+            displayName: persistedSetup.displayName,
+            setupRequired: false,
+            setupMode: persistedSetup.mode,
+            setupSource: "INTERFACE",
+            ...(persistedSetup.relayUrl === undefined
+              ? {}
+              : { relayUrl: persistedSetup.relayUrl }),
+            directEnabled: persistedSetup.directEnabled,
+            ...(persistedSetup.directPublicUrl === undefined
+              ? {}
+              : { directPublicUrl: persistedSetup.directPublicUrl }),
+          };
+    this.#startupInvitation =
+      persistedSetup === undefined ? config.relay.invitation : undefined;
     if (config.relay.enabled) {
       this.relayServer = new RelayServer({
         databasePath: config.relay.databasePath,
@@ -191,8 +297,11 @@ export class SquadService extends Service {
         maxRequestsPerMinute: config.relay.maxRequestsPerMinute,
       });
     }
-    if (config.relay.url !== undefined) {
-      this.relayClient = new RelayClient(config.relay.url, this.identity);
+    if (this.#nodeSettings.relayUrl !== undefined) {
+      this.relayClient = new RelayClient(
+        this.#nodeSettings.relayUrl,
+        this.identity,
+      );
       this.relayTransport = new RelayEnvelopeTransport(this.relayClient);
     }
     this.directTransport = new DirectEnvelopeTransport(
@@ -210,12 +319,13 @@ export class SquadService extends Service {
     await this.updates.start();
     if (
       this.relayClient !== undefined &&
-      this.config.relay.invitation !== undefined
+      this.#startupInvitation !== undefined
     ) {
       await this.relayClient.enroll(
-        this.config.relay.invitation,
-        this.config.displayName,
+        this.#startupInvitation,
+        this.#nodeSettings.displayName,
       );
+      this.#startupInvitation = undefined;
     }
     for (const interrupted of this.database.interruptedExecutions()) {
       const failed = this.database.transition(interrupted.id, "FAILED", {
@@ -226,6 +336,7 @@ export class SquadService extends Service {
       });
       this.enqueueResult(failed);
     }
+    this.#started = true;
     await this.pump();
     this.startRelayEvents();
     this.#timer = setInterval(() => {
@@ -238,8 +349,8 @@ export class SquadService extends Service {
     if (this.#closed) return;
     this.#closed = true;
     if (this.#timer !== undefined) clearInterval(this.#timer);
-    this.#relayEventsAbort?.abort();
-    await this.#relayEventsTask;
+    await this.stopRelayEvents();
+    await this.#configurationTask?.catch(() => undefined);
     while (this.#pumping) {
       await new Promise<void>((resolve) => setImmediate(resolve));
     }
@@ -265,6 +376,151 @@ export class SquadService extends Service {
     for (const listener of this.#stateListeners) {
       listener(this.#stateRevision);
     }
+  }
+
+  async configureNode(input: NodeSetupInput): Promise<SquadLocalState> {
+    if (this.#closed) {
+      throw new SquadConfigurationError(
+        "SQUAD_SERVICE_CLOSED",
+        "Squad service is closed",
+      );
+    }
+    if (this.#configurationTask !== undefined) {
+      throw new SquadConfigurationError(
+        "SQUAD_CONFIGURATION_IN_PROGRESS",
+        "another Squad configuration change is in progress",
+      );
+    }
+    const task = this.configureNodeNow(input);
+    this.#configurationTask = task;
+    try {
+      return await task;
+    } finally {
+      if (this.#configurationTask === task) {
+        this.#configurationTask = undefined;
+      }
+    }
+  }
+
+  private async configureNodeNow(
+    input: NodeSetupInput,
+  ): Promise<SquadLocalState> {
+    let nextRelayClient: RelayClient | undefined;
+    let nextRelayTransport: RelayEnvelopeTransport | undefined;
+    let nextSettings: RuntimeNodeSettings;
+
+    if (input.mode === "RELAY") {
+      let relayUrl: string | undefined;
+      try {
+        relayUrl = resolveRelayBaseUrl(input.relayUrl, "Relay URL");
+      } catch (error) {
+        throw new SquadConfigurationError(
+          "INVALID_RELAY_URL",
+          "Relay URL must be an HTTPS origin",
+          { cause: error },
+        );
+      }
+      if (relayUrl === undefined) {
+        throw new SquadConfigurationError(
+          "INVALID_RELAY_URL",
+          "Relay URL is required",
+        );
+      }
+      nextRelayClient = new RelayClient(relayUrl, this.identity);
+      try {
+        if (input.invitation !== undefined) {
+          await nextRelayClient.enroll(input.invitation, input.displayName);
+        }
+        await nextRelayClient.mailbox(this.database.mailboxCursor(relayUrl), 1);
+      } catch (error) {
+        if (
+          input.invitation === undefined &&
+          error instanceof RelayClientError &&
+          [401, 403].includes(error.status)
+        ) {
+          throw new SquadConfigurationError(
+            "RELAY_ENROLLMENT_REQUIRED",
+            "this Node is not enrolled at that Relay; enter a one-time invitation",
+            { cause: error },
+          );
+        }
+        if (!(error instanceof RelayClientError)) {
+          throw new SquadConfigurationError(
+            "RELAY_CONNECTION_FAILED",
+            "could not connect to the Relay",
+            { cause: error },
+          );
+        }
+        throw error;
+      }
+      nextRelayTransport = new RelayEnvelopeTransport(nextRelayClient);
+      nextSettings = {
+        displayName: input.displayName,
+        setupRequired: false,
+        setupMode: "RELAY",
+        setupSource: "INTERFACE",
+        relayUrl,
+        directEnabled: false,
+      };
+    } else {
+      let directPublicUrl: string | undefined;
+      try {
+        directPublicUrl = resolveDirectBaseUrl(
+          input.directPublicUrl,
+          "Direct public URL",
+        );
+      } catch (error) {
+        throw new SquadConfigurationError(
+          "INVALID_DIRECT_URL",
+          "Direct public URL must be an HTTPS origin",
+          { cause: error },
+        );
+      }
+      if (input.directEnabled && directPublicUrl === undefined) {
+        throw new SquadConfigurationError(
+          "DIRECT_PUBLIC_URL_REQUIRED",
+          "Direct public URL is required when Direct receiving is enabled",
+        );
+      }
+      nextSettings = {
+        displayName: input.displayName,
+        setupRequired: false,
+        setupMode: "DIRECT",
+        setupSource: "INTERFACE",
+        directEnabled: input.directEnabled,
+        ...(directPublicUrl === undefined ? {} : { directPublicUrl }),
+      };
+    }
+
+    this.#reconfiguring = true;
+    try {
+      await this.stopRelayEvents();
+      while (this.#pumping) {
+        await new Promise<void>((resolve) => setImmediate(resolve));
+      }
+      await this.#flushing?.catch(() => undefined);
+      this.database.saveNodeSetup({
+        mode: input.mode,
+        displayName: nextSettings.displayName,
+        ...(nextSettings.relayUrl === undefined
+          ? {}
+          : { relayUrl: nextSettings.relayUrl }),
+        directEnabled: nextSettings.directEnabled,
+        ...(nextSettings.directPublicUrl === undefined
+          ? {}
+          : { directPublicUrl: nextSettings.directPublicUrl }),
+      });
+      this.#nodeSettings = nextSettings;
+      this.relayClient = nextRelayClient;
+      this.relayTransport = nextRelayTransport;
+      this.#startupInvitation = undefined;
+    } finally {
+      this.#reconfiguring = false;
+      if (this.#started && !this.#closed) this.startRelayEvents();
+    }
+    this.touchLocalState();
+    if (this.#started) void this.pump();
+    return this.localState();
   }
 
   addPeer(input: {
@@ -378,8 +634,9 @@ export class SquadService extends Service {
   }
 
   private async syncOrganizations(): Promise<boolean> {
-    if (this.relayClient === undefined) return false;
-    const bundles = await this.relayClient.organizations();
+    const relayClient = this.relayClient;
+    if (relayClient === undefined) return false;
+    const bundles = await relayClient.organizations();
     let changed = false;
     for (const bundle of bundles) {
       changed =
@@ -429,7 +686,7 @@ export class SquadService extends Service {
         memberRevision: 1,
         nodeId: this.identity.nodeId,
         publicKey: this.identity.publicKey,
-        displayName: this.config.displayName,
+        displayName: this.#nodeSettings.displayName,
         role: "OWNER",
         status: "ACTIVE",
         issuer: { kind: "AUTHORITY", authorityId: authority.authorityId },
@@ -486,7 +743,7 @@ export class SquadService extends Service {
       membershipId: randomUUID(),
       nodeId: this.identity.nodeId,
       publicKey: this.identity.publicKey,
-      displayName: this.config.displayName,
+      displayName: this.#nodeSettings.displayName,
       requestedAt: new Date().toISOString(),
     });
     const request: OrganizationJoinRequest = {
@@ -1524,7 +1781,7 @@ export class SquadService extends Service {
     if (this.#closed) {
       throw new Error("Squad service is closed");
     }
-    if (!this.config.direct.enabled) {
+    if (!this.#nodeSettings.directEnabled) {
       throw new Error("Direct transport is not enabled on this Node");
     }
     const envelope = envelopeSchema.parse(candidate);
@@ -1576,6 +1833,10 @@ export class SquadService extends Service {
   }
 
   async flushOutbox(): Promise<void> {
+    if (this.#reconfiguring) {
+      this.#pumpRequested = true;
+      return;
+    }
     if (this.#flushing !== undefined) return this.#flushing;
     const flushing = this.flushOutboxNow().finally(() => {
       if (this.#flushing === flushing) this.#flushing = undefined;
@@ -1632,10 +1893,11 @@ export class SquadService extends Service {
   }
 
   private async pollMailbox(): Promise<void> {
-    if (this.relayClient === undefined || this.config.relay.url === undefined)
-      return;
-    const after = this.database.mailboxCursor(this.config.relay.url);
-    const mailbox = await this.relayClient.mailbox(after);
+    const relayClient = this.relayClient;
+    const relayUrl = this.#nodeSettings.relayUrl;
+    if (relayClient === undefined || relayUrl === undefined) return;
+    const after = this.database.mailboxCursor(relayUrl);
+    const mailbox = await relayClient.mailbox(after);
     for (const item of mailbox.items) {
       let permanentFailure = false;
       try {
@@ -1654,26 +1916,42 @@ export class SquadService extends Service {
           error instanceof PermanentEnvelopeError || error instanceof ZodError;
         if (!permanentFailure) break;
       }
-      await this.relayClient.acknowledge(item.envelope.envelopeId);
-      this.database.advanceMailboxCursor(this.config.relay.url, item.cursor);
+      await relayClient.acknowledge(item.envelope.envelopeId);
+      this.database.advanceMailboxCursor(relayUrl, item.cursor);
     }
     if (mailbox.items.length > 0) this.touchLocalState();
   }
 
   private startRelayEvents(): void {
-    if (this.relayClient === undefined) return;
+    const relayClient = this.relayClient;
+    if (relayClient === undefined || this.#relayEventsTask !== undefined)
+      return;
     const controller = new AbortController();
     this.#relayEventsAbort = controller;
-    this.#relayEventsTask = this.watchRelayEvents(controller.signal);
+    this.#relayEventsTask = this.watchRelayEvents(
+      relayClient,
+      controller.signal,
+    );
   }
 
-  private async watchRelayEvents(signal: AbortSignal): Promise<void> {
-    if (this.relayClient === undefined) return;
+  private async stopRelayEvents(): Promise<void> {
+    const controller = this.#relayEventsAbort;
+    const task = this.#relayEventsTask;
+    this.#relayEventsAbort = undefined;
+    this.#relayEventsTask = undefined;
+    controller?.abort();
+    await task?.catch(() => undefined);
+  }
+
+  private async watchRelayEvents(
+    relayClient: RelayClient,
+    signal: AbortSignal,
+  ): Promise<void> {
     let retryAfterMs = 1_000;
     let reportedFailure = false;
     while (!signal.aborted && !this.#closed) {
       try {
-        await this.relayClient.watchMailbox(signal, () => {
+        await relayClient.watchMailbox(signal, () => {
           void this.pump();
         });
         retryAfterMs = 1_000;
@@ -1698,13 +1976,17 @@ export class SquadService extends Service {
 
   async pump(): Promise<void> {
     if (this.#closed) return;
+    if (this.#reconfiguring) {
+      this.#pumpRequested = true;
+      return;
+    }
     if (this.#pumping) {
       this.#pumpRequested = true;
       return;
     }
     this.#pumping = true;
     try {
-      while (!this.#closed) {
+      while (!this.#closed && !this.#reconfiguring) {
         this.#pumpRequested = false;
         try {
           await this.syncOrganizations();
@@ -1719,40 +2001,39 @@ export class SquadService extends Service {
             error instanceof Error ? error.message : String(error),
           );
         }
-        if (!this.#pumpRequested) break;
+        if (this.#reconfiguring || !this.#pumpRequested) break;
       }
     } finally {
       this.#pumping = false;
     }
   }
 
-  localState(): {
-    identity: { nodeId: string; displayName: string; publicKey: string };
-    relay: { configured: boolean; serving: boolean };
-    direct: { serving: boolean; publicUrl?: string };
-    peers: PeerRecord[];
-    organizations: OrganizationView[];
-    sessionOrganizations: Record<string, string>;
-    revision: number;
-    plans: TeamPlan[];
-    delegations: DelegationRecord[];
-    updates: UpdateSnapshot;
-  } {
+  localState(): SquadLocalState {
     return {
+      setup: {
+        required: this.#nodeSettings.setupRequired,
+        ...(this.#nodeSettings.setupMode === undefined
+          ? {}
+          : { mode: this.#nodeSettings.setupMode }),
+        source: this.#nodeSettings.setupSource,
+      },
       identity: {
         nodeId: this.identity.nodeId,
-        displayName: this.config.displayName,
+        displayName: this.#nodeSettings.displayName,
         publicKey: this.identity.publicKey,
       },
       relay: {
         configured: this.relayClient !== undefined,
         serving: this.relayServer !== undefined,
+        ...(this.#nodeSettings.relayUrl === undefined
+          ? {}
+          : { url: this.#nodeSettings.relayUrl }),
       },
       direct: {
-        serving: this.config.direct.enabled,
-        ...(this.config.direct.publicUrl === undefined
+        serving: this.#nodeSettings.directEnabled,
+        ...(this.#nodeSettings.directPublicUrl === undefined
           ? {}
-          : { publicUrl: this.config.direct.publicUrl }),
+          : { publicUrl: this.#nodeSettings.directPublicUrl }),
       },
       peers: this.database.listPeers(),
       organizations: this.database.listOrganizations(this.identity.nodeId),
