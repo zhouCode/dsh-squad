@@ -51,6 +51,7 @@ import {
   verifyOrganizationDocument,
 } from "./organization.ts";
 import type { RelayInviteConfig } from "./config.ts";
+import type { RelayOperationsSnapshot } from "../shared/state.ts";
 
 const enrollmentSchema = z.strictObject({
   invitation: z.string().min(16).max(512),
@@ -173,6 +174,7 @@ export class RelayServer {
   readonly #maxRequestsPerMinute: number;
   readonly #rate = new Map<string, { minute: number; count: number }>();
   readonly #mailboxStreams = new Map<string, Set<MailboxStream>>();
+  readonly #startedAt = new Date().toISOString();
 
   constructor(options: RelayServerOptions) {
     mkdirSync(dirname(options.databasePath), { recursive: true, mode: 0o700 });
@@ -446,6 +448,100 @@ export class RelayServer {
     }
     this.#mailboxStreams.clear();
     this.#db.close();
+  }
+
+  operationsSnapshot(now = new Date()): RelayOperationsSnapshot {
+    const capturedAt = now.toISOString();
+    const nodes = this.#db
+      .prepare(
+        `SELECT
+           sum(CASE WHEN disabled_at IS NULL THEN 1 ELSE 0 END) AS active,
+           sum(CASE WHEN disabled_at IS NULL THEN 0 ELSE 1 END) AS disabled
+         FROM relay_nodes`,
+      )
+      .get() as SqlRow;
+    const mailbox = this.#db
+      .prepare(
+        `SELECT count(*) AS pending, min(envelope.created_at) AS oldest_pending_at
+           FROM relay_deliveries AS delivery
+           JOIN relay_envelopes AS envelope
+             ON envelope.envelope_id = delivery.envelope_id
+          WHERE delivery.acknowledged_at IS NULL
+            AND envelope.expires_at > ?`,
+      )
+      .get(capturedAt) as SqlRow;
+    const organizations = this.#db
+      .prepare(
+        `SELECT
+           sum(CASE WHEN dissolved_at IS NULL THEN 1 ELSE 0 END) AS active,
+           sum(CASE WHEN dissolved_at IS NULL THEN 0 ELSE 1 END) AS dissolved
+         FROM relay_organizations`,
+      )
+      .get() as SqlRow;
+    const pendingJoinRequests = this.#db
+      .prepare(
+        `SELECT count(*) AS count
+           FROM relay_organization_join_requests AS request
+           JOIN relay_organizations AS organization
+             ON organization.organization_id = request.organization_id
+          WHERE request.status = 'PENDING'
+            AND organization.dissolved_at IS NULL`,
+      )
+      .get() as SqlRow;
+    const activeOrganizationInvitations = this.#db
+      .prepare(
+        `SELECT count(*) AS count
+           FROM relay_organization_invites AS invitation
+           JOIN relay_organizations AS organization
+             ON organization.organization_id = invitation.organization_id
+          WHERE invitation.used_at IS NULL
+            AND invitation.revoked_at IS NULL
+            AND invitation.expires_at > ?
+            AND organization.dissolved_at IS NULL`,
+      )
+      .get(capturedAt) as SqlRow;
+    const activeEnrollmentInvitations = this.#db
+      .prepare(
+        `SELECT count(*) AS count
+           FROM relay_invites
+          WHERE used_at IS NULL AND revoked_at IS NULL AND expires_at > ?`,
+      )
+      .get(capturedAt) as SqlRow;
+    const liveConnections = [...this.#mailboxStreams.values()].reduce(
+      (count, streams) => count + streams.size,
+      0,
+    );
+    const oldestPendingAt =
+      typeof mailbox.oldest_pending_at === "string"
+        ? mailbox.oldest_pending_at
+        : undefined;
+    return {
+      capturedAt,
+      startedAt: this.#startedAt,
+      nodes: {
+        active: Number(nodes.active ?? 0),
+        disabled: Number(nodes.disabled ?? 0),
+      },
+      mailbox: {
+        pending: Number(mailbox.pending ?? 0),
+        connectedNodes: this.#mailboxStreams.size,
+        liveConnections,
+        maxItemsPerNode: this.#maxMailboxItems,
+        ...(oldestPendingAt === undefined ? {} : { oldestPendingAt }),
+      },
+      organizations: {
+        active: Number(organizations.active ?? 0),
+        dissolved: Number(organizations.dissolved ?? 0),
+        pendingJoinRequests: Number(pendingJoinRequests.count ?? 0),
+        activeInvitations: Number(activeOrganizationInvitations.count ?? 0),
+      },
+      enrollmentInvitations: {
+        active: Number(activeEnrollmentInvitations.count ?? 0),
+      },
+      limits: {
+        maxRequestsPerMinute: this.#maxRequestsPerMinute,
+      },
+    };
   }
 
   private streamMailbox(

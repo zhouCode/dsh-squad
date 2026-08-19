@@ -222,6 +222,8 @@ The same package can enable a Relay Server in any always-on DSH Node. Invitation
 
 The Relay API is registered under `/squad/v1` on the Host WebServer. It validates enrollment, request signatures, nonces, freshness, organization membership routes, sender and recipient identities, mailbox capacity, and rate limits. It stores the signed organization directory and durable mailbox, but neither runs an Agent nor holds private Sessions, HumanTodo details, workspaces, or member credentials. Its authenticated event stream carries only “mailbox changed” wakeups, never task bodies. Nodes retain polling fallback, so stream availability is not a reliability dependency. If the reverse proxy uses an exact route allowlist, v0.6 must additionally allow `GET /squad/v1/mailbox/events` for immediate wakeups; polling still works when that route is omitted.
 
+A Node hosting Relay shows a loopback-only operations overview under `Agent Inbox → Settings → Connection diagnostics`: startup time, enrolled Nodes, live mailbox connections, durable backlog and its oldest item, organization and invitation counts, plus capacity and rate limits. These are Relay-local aggregates; the dashboard neither reads task bodies nor collects private runtime metrics from other Nodes.
+
 ## Safe updates for an always-on Relay
 
 Starting with v0.5.0, Squad includes an Update Center and a separate `dsh-squad-update` executable. It updates Squad only—not DSH core or other plugins. The plugin process never overwrites itself: the WebUI checks releases, shows policy, and records explicit install requests, while a systemd-launched external updater stops the service, backs up, installs, restarts, checks health, and rolls back.

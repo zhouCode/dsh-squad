@@ -88,6 +88,7 @@ import {
   summarizeAttention,
   type SquadConnectionDiagnostics,
   type SquadAttentionSummary,
+  type RelayOperationsSnapshot,
 } from "../shared/state.ts";
 import type { UpdateMode, UpdateSnapshot } from "../shared/updates.ts";
 import { SQUAD_VERSION } from "../shared/version.ts";
@@ -176,7 +177,12 @@ export interface SquadLocalState {
     source: SetupSource;
   };
   identity: { nodeId: string; displayName: string; publicKey: string };
-  relay: { configured: boolean; serving: boolean; url?: string };
+  relay: {
+    configured: boolean;
+    serving: boolean;
+    url?: string;
+    operations?: RelayOperationsSnapshot;
+  };
   direct: { serving: boolean; publicUrl?: string };
   automation: {
     rules: AutomationRuleView[];
@@ -2945,6 +2951,9 @@ export class SquadService extends Service {
         ...(this.#nodeSettings.relayUrl === undefined
           ? {}
           : { url: this.#nodeSettings.relayUrl }),
+        ...(this.relayServer === undefined
+          ? {}
+          : { operations: this.relayServer.operationsSnapshot() }),
       },
       direct: {
         serving: this.#nodeSettings.directEnabled,

@@ -29,6 +29,7 @@ import {
   summarizeAttention,
   type SquadConnectionDiagnostics,
   type DelegationStatus,
+  type RelayOperationsSnapshot,
   type SquadAttentionSummary,
 } from "../shared/state.ts";
 import type { UpdateMode, UpdateSnapshot } from "../shared/updates.ts";
@@ -148,7 +149,12 @@ interface LocalState {
     source: "UNCONFIGURED" | "FILE" | "INTERFACE" | "EXISTING_DATA";
   };
   identity: { nodeId: string; displayName: string; publicKey: string };
-  relay: { configured: boolean; serving: boolean; url?: string };
+  relay: {
+    configured: boolean;
+    serving: boolean;
+    url?: string;
+    operations?: RelayOperationsSnapshot;
+  };
   direct: { serving: boolean; publicUrl?: string };
   automation: {
     rules: AutomationRuleView[];
@@ -3346,6 +3352,115 @@ function NodeSetupForm({
   );
 }
 
+function RelayOperations({
+  operations,
+  t,
+}: {
+  operations: RelayOperationsSnapshot;
+  t: SquadTranslate;
+}) {
+  return (
+    <section className="squad-relay-operations">
+      <header>
+        <div>
+          <h3>{t("relayOps.title")}</h3>
+          <p className="squad-muted">{t("relayOps.intro")}</p>
+        </div>
+        <span>
+          {t("relayOps.capturedAt", {
+            time: new Date(operations.capturedAt).toLocaleString(),
+          })}
+        </span>
+      </header>
+      <div className="squad-relay-ops-grid">
+        <article>
+          <h4>{t("relayOps.runtime")}</h4>
+          <dl>
+            <div>
+              <dt>{t("relayOps.startedAt")}</dt>
+              <dd>{new Date(operations.startedAt).toLocaleString()}</dd>
+            </div>
+            <div>
+              <dt>{t("relayOps.connectedNodes")}</dt>
+              <dd>{operations.mailbox.connectedNodes}</dd>
+            </div>
+            <div>
+              <dt>{t("relayOps.liveConnections")}</dt>
+              <dd>{operations.mailbox.liveConnections}</dd>
+            </div>
+            <div>
+              <dt>{t("relayOps.requestLimit")}</dt>
+              <dd>{operations.limits.maxRequestsPerMinute}</dd>
+            </div>
+          </dl>
+        </article>
+        <article>
+          <h4>{t("relayOps.nodes")}</h4>
+          <dl>
+            <div>
+              <dt>{t("relayOps.active")}</dt>
+              <dd>{operations.nodes.active}</dd>
+            </div>
+            <div>
+              <dt>{t("relayOps.disabled")}</dt>
+              <dd>{operations.nodes.disabled}</dd>
+            </div>
+            <div>
+              <dt>{t("relayOps.enrollmentInvitations")}</dt>
+              <dd>{operations.enrollmentInvitations.active}</dd>
+            </div>
+          </dl>
+        </article>
+        <article className={operations.mailbox.pending > 0 ? "pending" : ""}>
+          <h4>{t("relayOps.mailbox")}</h4>
+          <dl>
+            <div>
+              <dt>{t("relayOps.pending")}</dt>
+              <dd>{operations.mailbox.pending}</dd>
+            </div>
+            <div>
+              <dt>{t("relayOps.mailboxLimit")}</dt>
+              <dd>{operations.mailbox.maxItemsPerNode}</dd>
+            </div>
+            {operations.mailbox.oldestPendingAt ? (
+              <div>
+                <dt>{t("relayOps.oldestPending")}</dt>
+                <dd>
+                  {new Date(
+                    operations.mailbox.oldestPendingAt,
+                  ).toLocaleString()}
+                </dd>
+              </div>
+            ) : null}
+          </dl>
+        </article>
+        <article>
+          <h4>{t("relayOps.organizations")}</h4>
+          <dl>
+            <div>
+              <dt>{t("relayOps.active")}</dt>
+              <dd>{operations.organizations.active}</dd>
+            </div>
+            <div>
+              <dt>{t("relayOps.dissolved")}</dt>
+              <dd>{operations.organizations.dissolved}</dd>
+            </div>
+            <div>
+              <dt>{t("relayOps.pendingJoins")}</dt>
+              <dd>{operations.organizations.pendingJoinRequests}</dd>
+            </div>
+            <div>
+              <dt>{t("relayOps.organizationInvitations")}</dt>
+              <dd>{operations.organizations.activeInvitations}</dd>
+            </div>
+          </dl>
+        </article>
+      </div>
+      <p className="squad-muted">{t("relayOps.privacyHint")}</p>
+    </section>
+  );
+}
+
 function ConnectionDiagnostics({
   state,
   refresh,
@@ -3495,6 +3610,13 @@ function ConnectionDiagnostics({
           ) : null}
         </article>
       </div>
+      {state.relay.operations ? (
+        <RelayOperations operations={state.relay.operations} t={t} />
+      ) : state.relay.configured && !state.relay.serving ? (
+        <p className="squad-muted squad-relay-remote-hint">
+          {t("relayOps.remoteHint")}
+        </p>
+      ) : null}
       {error ? <p className="squad-error">{error}</p> : null}
     </div>
   );
@@ -5162,6 +5284,7 @@ const css = `
 .squad-trigger{position:relative}.squad-trigger-badge,.squad-tab-count{display:inline-flex;align-items:center;justify-content:center;box-sizing:border-box;min-width:18px;height:18px;padding:0 5px;border-radius:999px;background:#b13c35;color:#fff;font-size:10px;font-weight:700;line-height:1}.squad-trigger:not(.squad-trigger-wide) .squad-trigger-badge{position:absolute;right:0;top:-2px}.squad-tabs button{display:inline-flex;align-items:center;gap:6px}.squad-tabs button.active .squad-tab-count{background:#315ee8}.squad-overview{overflow:auto;padding:24px 28px;flex:1}.squad-overview>header h2{margin:4px 0}.squad-attention-grid{display:grid;grid-template-columns:repeat(4,minmax(0,1fr));gap:10px;margin:20px 0}.squad-attention-grid button{display:grid;gap:5px;text-align:left;border:1px solid var(--dsw-alias-border-l2,#ddd);border-radius:12px;background:transparent;color:inherit;padding:14px;cursor:pointer}.squad-attention-grid button.needs-attention{border-color:#d59b1b;background:#fff8e5;color:#5d470a}.squad-attention-grid strong{font-size:24px}.squad-attention-grid span{font-size:12px;color:var(--dsw-alias-label-secondary,#666)}.squad-next-step{margin-top:18px;padding:18px;border:1px solid var(--dsw-alias-border-l2,#ddd);border-radius:14px}.squad-next-step h3{margin:0 0 7px}.squad-next-step code{display:block;padding:10px;border-radius:9px;background:var(--dsw-alias-interactive-bg-hover,#f4f5f7);overflow-wrap:anywhere}.squad-next-step button,.squad-update-callout{border:0;border-radius:9px;padding:8px 12px;margin-top:12px;background:#315ee8;color:#fff;cursor:pointer}.squad-update-callout{display:block;width:100%;text-align:left;background:#fff0c7;color:#755400}@media(max-width:700px){.squad-attention-grid{grid-template-columns:1fr 1fr}.squad-overview{padding:18px 16px}}
 .squad-tabs{align-items:stretch}.squad-tab-group{display:flex;align-items:center;gap:4px;padding-right:10px;border-right:1px solid var(--dsw-alias-border-l2,#ddd)}.squad-tab-group:last-child{border-right:0}.squad-tab-group-label{align-self:center;color:var(--dsw-alias-label-secondary,#666);font-size:10px;letter-spacing:.08em;text-transform:uppercase;white-space:nowrap}.squad-loading{display:grid;place-items:center;align-content:center;gap:12px;min-height:260px;flex:1;padding:24px;text-align:center}.squad-loading button{border:0;border-radius:9px;padding:8px 12px;background:#315ee8;color:#fff;cursor:pointer}.squad-spinner{width:24px;height:24px;border:3px solid var(--dsw-alias-border-l2,#ddd);border-top-color:#315ee8;border-radius:50%;animation:squad-spin .8s linear infinite}@keyframes squad-spin{to{transform:rotate(360deg)}}@media(max-width:700px){.squad-tab-group-label{display:none}.squad-tab-group{padding-right:4px}}
 .squad-diagnostics{overflow:auto;padding:22px 26px;flex:1}.squad-diagnostics>header{display:flex;align-items:flex-start;justify-content:space-between;gap:16px}.squad-diagnostics>header h2{margin:0}.squad-diagnostics button{border:0;border-radius:9px;padding:8px 12px;background:#315ee8;color:#fff;cursor:pointer}.squad-diagnostics button:disabled{opacity:.5}.squad-diagnostic-grid{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:12px;margin-top:18px}.squad-diagnostic-grid article{min-width:0;border:1px solid var(--dsw-alias-border-l2,#ddd);border-radius:13px;padding:14px}.squad-diagnostic-grid article>header{display:flex;align-items:center;justify-content:space-between;gap:10px}.squad-diagnostic-grid h3{margin:0;font-size:14px}.squad-diagnostic-grid code{display:block;margin:10px 0;overflow-wrap:anywhere;font-size:11px}.squad-diagnostic-grid p,.squad-diagnostic-grid dl{font-size:12px}.squad-diagnostic-grid dl div{display:grid;gap:3px}.squad-diagnostic-grid dt{color:var(--dsw-alias-label-secondary,#666)}.squad-diagnostic-grid dd{margin:0}.squad-connection-unreachable{background:#fde4e1;color:#a52a24}.squad-connection-unverified{background:#fff0c7;color:#755400}.squad-connection-connected,.squad-connection-ready,.squad-connection-serving{background:#dff5e6;color:#176c35}@media(max-width:800px){.squad-diagnostic-grid{grid-template-columns:1fr}.squad-diagnostics{padding:16px}}
+.squad-relay-operations{margin-top:22px;padding-top:18px;border-top:1px solid var(--dsw-alias-border-l2,#ddd)}.squad-relay-operations>header{display:flex;align-items:flex-start;justify-content:space-between;gap:12px}.squad-relay-operations>header h3,.squad-relay-operations>header p{margin:0}.squad-relay-operations>header>span{font-size:10px;color:var(--dsw-alias-label-secondary,#666);white-space:nowrap}.squad-relay-ops-grid{display:grid;grid-template-columns:repeat(4,minmax(0,1fr));gap:10px;margin:14px 0}.squad-relay-ops-grid article{min-width:0;padding:12px;border:1px solid var(--dsw-alias-border-l2,#ddd);border-radius:11px}.squad-relay-ops-grid article.pending{border-color:#d59b1b;background:#fff8e5;color:#5d470a}.squad-relay-ops-grid h4{margin:0 0 9px;font-size:12px}.squad-relay-ops-grid dl{display:grid;gap:7px;margin:0}.squad-relay-ops-grid dl>div{display:grid;gap:2px}.squad-relay-ops-grid dt{font-size:10px;color:var(--dsw-alias-label-secondary,#666)}.squad-relay-ops-grid dd{margin:0;font-size:13px;overflow-wrap:anywhere}.squad-relay-remote-hint{margin-top:18px}@media(max-width:900px){.squad-relay-ops-grid{grid-template-columns:repeat(2,minmax(0,1fr))}}@media(max-width:560px){.squad-relay-operations>header{display:grid}.squad-relay-operations>header>span{white-space:normal}.squad-relay-ops-grid{grid-template-columns:1fr}}
 .squad-settings>.squad-peer{display:grid;grid-template-columns:1fr;gap:8px;margin:10px 0;padding:14px;border:1px solid var(--dsw-alias-border-l2,#ddd);border-radius:12px}.squad-peer>header{display:flex;align-items:flex-start;justify-content:space-between;gap:12px}.squad-peer>header span{display:block;margin-top:4px;color:var(--dsw-alias-label-secondary,#666);font-size:12px}.squad-peer-disabled{opacity:.72}.squad-peer details,.squad-advanced-pairing{margin-top:8px}.squad-peer summary,.squad-advanced-pairing summary{cursor:pointer;color:#315ee8;font-size:13px}.squad-settings .squad-secondary{border:1px solid var(--dsw-alias-border-l2,#ccc);background:transparent;color:inherit}.squad-settings button:disabled{opacity:.5;cursor:not-allowed}.squad-pairing{margin-top:24px;padding-top:2px}.squad-pairing-grid{display:grid;grid-template-columns:1fr 1fr;gap:12px}.squad-pairing-grid>div,.squad-pairing-grid>form{min-width:0;border:1px solid var(--dsw-alias-border-l2,#ddd);border-radius:12px;padding:14px}.squad-pairing-grid h4{margin:0 0 7px}.squad-pairing-result{display:grid;gap:8px;margin-top:12px}.squad-pairing-result textarea{font-family:monospace;font-size:11px}.squad-advanced-pairing{margin:20px 0;padding:14px;border:1px dashed var(--dsw-alias-border-l2,#ccc);border-radius:12px}@media(max-width:700px){.squad-pairing-grid{grid-template-columns:1fr}}
 .squad-confirm-layer{position:fixed;z-index:1100;inset:0;display:grid;place-items:center;padding:20px;background:rgba(10,14,22,.52);pointer-events:auto}.squad-confirm-dialog{box-sizing:border-box;width:min(460px,100%);padding:22px;border:1px solid var(--dsw-alias-border-l2,#ddd);border-radius:15px;background:var(--dsw-specific-dialog-fill,#fff);color:var(--dsw-alias-label-primary,#151515);box-shadow:0 18px 60px rgba(0,0,0,.3)}.squad-confirm-dialog h2{margin:0 0 10px;font-size:20px}.squad-confirm-dialog p{line-height:1.55;white-space:pre-wrap}.squad-confirm-dialog button{border:0;border-radius:9px;padding:9px 13px;background:#315ee8;color:#fff;cursor:pointer}.squad-confirm-dialog .squad-secondary{border:1px solid var(--dsw-alias-border-l2,#ccc);background:transparent;color:inherit}.squad-confirm-dialog .squad-danger{background:#b13c35;color:#fff}
 .squad-detail input{box-sizing:border-box;width:100%;border:1px solid var(--dsw-alias-border-l2,#ccc);border-radius:9px;background:transparent;color:inherit;padding:9px;font:inherit}.squad-todo{border:1px solid var(--dsw-alias-border-l2,#ddd);border-left:3px solid #d59b1b;border-radius:10px;padding:14px;margin:12px 0}.squad-todo>header{display:flex;align-items:center;justify-content:space-between;gap:10px}.squad-attachment-editor{margin:14px 0;padding-top:12px;border-top:1px solid var(--dsw-alias-border-l2,#ddd)}.squad-attachment-editor>header{display:flex;align-items:flex-start;justify-content:space-between;gap:12px}.squad-attachment-editor>header div{display:grid;gap:4px}.squad-attachment-editor small{display:block;color:var(--dsw-alias-label-secondary,#666);line-height:1.4}.squad-attachment-editor fieldset{margin:12px 0;padding:10px 12px;border:1px solid var(--dsw-alias-border-l2,#ddd);border-radius:10px}.squad-attachment-editor legend{padding:0 5px;font-size:12px;font-weight:600}.squad-attachment-fields{display:grid;grid-template-columns:minmax(0,1.4fr) minmax(130px,.7fr);gap:0 10px}.squad-detail .squad-secondary{border:1px solid var(--dsw-alias-border-l2,#ccc);background:transparent;color:inherit}.squad-detail .squad-danger-text{color:#b13c35}.squad-todo button[type=submit]{margin-top:4px}@media(max-width:700px){.squad-attachment-editor>header,.squad-attachment-fields{display:grid;grid-template-columns:1fr}.squad-attachment-editor>header button{justify-self:start}}

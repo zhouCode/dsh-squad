@@ -64,6 +64,34 @@ export interface SquadConnectionDiagnostics {
   };
 }
 
+export interface RelayOperationsSnapshot {
+  capturedAt: string;
+  startedAt: string;
+  nodes: {
+    active: number;
+    disabled: number;
+  };
+  mailbox: {
+    pending: number;
+    connectedNodes: number;
+    liveConnections: number;
+    maxItemsPerNode: number;
+    oldestPendingAt?: string;
+  };
+  organizations: {
+    active: number;
+    dissolved: number;
+    pendingJoinRequests: number;
+    activeInvitations: number;
+  };
+  enrollmentInvitations: {
+    active: number;
+  };
+  limits: {
+    maxRequestsPerMinute: number;
+  };
+}
+
 export interface SquadAttentionSource {
   revision: number;
   setupRequired: boolean;

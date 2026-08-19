@@ -166,6 +166,23 @@ describe("Relay mailbox", () => {
       await watching;
     });
     await ready;
+    expect(relay.operationsSnapshot()).toMatchObject({
+      nodes: { active: 2, disabled: 0 },
+      mailbox: {
+        pending: 0,
+        connectedNodes: 1,
+        liveConnections: 1,
+        maxItemsPerNode: 100,
+      },
+      organizations: {
+        active: 0,
+        dissolved: 0,
+        pendingJoinRequests: 0,
+        activeInvitations: 0,
+      },
+      enrollmentInvitations: { active: 0 },
+      limits: { maxRequestsPerMinute: 1_000 },
+    });
 
     const delegationId = randomUUID();
     const now = new Date();
@@ -188,6 +205,14 @@ describe("Relay mailbox", () => {
     });
     await alice.submit(envelope);
     await mailboxEvent;
+    expect(relay.operationsSnapshot().mailbox).toMatchObject({
+      pending: 1,
+      connectedNodes: 1,
+      liveConnections: 1,
+    });
+    expect(relay.operationsSnapshot().mailbox.oldestPendingAt).toBe(
+      envelope.createdAt,
+    );
     eventController.abort();
     await watching;
     await alice.submit(envelope);
@@ -227,6 +252,7 @@ describe("Relay mailbox", () => {
     });
     await bob.acknowledge(envelope.envelopeId);
     expect((await bob.mailbox(first.cursor)).items).toHaveLength(0);
+    expect(relay.operationsSnapshot().mailbox.pending).toBe(0);
     relay.close();
     relay = new RelayServer(relayOptions);
     expect((await bob.mailbox(first.cursor)).items).toHaveLength(0);

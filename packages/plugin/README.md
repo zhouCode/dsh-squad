@@ -78,6 +78,8 @@ Delegation details expose a four-stage created/delivery/execution/result timelin
 
 The workbench reports local live-event health and the latest successful read. `Sync now` actively pumps organization, outbox, mailbox, and update state.
 
+When the current Node hosts Relay, Connection diagnostics includes a loopback-only operations overview of aggregate enrollment, live mailbox connections, durable backlog age, organization activity, invitations, startup, capacity, and rate limits. It exposes no task payloads or private metrics from remote Nodes.
+
 Delegation and Team Planner lists paginate independently in batches of 25 and navigate directly to records opened across views.
 
 Finished delegations and fully dispatched or canceled plans share a reversible local archive. Archival removes failures from attention counts without deleting records, results, plan items, or audit history.
