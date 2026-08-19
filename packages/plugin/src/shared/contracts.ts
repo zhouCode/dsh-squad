@@ -254,6 +254,34 @@ export const createTeamPlanInputSchema = z.strictObject({
 });
 export type CreateTeamPlanInput = z.infer<typeof createTeamPlanInputSchema>;
 
+export const teamPlanDraftItemInputSchema = teamPlanItemInputSchema.extend({
+  id: idSchema.optional(),
+});
+export type TeamPlanDraftItemInput = z.infer<
+  typeof teamPlanDraftItemInputSchema
+>;
+
+export const updateTeamPlanInputSchema = z
+  .strictObject({
+    revision: z.number().int().positive(),
+    title: createTeamPlanInputSchema.shape.title,
+    sourceSummary: createTeamPlanInputSchema.shape.sourceSummary,
+    items: z.array(teamPlanDraftItemInputSchema).min(1).max(32),
+  })
+  .superRefine((value, context) => {
+    const ids = value.items.flatMap((item) =>
+      item.id === undefined ? [] : [item.id],
+    );
+    if (new Set(ids).size !== ids.length) {
+      context.addIssue({
+        code: "custom",
+        path: ["items"],
+        message: "team plan item IDs must be unique",
+      });
+    }
+  });
+export type UpdateTeamPlanInput = z.infer<typeof updateTeamPlanInputSchema>;
+
 export interface TeamPlanItem {
   id: string;
   planId: string;

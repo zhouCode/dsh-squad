@@ -2,6 +2,7 @@ import { createServer } from "node:http";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import type { AddressInfo } from "node:net";
 import { createHttpHandler } from "./http.ts";
+import { TeamPlanEditConflictError } from "./database.ts";
 import type { SquadService } from "./service.ts";
 
 const servers: ReturnType<typeof createServer>[] = [];
@@ -114,6 +115,58 @@ describe("Squad host health", () => {
         server.close((error) => (error ? reject(error) : resolve())),
       );
     }
+  });
+
+  it("validates and saves an optimistic team-plan draft edit", async () => {
+    const planId = "bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb";
+    const updateTeamPlan = vi.fn(async (_id: string, input: unknown) => ({
+      id: planId,
+      revision: 3,
+      status: "DRAFT",
+      input,
+    }));
+    const squad = { updateTeamPlan } as unknown as SquadService;
+    const server = createServer(createHttpHandler(squad));
+    servers.push(server);
+    await new Promise<void>((resolve) =>
+      server.listen(0, "127.0.0.1", resolve),
+    );
+    const address = server.address() as AddressInfo;
+    const input = {
+      revision: 2,
+      title: "Edited plan",
+      items: [{ to: "Bob", objective: "Write the final draft" }],
+    };
+    const response = await fetch(
+      `http://127.0.0.1:${address.port}/squad/v1/local/plans/${planId}`,
+      {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify(input),
+      },
+    );
+    expect(response.status).toBe(200);
+    expect(await response.json()).toMatchObject({ revision: 3 });
+    expect(updateTeamPlan).toHaveBeenCalledWith(planId, input);
+
+    updateTeamPlan.mockRejectedValueOnce(
+      new TeamPlanEditConflictError("reload before saving"),
+    );
+    const conflict = await fetch(
+      `http://127.0.0.1:${address.port}/squad/v1/local/plans/${planId}`,
+      {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify(input),
+      },
+    );
+    expect(conflict.status).toBe(409);
+    expect(await conflict.json()).toEqual({
+      error: {
+        code: "TEAM_PLAN_EDIT_CONFLICT",
+        message: "reload before saving",
+      },
+    });
   });
 
   it("runs connection diagnostics through the loopback management API", async () => {

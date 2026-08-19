@@ -12,6 +12,7 @@ import {
   peerPolicySchema,
   peerTransportSchema,
   resultOutputSchema,
+  updateTeamPlanInputSchema,
   type AttachmentRef,
   type CreateTeamPlanInput,
   type DelegationRequest,
@@ -27,6 +28,7 @@ import {
   type TeamPlanItem,
   type TeamPlanItemStatus,
   type TeamPlanStatus,
+  type UpdateTeamPlanInput,
 } from "../shared/contracts.ts";
 import {
   automationRuleInputSchema,
@@ -161,6 +163,8 @@ function asBoolean(value: unknown): boolean {
 function optionalString(value: unknown): string | undefined {
   return typeof value === "string" && value.length > 0 ? value : undefined;
 }
+
+export class TeamPlanEditConflictError extends Error {}
 
 function parseJson<T>(value: unknown, parse: (input: unknown) => T): T {
   if (typeof value !== "string") throw new Error("invalid SQLite JSON column");
@@ -1584,6 +1588,91 @@ export class SquadDatabase {
       const plan = this.getTeamPlan(planId);
       if (plan === undefined) throw new Error("team plan was not persisted");
       return plan;
+    });
+  }
+
+  updateTeamPlanDraft(
+    idCandidate: string,
+    candidate: UpdateTeamPlanInput,
+    resolvedPeers: ResolvedDelegationRecipient[],
+  ): TeamPlan {
+    const id = idSchema.parse(idCandidate);
+    const input = updateTeamPlanInputSchema.parse(candidate);
+    if (resolvedPeers.length !== input.items.length) {
+      throw new Error("every team plan item must have one resolved peer");
+    }
+    return this.transaction(() => {
+      const current = this.getTeamPlan(id);
+      if (current === undefined) throw new Error(`unknown team plan ${id}`);
+      if (current.status !== "DRAFT") {
+        throw new TeamPlanEditConflictError(
+          `team plan ${id} cannot be edited from ${current.status}`,
+        );
+      }
+      if (current.revision !== input.revision) {
+        throw new TeamPlanEditConflictError(
+          `team plan ${id} changed from revision ${input.revision} to ${current.revision}; reload before saving`,
+        );
+      }
+      const existingItems = new Map(
+        current.items.map((item) => [item.id, item] as const),
+      );
+      for (const item of input.items) {
+        if (item.id !== undefined && !existingItems.has(item.id)) {
+          throw new Error(`team plan item ${item.id} does not belong to ${id}`);
+        }
+      }
+      const now = new Date().toISOString();
+      this.#db
+        .prepare(
+          `
+          UPDATE team_plans
+          SET title = ?, source_summary = ?, revision = revision + 1,
+              updated_at = ?
+          WHERE id = ? AND status = 'DRAFT' AND revision = ?
+        `,
+        )
+        .run(input.title, input.sourceSummary ?? null, now, id, input.revision);
+      this.#db.prepare("DELETE FROM team_plan_items WHERE plan_id = ?").run(id);
+      const insertItem = this.#db.prepare(`
+        INSERT INTO team_plan_items(
+          id, plan_id, position, peer_node_id, peer_display_name, membership_id,
+          objective, context, acceptance_criteria_json, attachment_refs_json,
+          status, created_at, updated_at
+        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'DRAFT', ?, ?)
+      `);
+      for (const [position, item] of input.items.entries()) {
+        const peer = resolvedPeers[position];
+        if (peer === undefined) {
+          throw new Error(`team plan item ${position} has no resolved peer`);
+        }
+        if (
+          peer.organizationId !== current.organizationId ||
+          (current.organizationId !== undefined &&
+            peer.membershipId === undefined)
+        ) {
+          throw new Error("team plan recipient organization is inconsistent");
+        }
+        const existing =
+          item.id === undefined ? undefined : existingItems.get(item.id);
+        insertItem.run(
+          item.id ?? randomUUID(),
+          id,
+          position,
+          peer.nodeId,
+          peer.displayName,
+          peer.membershipId ?? null,
+          item.objective,
+          item.context ?? null,
+          JSON.stringify(item.acceptanceCriteria ?? []),
+          JSON.stringify(item.attachmentRefs ?? []),
+          existing?.createdAt ?? now,
+          now,
+        );
+      }
+      const updated = this.getTeamPlan(id);
+      if (updated === undefined) throw new Error(`team plan ${id} disappeared`);
+      return updated;
     });
   }
 

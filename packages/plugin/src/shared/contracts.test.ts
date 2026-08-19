@@ -8,6 +8,7 @@ import {
   delegationRequestSchema,
   envelopeSchema,
   humanInputSchema,
+  updateTeamPlanInputSchema,
 } from "./contracts.ts";
 import { summarizeAttention } from "./state.ts";
 import { canonicalJson } from "./canonical.ts";
@@ -71,6 +72,24 @@ describe("Squad contracts", () => {
           to: "Bob",
           objective: `Task ${index}`,
         })),
+      }).success,
+    ).toBe(false);
+    expect(
+      updateTeamPlanInputSchema.safeParse({
+        revision: 1,
+        title: "Duplicate IDs",
+        items: [
+          {
+            id: "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa",
+            to: "Bob",
+            objective: "First",
+          },
+          {
+            id: "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa",
+            to: "Carol",
+            objective: "Second",
+          },
+        ],
       }).success,
     ).toBe(false);
   });

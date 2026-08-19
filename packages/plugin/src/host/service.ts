@@ -26,6 +26,7 @@ import {
   nodeIdSchema,
   peerPolicySchema,
   unsignedNodeReceiptSchema,
+  updateTeamPlanInputSchema,
   type CreateDelegationInput,
   type CreateTeamPlanInput,
   type DelegationResult,
@@ -37,6 +38,7 @@ import {
   type StructuredOutcome,
   type TeamPlan,
   type UnsignedEnvelope,
+  type UpdateTeamPlanInput,
 } from "../shared/contracts.ts";
 import {
   applyAutomationLimits,
@@ -92,6 +94,7 @@ import {
 } from "./config.ts";
 import {
   SquadDatabase,
+  TeamPlanEditConflictError,
   type DelegationRecord,
   type OrganizationDirectoryRecord,
   type PeerRecord,
@@ -1648,6 +1651,39 @@ export class SquadService extends Service {
     const plan = this.database.createTeamPlan(input, peers, organizationId);
     this.touchLocalState();
     return Promise.resolve(plan);
+  }
+
+  updateTeamPlan(
+    idCandidate: string,
+    candidate: UpdateTeamPlanInput,
+  ): Promise<TeamPlan> {
+    const id = idSchema.parse(idCandidate);
+    const input = updateTeamPlanInputSchema.parse(candidate);
+    const existing = this.database.getTeamPlan(id);
+    if (existing === undefined) throw new Error(`unknown team plan ${id}`);
+    if (existing.status !== "DRAFT") {
+      throw new TeamPlanEditConflictError(
+        `team plan ${id} cannot be edited from ${existing.status}`,
+      );
+    }
+    if (existing.revision !== input.revision) {
+      throw new TeamPlanEditConflictError(
+        `team plan ${id} changed from revision ${input.revision} to ${existing.revision}; reload before saving`,
+      );
+    }
+    const peers = input.items.map((item) => {
+      const peer = this.resolveRecipient(item.to, existing.organizationId);
+      if (!peer.enabled) {
+        throw new Error(`recipient ${item.to} is unavailable or disabled`);
+      }
+      if (!peer.policy.canDelegate) {
+        throw new Error(`peer ${peer.displayName} does not allow delegation`);
+      }
+      return peer;
+    });
+    const updated = this.database.updateTeamPlanDraft(id, input, peers);
+    this.touchLocalState();
+    return Promise.resolve(updated);
   }
 
   getTeamPlan(id: string): Promise<TeamPlan | undefined> {

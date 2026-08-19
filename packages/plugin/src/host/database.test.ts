@@ -363,8 +363,10 @@ describe("SquadDatabase", () => {
       enabled: true,
       policy,
     });
-    const peers = [db.findPeer("Bob"), db.findPeer("Carol")];
-    expect(peers.every((peer) => peer !== undefined)).toBe(true);
+    const peers = [db.findPeer("Bob"), db.findPeer("Carol")].filter(
+      (peer) => peer !== undefined,
+    );
+    expect(peers).toHaveLength(2);
     const plan = db.createTeamPlan(
       {
         title: "Release follow-up",
@@ -374,14 +376,56 @@ describe("SquadDatabase", () => {
           { to: "Carol", objective: "Verify the installation guide" },
         ],
       },
-      peers.filter((peer) => peer !== undefined),
+      peers,
     );
     expect(plan.status).toBe("DRAFT");
     expect(plan.items).toHaveLength(2);
 
+    const originalFirstId = plan.items[0]!.id;
+    const retainedSecondId = plan.items[1]!.id;
+    const updated = db.updateTeamPlanDraft(
+      plan.id,
+      {
+        revision: plan.revision,
+        title: "Edited release follow-up",
+        items: [
+          {
+            id: retainedSecondId,
+            to: "Carol",
+            objective: "Verify and sign off the installation guide",
+            acceptanceCriteria: ["Record the tested version"],
+          },
+          { to: "Bob", objective: "Draft the final release notes" },
+        ],
+      },
+      [peers[1]!, peers[0]!],
+    );
+    expect(updated).toMatchObject({
+      title: "Edited release follow-up",
+      revision: 2,
+    });
+    expect(updated.sourceSummary).toBeUndefined();
+    expect(updated.items.map((item) => item.position)).toEqual([0, 1]);
+    expect(updated.items[0]?.id).toBe(retainedSecondId);
+    expect(updated.items[1]?.id).not.toBe(originalFirstId);
+    expect(updated.items[0]?.acceptanceCriteria).toEqual([
+      "Record the tested version",
+    ]);
+    expect(() =>
+      db.updateTeamPlanDraft(
+        plan.id,
+        {
+          revision: plan.revision,
+          title: "Stale edit",
+          items: [{ to: "Bob", objective: "Should not save" }],
+        },
+        [peers[0]!],
+      ),
+    ).toThrow(/changed from revision/u);
+
     db.beginTeamPlanDispatch(plan.id);
-    const first = plan.items[0];
-    const second = plan.items[1];
+    const first = updated.items[0];
+    const second = updated.items[1];
     expect(first).toBeDefined();
     expect(second).toBeDefined();
     db.markTeamPlanItemDispatched(plan.id, first!.id, first!.id);
@@ -405,6 +449,17 @@ describe("SquadDatabase", () => {
     expect(finished.items.every((item) => item.status === "DISPATCHED")).toBe(
       true,
     );
+    expect(() =>
+      reopened.updateTeamPlanDraft(
+        plan.id,
+        {
+          revision: finished.revision,
+          title: "Too late",
+          items: [{ to: "Bob", objective: "Cannot edit" }],
+        },
+        [peers[0]!],
+      ),
+    ).toThrow(/cannot be edited/u);
     reopened.close();
   });
 

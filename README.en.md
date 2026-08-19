@@ -62,7 +62,7 @@ Use native DSH Sub-agents for parallel decomposition within one person's DSH. Us
 
 ## Team Planner: review before dispatch
 
-The local Agent can inspect active members in the organization selected for the current Session, or compatible direct Peers when no organization is selected, then turn meeting notes or a team objective into a persistent delegation-plan draft. Draft creation performs no network request or remote execution. The owner reviews every recipient, objective, context, acceptance criterion, and attachment under `Agent Inbox → Plans`, then selects `Approve and dispatch`.
+The local Agent can inspect active members in the organization selected for the current Session, or compatible direct Peers when no organization is selected, then turn meeting notes or a team objective into a persistent delegation-plan draft. Draft creation performs no network request or remote execution. Under `Agent Inbox → Plans`, the owner can edit recipients, objectives, context, acceptance criteria, and attachments, add or remove items, and reorder them before selecting `Approve and dispatch`. Saving a draft still sends nothing; items lock once dispatch begins.
 
 A typical prompt is:
 

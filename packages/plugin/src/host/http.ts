@@ -3,6 +3,7 @@ import {
   peerPolicySchema,
   type CreateDelegationInput,
   type CreateTeamPlanInput,
+  updateTeamPlanInputSchema,
 } from "../shared/contracts.ts";
 import { automationRuleInputSchema } from "../shared/automation.ts";
 import { updateModeSchema } from "../shared/updates.ts";
@@ -12,6 +13,7 @@ import {
 } from "../shared/pairing.ts";
 import { importJoinPackageSchema } from "../shared/join-package.ts";
 import { nodeSetupInputSchema } from "./config.ts";
+import { TeamPlanEditConflictError } from "./database.ts";
 import { RelayClientError } from "./relay-client.ts";
 import { SquadConfigurationError, type SquadService } from "./service.ts";
 
@@ -214,6 +216,21 @@ export function createHttpHandler(squad: SquadService) {
         const body = await readJson(req);
         const plan = await squad.createTeamPlan(body as CreateTeamPlanInput);
         reply(res, 201, plan);
+        return;
+      }
+      const planDraft = /^\/squad\/v1\/local\/plans\/([0-9a-f-]{36})$/u.exec(
+        url.pathname,
+      );
+      if (req.method === "POST" && planDraft?.[1] !== undefined) {
+        const body = await readJson(req);
+        reply(
+          res,
+          200,
+          await squad.updateTeamPlan(
+            planDraft[1],
+            updateTeamPlanInputSchema.parse(body),
+          ),
+        );
         return;
       }
       if (
@@ -566,6 +583,12 @@ export function createHttpHandler(squad: SquadService) {
               : 400,
           { error: { code: error.code, message: error.message } },
         );
+        return;
+      }
+      if (error instanceof TeamPlanEditConflictError) {
+        reply(res, 409, {
+          error: { code: "TEAM_PLAN_EDIT_CONFLICT", message: error.message },
+        });
         return;
       }
       if (error instanceof RelayClientError) {
