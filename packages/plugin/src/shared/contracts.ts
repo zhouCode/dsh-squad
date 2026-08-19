@@ -1,4 +1,5 @@
 import { z } from "zod";
+import type { DelegationStatus } from "./state.ts";
 
 export const PROTOCOL_VERSION = 1 as const;
 export const ORGANIZATION_PROTOCOL_VERSION = 2 as const;
@@ -71,6 +72,16 @@ export const resultOutputSchema = z.discriminatedUnion("type", [
   }),
 ]);
 export type ResultOutput = z.infer<typeof resultOutputSchema>;
+
+export const deliveryStatusSchema = z.enum([
+  "QUEUED_LOCAL",
+  "WAITING_FOR_PEER",
+  "STORED_BY_RELAY",
+  "RECEIVED_BY_NODE",
+  "DELIVERY_EXPIRED",
+  "RECEIVED_LOCAL",
+]);
+export type DeliveryStatus = z.infer<typeof deliveryStatusSchema>;
 
 export const delegationResultSchema = z.strictObject({
   delegationId: idSchema,
@@ -295,9 +306,30 @@ export interface TeamPlanItem {
   attachmentRefs: AttachmentRef[];
   status: TeamPlanItemStatus;
   delegationId?: string;
+  delegation?: {
+    status: DelegationStatus;
+    deliveryStatus: DeliveryStatus;
+    summary?: string;
+    outputs: ResultOutput[];
+    errorCode?: string;
+    updatedAt: string;
+    completedAt?: string;
+  };
   error?: string;
   createdAt: string;
   updatedAt: string;
+}
+
+export interface TeamPlanRollup {
+  total: number;
+  pendingDispatch: number;
+  dispatchFailed: number;
+  queued: number;
+  waitingHuman: number;
+  running: number;
+  completed: number;
+  failed: number;
+  canceled: number;
 }
 
 export interface TeamPlan {
@@ -312,6 +344,7 @@ export interface TeamPlan {
   createdAt: string;
   updatedAt: string;
   items: TeamPlanItem[];
+  rollup: TeamPlanRollup;
 }
 
 export const structuredOutcomeSchema = z.discriminatedUnion("kind", [

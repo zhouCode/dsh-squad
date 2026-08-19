@@ -18,6 +18,7 @@ import {
   type DelegationRequest,
   type DelegationResult,
   type DelegationUpdate,
+  type DeliveryStatus as SharedDeliveryStatus,
   type Envelope,
   type HumanTodo,
   type HumanInput,
@@ -30,6 +31,7 @@ import {
   type TeamPlanStatus,
   type UpdateTeamPlanInput,
 } from "../shared/contracts.ts";
+import { summarizeTeamPlanItems } from "../shared/team-plan.ts";
 import {
   automationRuleInputSchema,
   automationRuleSchema,
@@ -59,13 +61,7 @@ import type { NodeSetupMode } from "./config.ts";
 import { verifyOrganizationDirectory } from "./organization.ts";
 
 export type DelegationDirection = "INCOMING" | "OUTGOING";
-export type DeliveryStatus =
-  | "QUEUED_LOCAL"
-  | "WAITING_FOR_PEER"
-  | "STORED_BY_RELAY"
-  | "RECEIVED_BY_NODE"
-  | "DELIVERY_EXPIRED"
-  | "RECEIVED_LOCAL";
+export type DeliveryStatus = SharedDeliveryStatus;
 
 export interface PeerRecord {
   nodeId: string;
@@ -1477,6 +1473,19 @@ export class SquadDatabase {
       const delegationId = optionalString(item.delegation_id);
       const membershipId = optionalString(item.membership_id);
       const error = optionalString(item.error);
+      const delegation =
+        delegationId === undefined
+          ? undefined
+          : (this.#db
+              .prepare(
+                `SELECT status, delivery_status, summary, outputs_json,
+                        error_code, updated_at, completed_at
+                   FROM local_delegations WHERE id = ?`,
+              )
+              .get(delegationId) as SqlRow | undefined);
+      const delegationSummary = optionalString(delegation?.summary);
+      const delegationErrorCode = optionalString(delegation?.error_code);
+      const delegationCompletedAt = optionalString(delegation?.completed_at);
       return {
         id: String(item.id),
         planId: String(item.plan_id),
@@ -1494,6 +1503,28 @@ export class SquadDatabase {
         ),
         status: item.status as TeamPlanItemStatus,
         ...(delegationId === undefined ? {} : { delegationId }),
+        ...(delegation === undefined
+          ? {}
+          : {
+              delegation: {
+                status: delegation.status as DelegationStatus,
+                deliveryStatus:
+                  delegation.delivery_status as SharedDeliveryStatus,
+                ...(delegationSummary === undefined
+                  ? {}
+                  : { summary: delegationSummary }),
+                outputs: parseJson(delegation.outputs_json, (input) =>
+                  resultOutputSchema.array().parse(input),
+                ),
+                ...(delegationErrorCode === undefined
+                  ? {}
+                  : { errorCode: delegationErrorCode }),
+                updatedAt: String(delegation.updated_at),
+                ...(delegationCompletedAt === undefined
+                  ? {}
+                  : { completedAt: delegationCompletedAt }),
+              },
+            }),
         ...(error === undefined ? {} : { error }),
         createdAt: String(item.created_at),
         updatedAt: String(item.updated_at),
@@ -1515,6 +1546,7 @@ export class SquadDatabase {
       createdAt: String(row.created_at),
       updatedAt: String(row.updated_at),
       items,
+      rollup: summarizeTeamPlanItems(items),
     };
   }
 

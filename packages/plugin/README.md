@@ -62,6 +62,8 @@ Direct has no NAT traversal or third-party offline mailbox: the sender keeps the
 
 The native WebUI exposes `Agent Inbox` / `智能体收件箱` for real-time Node and Session organization identity, signed membership, invitations and approvals, per-member policy, Team Planner review, inbox/outbox state, HumanTodo input, and native Session links. Agents also receive organization listing/selection tools. A Team Planner proposal stays local until its owner approves it; recipient policy and approval remain independent.
 
+After dispatch, the plan rolls up live execution progress and collects only the result summaries and outputs explicitly published by recipients; each item links to its full delegation record.
+
 Chat triggering stays unobtrusive: use natural language or `@member`, or use namespaced `/squad-*` commands for tasks, plans, status, organizations, members, invitations, and roles. They are discovered through DSH's native `/` menu; this package adds no command buttons.
 
 ## Updates

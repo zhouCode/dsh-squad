@@ -64,6 +64,10 @@ describe("team plan drafts", () => {
         peerNodeId: carol.nodeId,
         peerDisplayName: "Carol",
       });
+      expect(updated.rollup).toMatchObject({
+        total: 1,
+        pendingDispatch: 1,
+      });
       expect(() =>
         service.updateTeamPlan(plan.id, {
           revision: plan.revision,
@@ -71,6 +75,37 @@ describe("team plan drafts", () => {
           items: [{ to: "Bob", objective: "Overwrite" }],
         }),
       ).toThrow(TeamPlanEditConflictError);
+
+      const dispatched = await service.approveTeamPlan(updated.id);
+      expect(dispatched.rollup).toMatchObject({ queued: 1, completed: 0 });
+      service.database.applyRemoteUpdate({
+        delegationId: updated.items[0]!.id,
+        status: "RUNNING",
+        shareableSummary: "Reviewing the draft",
+        revision: 2,
+        updatedAt: "2026-08-20T01:00:00.000Z",
+      });
+      expect((await service.getTeamPlan(updated.id))?.rollup.running).toBe(1);
+
+      service.database.applyRemoteResult({
+        delegationId: updated.items[0]!.id,
+        status: "COMPLETED",
+        summary: "Review complete",
+        outputs: [{ type: "text", content: "No blockers found." }],
+        revision: 3,
+        completedAt: "2026-08-20T01:05:00.000Z",
+      });
+      const completed = await service.getTeamPlan(updated.id);
+      expect(completed?.rollup).toMatchObject({
+        total: 1,
+        running: 0,
+        completed: 1,
+      });
+      expect(completed?.items[0]?.delegation).toMatchObject({
+        status: "COMPLETED",
+        summary: "Review complete",
+        outputs: [{ type: "text", content: "No blockers found." }],
+      });
     } finally {
       await service.close();
     }

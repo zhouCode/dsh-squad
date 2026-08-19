@@ -4,6 +4,10 @@ All notable changes to this project are documented in this file. The format is b
 
 ## [Unreleased]
 
+### Added
+
+- Team Planner now rolls up live execution state, result summaries, and published outputs for every dispatched item, with direct navigation to its full delegation record.
+
 ## [0.7.0] - 2026-08-19
 
 ### Added

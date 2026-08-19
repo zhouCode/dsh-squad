@@ -436,6 +436,11 @@ describe("SquadDatabase", () => {
     );
     const partial = db.finishTeamPlanDispatch(plan.id);
     expect(partial.status).toBe("PARTIAL");
+    expect(partial.rollup).toMatchObject({
+      total: 2,
+      queued: 1,
+      dispatchFailed: 1,
+    });
     expect(partial.items[0]?.delegationId).toBe(first!.id);
     expect(partial.items[1]?.error).toContain("token=[REDACTED]");
     db.close();
@@ -449,6 +454,11 @@ describe("SquadDatabase", () => {
     expect(finished.items.every((item) => item.status === "DISPATCHED")).toBe(
       true,
     );
+    expect(finished.rollup).toMatchObject({
+      total: 2,
+      queued: 2,
+      dispatchFailed: 0,
+    });
     expect(() =>
       reopened.updateTeamPlanDraft(
         plan.id,

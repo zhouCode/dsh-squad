@@ -70,6 +70,8 @@ A typical prompt is:
 
 The Agent calls `propose_team_plan`. Only owner approval creates one signed Delegation from the existing protocol per plan item. Every item receives its final Delegation ID when the draft is created, so a lost approval response, process restart, or partial-failure retry cannot create duplicate assignments. Sender-side approval is not recipient authorization: the receiver may still reject, require local acceptance, or execute under its own `SAFE` / `TRUSTED` policy.
 
+After dispatch, the original plan rolls up each item's live queued, running, waiting-for-human, completed, failed, or canceled state and collects only the result summary and outputs that the recipient explicitly publishes. The owner can open the full delegation record from any plan item. Private Sessions, HumanTodo details, and local work remain outside the plan projection.
+
 The same local Plan API is available for future connectors such as Feishu/Lark to create drafts or read status projections. This version does not include a Feishu/Lark connector and never executes work merely because an external board was edited.
 
 ## Organizations, roles, and Session isolation

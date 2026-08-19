@@ -14,6 +14,17 @@ const plan: TeamPlan = {
   revision: 4,
   createdAt: "2026-08-20T00:00:00.000Z",
   updatedAt: "2026-08-20T00:00:00.000Z",
+  rollup: {
+    total: 1,
+    pendingDispatch: 1,
+    dispatchFailed: 0,
+    queued: 0,
+    waitingHuman: 0,
+    running: 0,
+    completed: 0,
+    failed: 0,
+    canceled: 0,
+  },
   items: [
     {
       id: "bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb",

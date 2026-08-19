@@ -1437,11 +1437,13 @@ function TeamPlanDetail({
   plan,
   state,
   refresh,
+  openDelegation,
   t,
 }: {
   plan: TeamPlan;
   state: LocalState;
   refresh: () => Promise<void>;
+  openDelegation: (id: string, status: DelegationStatus) => void;
   t: SquadTranslate;
 }) {
   const [busy, setBusy] = useState(false);
@@ -1466,6 +1468,10 @@ function TeamPlanDetail({
   ).length;
   const canDispatch = ["DRAFT", "DISPATCHING", "PARTIAL"].includes(plan.status);
   const canCancel = !["DISPATCHED", "CANCELED"].includes(plan.status);
+  const settled =
+    plan.rollup.completed + plan.rollup.failed + plan.rollup.canceled;
+  const active = plan.rollup.queued + plan.rollup.running;
+  const problems = plan.rollup.dispatchFailed + plan.rollup.failed;
   const dispatch = async () => {
     const action = plan.status === "DRAFT" ? "approve" : "retry";
     if (
@@ -1526,6 +1532,50 @@ function TeamPlanDetail({
           total: plan.items.length,
         })}
       </p>
+      <section
+        className="squad-plan-rollup"
+        aria-label={t("plan.progressLabel")}
+      >
+        <div
+          className="squad-plan-progress"
+          role="progressbar"
+          aria-valuemin={0}
+          aria-valuemax={plan.rollup.total}
+          aria-valuenow={settled}
+          aria-valuetext={t("plan.settledCount", {
+            settled,
+            total: plan.rollup.total,
+          })}
+        >
+          <span
+            style={{
+              width: `${plan.rollup.total === 0 ? 0 : (settled / plan.rollup.total) * 100}%`,
+            }}
+          />
+        </div>
+        <div className="squad-plan-metrics">
+          <div>
+            <strong>{plan.rollup.completed}</strong>
+            <span>{t("plan.completed")}</span>
+          </div>
+          <div>
+            <strong>{active}</strong>
+            <span>{t("plan.active")}</span>
+          </div>
+          <div>
+            <strong>{plan.rollup.waitingHuman}</strong>
+            <span>{t("plan.waitingHuman")}</span>
+          </div>
+          <div className={problems > 0 ? "problem" : ""}>
+            <strong>{problems}</strong>
+            <span>{t("plan.failed")}</span>
+          </div>
+          <div>
+            <strong>{plan.rollup.pendingDispatch}</strong>
+            <span>{t("plan.pendingDispatch")}</span>
+          </div>
+        </div>
+      </section>
       {plan.sourceSummary ? (
         <section>
           <h3>{t("field.sourceSummary")}</h3>
@@ -1569,11 +1619,15 @@ function TeamPlanDetail({
             <article className="squad-plan-item" key={item.id}>
               <header>
                 <strong>{item.objective}</strong>
-                <span
-                  className={`squad-plan-item-status squad-plan-item-status-${item.status.toLowerCase()}`}
-                >
-                  {formatPlanItemStatus(t, item.status)}
-                </span>
+                {item.delegation ? (
+                  <StatusPill status={item.delegation.status} t={t} />
+                ) : (
+                  <span
+                    className={`squad-plan-item-status squad-plan-item-status-${item.status.toLowerCase()}`}
+                  >
+                    {formatPlanItemStatus(t, item.status)}
+                  </span>
+                )}
               </header>
               <dl>
                 <div>
@@ -1629,7 +1683,64 @@ function TeamPlanDetail({
                     </dd>
                   </div>
                 ) : null}
+                {item.delegation ? (
+                  <>
+                    <div>
+                      <dt>{t("field.delivery")}</dt>
+                      <dd>
+                        {formatDelivery(t, item.delegation.deliveryStatus)}
+                      </dd>
+                    </div>
+                    <div>
+                      <dt>{t("field.updatedAt")}</dt>
+                      <dd>
+                        {new Date(item.delegation.updatedAt).toLocaleString()}
+                      </dd>
+                    </div>
+                  </>
+                ) : null}
               </dl>
+              {item.delegation?.summary ? (
+                <section className="squad-plan-result">
+                  <h4>{t("field.shareableSummary")}</h4>
+                  <p className="squad-prewrap">
+                    {formatSummary(t, item.delegation.summary)}
+                  </p>
+                </section>
+              ) : null}
+              {item.delegation && item.delegation.outputs.length > 0 ? (
+                <section className="squad-plan-result">
+                  <h4>{t("field.outputs")}</h4>
+                  {item.delegation.outputs.map((output, index) =>
+                    output.type === "text" ? (
+                      <p className="squad-prewrap" key={index}>
+                        {output.content}
+                      </p>
+                    ) : (
+                      <p key={index}>
+                        <a href={output.url} target="_blank" rel="noreferrer">
+                          {output.name}
+                        </a>
+                      </p>
+                    ),
+                  )}
+                </section>
+              ) : null}
+              {item.delegation?.errorCode ? (
+                <p className="squad-error">
+                  {formatErrorCode(t, item.delegation.errorCode)}
+                </p>
+              ) : null}
+              {item.delegationId && item.delegation ? (
+                <button
+                  className="squad-link-button"
+                  onClick={() =>
+                    openDelegation(item.delegationId!, item.delegation!.status)
+                  }
+                >
+                  {t("action.viewDelegation")}
+                </button>
+              ) : null}
               {item.error ? <p className="squad-error">{item.error}</p> : null}
             </article>
           ))}
@@ -4008,6 +4119,16 @@ function SquadPanel({
                   plan={selectedPlan}
                   state={state}
                   refresh={refresh}
+                  openDelegation={(id, status) => {
+                    setTab(
+                      ["COMPLETED", "REJECTED", "FAILED", "CANCELED"].includes(
+                        status,
+                      )
+                        ? "completed"
+                        : "sent",
+                    );
+                    setSelectedId(id);
+                  }}
                   t={t}
                 />
               ) : (
@@ -4077,6 +4198,7 @@ const css = `
 .squad-detail input{box-sizing:border-box;width:100%;border:1px solid var(--dsw-alias-border-l2,#ccc);border-radius:9px;background:transparent;color:inherit;padding:9px;font:inherit}.squad-todo{border:1px solid var(--dsw-alias-border-l2,#ddd);border-left:3px solid #d59b1b;border-radius:10px;padding:14px;margin:12px 0}.squad-todo>header{display:flex;align-items:center;justify-content:space-between;gap:10px}.squad-attachment-editor{margin:14px 0;padding-top:12px;border-top:1px solid var(--dsw-alias-border-l2,#ddd)}.squad-attachment-editor>header{display:flex;align-items:flex-start;justify-content:space-between;gap:12px}.squad-attachment-editor>header div{display:grid;gap:4px}.squad-attachment-editor small{display:block;color:var(--dsw-alias-label-secondary,#666);line-height:1.4}.squad-attachment-editor fieldset{margin:12px 0;padding:10px 12px;border:1px solid var(--dsw-alias-border-l2,#ddd);border-radius:10px}.squad-attachment-editor legend{padding:0 5px;font-size:12px;font-weight:600}.squad-attachment-fields{display:grid;grid-template-columns:minmax(0,1.4fr) minmax(130px,.7fr);gap:0 10px}.squad-detail .squad-secondary{border:1px solid var(--dsw-alias-border-l2,#ccc);background:transparent;color:inherit}.squad-detail .squad-danger-text{color:#b13c35}.squad-todo button[type=submit]{margin-top:4px}@media(max-width:700px){.squad-attachment-editor>header,.squad-attachment-fields{display:grid;grid-template-columns:1fr}.squad-attachment-editor>header button{justify-self:start}}
 .squad-automation{margin:24px 0;padding:18px 0;border-top:1px solid var(--dsw-alias-border-l2,#ddd);border-bottom:1px solid var(--dsw-alias-border-l2,#ddd)}.squad-automation>h2{margin:0}.squad-automation-list{display:grid;gap:10px;margin:14px 0}.squad-automation-list>article{padding:13px;border:1px solid var(--dsw-alias-border-l2,#ddd);border-radius:12px}.squad-automation-list>article.disabled{opacity:.68}.squad-automation-list>article>header{display:flex;align-items:flex-start;justify-content:space-between;gap:12px}.squad-automation-list>article>header>div:first-child{display:grid;gap:4px}.squad-automation-list>article>header span{font-size:11px;color:var(--dsw-alias-label-secondary,#666)}.squad-automation-list code{display:block;margin-top:9px;overflow-wrap:anywhere}.squad-automation-list form{margin-top:14px;padding-top:10px;border-top:1px solid var(--dsw-alias-border-l2,#ddd)}.squad-automation-limits{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:0 10px}.squad-settings .squad-check{display:flex;align-items:center;gap:9px}.squad-settings .squad-check input{width:auto}.squad-automation-create{margin-top:12px;padding:12px;border:1px dashed var(--dsw-alias-border-l2,#ccc);border-radius:12px}.squad-automation-create>summary{cursor:pointer;color:#315ee8}.squad-automation-create form{margin-top:12px}.squad-automation small{color:var(--dsw-alias-label-secondary,#666);line-height:1.4}@media(max-width:700px){.squad-automation-list>article>header,.squad-automation-limits{display:grid;grid-template-columns:1fr}}
 .squad-plan-editor input,.squad-plan-editor textarea,.squad-plan-editor select{box-sizing:border-box;width:100%;border:1px solid var(--dsw-alias-border-l2,#ccc);border-radius:9px;background:var(--dsw-specific-dialog-fill,#fff);color:inherit;padding:9px;font:inherit}.squad-plan-editor-items{display:grid;gap:14px;margin:16px 0}.squad-plan-editor-item{min-width:0;margin:0;padding:14px;border:1px solid var(--dsw-alias-border-l2,#ddd);border-radius:12px}.squad-plan-editor-item>legend{padding:0 6px;font-size:13px;font-weight:700}.squad-plan-editor-order{display:flex;align-items:center;gap:7px;flex-wrap:wrap}.squad-plan-editor-order .squad-link-button{margin:0 0 0 auto}.squad-plan-editor .squad-attachment-editor{margin-top:18px}.squad-plan-editor>button.squad-secondary{margin-top:2px}@media(max-width:700px){.squad-plan-editor-order .squad-link-button{margin-left:0}.squad-plan-editor-item{padding:11px}}
+.squad-plan-rollup{margin:16px 0}.squad-plan-progress{height:7px;overflow:hidden;border-radius:999px;background:var(--dsw-alias-interactive-bg-hover,#eee)}.squad-plan-progress>span{display:block;height:100%;border-radius:inherit;background:#315ee8;transition:width .2s ease}.squad-plan-metrics{display:grid;grid-template-columns:repeat(5,minmax(0,1fr));gap:8px;margin-top:10px}.squad-plan-metrics>div{display:grid;gap:2px;padding:9px;border:1px solid var(--dsw-alias-border-l2,#ddd);border-radius:9px}.squad-plan-metrics>div.problem{border-color:#b13c35;background:#fde4e1;color:#a52a24}.squad-plan-metrics strong{font-size:18px}.squad-plan-metrics span{font-size:10px;color:var(--dsw-alias-label-secondary,#666)}.squad-plan-result{margin-top:12px;padding-top:1px;border-top:1px solid var(--dsw-alias-border-l2,#ddd)}.squad-plan-result h4{margin:10px 0 5px;font-size:12px}@media(max-width:700px){.squad-plan-metrics{grid-template-columns:repeat(2,minmax(0,1fr))}}
 `;
 
 function installStyles(): () => void {
