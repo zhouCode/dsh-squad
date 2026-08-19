@@ -943,6 +943,16 @@ function OrganizationCenter({
     expiresAt: string;
   }>();
 
+  if (!state.relay.configured) {
+    return (
+      <div className="squad-organizations squad-connection-required">
+        <h2>{t("organizations.relayRequired")}</h2>
+        <p>{t("organizations.relayRequiredHint")}</p>
+        <p className="squad-muted">{t("organizations.retainedHint")}</p>
+      </div>
+    );
+  }
+
   const run = async (key: string, action: () => Promise<void>) => {
     setBusy(key);
     setError(undefined);
@@ -1296,9 +1306,7 @@ function NodeSetupForm({
   const [displayName, setDisplayName] = useState(state.identity.displayName);
   const [relayUrl, setRelayUrl] = useState(state.relay.url ?? "");
   const [invitation, setInvitation] = useState("");
-  const [directEnabled, setDirectEnabled] = useState(
-    initialMode === "DIRECT" ? state.direct.serving : true,
-  );
+  const [directEnabled, setDirectEnabled] = useState(state.direct.serving);
   const [directPublicUrl, setDirectPublicUrl] = useState(
     state.direct.publicUrl ?? "",
   );
@@ -1317,7 +1325,7 @@ function NodeSetupForm({
     setMode(nextMode);
     setDisplayName(state.identity.displayName);
     setRelayUrl(state.relay.url ?? "");
-    setDirectEnabled(nextMode === "DIRECT" ? state.direct.serving : true);
+    setDirectEnabled(state.direct.serving);
     setDirectPublicUrl(state.direct.publicUrl ?? "");
   }, [
     state.direct.publicUrl,
@@ -1343,6 +1351,8 @@ function NodeSetupForm({
                 displayName,
                 relayUrl,
                 ...(invitation.trim() === "" ? {} : { invitation }),
+                directEnabled,
+                ...(directPublicUrl.trim() === "" ? {} : { directPublicUrl }),
               }
             : {
                 mode,
@@ -1434,6 +1444,34 @@ function NodeSetupForm({
                 onChange={(event) => setInvitation(event.currentTarget.value)}
               />
               <small>{t("setup.invitationHint")}</small>
+            </label>
+            <hr />
+            <label className="squad-check">
+              <input
+                name="relayDirectEnabled"
+                type="checkbox"
+                checked={directEnabled}
+                onChange={(event) =>
+                  setDirectEnabled(event.currentTarget.checked)
+                }
+              />
+              <span>{t("setup.optionalDirectReceive")}</span>
+            </label>
+            <label>
+              {t("setup.directPublicUrl")}
+              <input
+                name="relayDirectPublicUrl"
+                type="url"
+                value={directPublicUrl}
+                required={directEnabled}
+                disabled={!directEnabled}
+                maxLength={2_048}
+                placeholder="https://alice-agent.example.com"
+                onChange={(event) =>
+                  setDirectPublicUrl(event.currentTarget.value)
+                }
+              />
+              <small>{t("setup.optionalDirectHint")}</small>
             </label>
           </div>
         ) : (
@@ -1622,8 +1660,13 @@ function Settings({
         </label>
         <label>
           {t("settings.transport")}
-          <select name="transport" defaultValue="RELAY">
-            <option value="RELAY">{t("transport.RELAY")}</option>
+          <select
+            name="transport"
+            defaultValue={state.relay.configured ? "RELAY" : "DIRECT"}
+          >
+            <option value="RELAY" disabled={!state.relay.configured}>
+              {t("transport.RELAY")}
+            </option>
             <option value="DIRECT">{t("transport.DIRECT")}</option>
           </select>
         </label>
@@ -1882,7 +1925,9 @@ function SessionContextBar({
         {t("context.organization")}
         <select
           value={selectedOrganizationId}
-          disabled={busy || currentSessionId === undefined}
+          disabled={
+            busy || currentSessionId === undefined || !state.relay.configured
+          }
           onChange={(event) =>
             void selectOrganization(event.currentTarget.value)
           }
@@ -1904,7 +1949,11 @@ function SessionContextBar({
               </option>
             ))}
         </select>
-        <small>{selectedOrganization?.name ?? t("context.selectHint")}</small>
+        <small>
+          {!state.relay.configured
+            ? t("context.relayRequired")
+            : (selectedOrganization?.name ?? t("context.selectHint"))}
+        </small>
       </label>
       {error ? <p className="squad-error">{error}</p> : null}
     </div>
@@ -2170,6 +2219,7 @@ const css = `
 .squad-context-bar{display:grid;grid-template-columns:minmax(150px,1fr) minmax(150px,1fr) minmax(220px,1.4fr);gap:14px;margin:0 22px 12px;padding:12px 14px;border:1px solid var(--dsw-alias-border-l2,#ddd);border-radius:12px;background:var(--dsw-alias-interactive-bg-hover,#f6f7f9)}.squad-context-bar>div,.squad-context-bar>label{display:grid;align-content:start;gap:4px;min-width:0;margin:0;font-size:12px}.squad-context-bar span,.squad-context-bar small{color:var(--dsw-alias-label-secondary,#666)}.squad-context-bar code{overflow:hidden;text-overflow:ellipsis;white-space:nowrap}.squad-context-bar select,.squad-organizations input,.squad-organizations textarea,.squad-organizations select,.squad-peer select{box-sizing:border-box;width:100%;border:1px solid var(--dsw-alias-border-l2,#ccc);border-radius:9px;background:var(--dsw-specific-dialog-fill,#fff);color:inherit;padding:8px;font:inherit}.squad-organizations{overflow:auto;padding:20px 24px;flex:1}.squad-organizations button{border:0;border-radius:9px;padding:8px 12px;background:#315ee8;color:#fff;cursor:pointer}.squad-organizations button:disabled{opacity:.5}.squad-organizations .squad-danger{background:#b13c35}.squad-organization-intro{display:grid;grid-template-columns:1fr 1.35fr;gap:22px}.squad-organization-intro h2,.squad-organization-card h2{margin:0}.squad-organization-forms{display:grid;grid-template-columns:1fr 1fr;gap:12px}.squad-organization-forms form{border:1px solid var(--dsw-alias-border-l2,#ddd);border-radius:12px;padding:12px}.squad-organization-forms h3{margin:0 0 8px;font-size:13px}.squad-organizations label{display:grid;gap:5px;margin:8px 0;font-size:12px}.squad-organization-list{display:grid;gap:16px;margin-top:18px}.squad-organization-card{border:1px solid var(--dsw-alias-border-l2,#ddd);border-radius:14px;padding:16px}.squad-organization-card>header{display:flex;justify-content:space-between;gap:16px}.squad-organization-card code,.squad-invitation-result code,.squad-member code,.squad-join-request code{display:block;font-size:11px;overflow-wrap:anywhere}.squad-organization-badges{display:flex;align-items:flex-start;gap:6px}.squad-organization-badges span,.squad-member-role>span{font-size:11px;border-radius:999px;padding:4px 8px;background:var(--dsw-alias-interactive-bg-hover,#eee);white-space:nowrap}.squad-organization-admin{display:flex;align-items:end;gap:8px;margin:12px 0}.squad-organization-admin label{margin:0;max-width:210px}.squad-join-request{display:flex;align-items:center;justify-content:space-between;gap:12px;padding:9px 0;border-bottom:1px solid var(--dsw-alias-border-l2,#ddd)}.squad-member-list{display:grid;gap:8px}.squad-member{display:grid;grid-template-columns:minmax(170px,1.4fr) minmax(130px,.8fr) minmax(150px,1fr) auto;align-items:center;gap:10px;padding:10px;border-radius:10px;background:var(--dsw-alias-interactive-bg-hover,#f4f5f7)}.squad-member-role{display:flex;align-items:center;gap:6px}.squad-policy-control{margin:0!important}.squad-invitation-result{display:grid;gap:7px;margin-top:14px;padding:13px;border:1px solid #d59b1b;border-radius:12px;background:#fff8e5;color:#5d470a}.squad-notice{padding:10px 12px;border-radius:9px;background:#dff5e6;color:#176c35}.squad-warning{padding:10px 12px;border-radius:9px;background:#fff0c7;color:#755400;font-size:12px}
 @media(max-width:700px){.squad-context-bar,.squad-organization-intro,.squad-organization-forms{grid-template-columns:1fr}.squad-context-bar{margin:0 12px 10px}.squad-organizations{padding:16px}.squad-member{grid-template-columns:1fr}.squad-organization-card>header{display:grid}}
 .squad-node-setup{box-sizing:border-box;overflow:auto;width:100%;max-width:720px;padding:4px 0 20px}.squad-onboarding{align-self:center;flex:1;padding:18px 30px 34px}.squad-node-setup>header{margin-bottom:18px}.squad-node-setup>header h2{font-size:26px;margin:7px 0}.squad-node-setup>header p{color:var(--dsw-alias-label-secondary,#666);line-height:1.55;max-width:620px}.squad-step{font-size:11px;letter-spacing:.12em;text-transform:uppercase;color:#315ee8}.squad-node-setup label{display:grid;gap:6px;margin:13px 0;font-size:13px}.squad-node-setup input{box-sizing:border-box;width:100%;border:1px solid var(--dsw-alias-border-l2,#ccc);border-radius:9px;background:transparent;color:inherit;padding:9px;font:inherit}.squad-node-setup input:disabled{opacity:.55}.squad-node-setup small{color:var(--dsw-alias-label-secondary,#666);line-height:1.45}.squad-mode-picker{display:grid;grid-template-columns:1fr 1fr;gap:10px;border:0;margin:18px 0;padding:0}.squad-mode-picker legend{grid-column:1/-1;padding:0 0 8px;font-size:13px;font-weight:600}.squad-node-setup .squad-mode-picker button{display:grid;gap:6px;border:1px solid var(--dsw-alias-border-l2,#ccc);border-radius:12px;background:transparent;color:inherit;padding:14px;text-align:left;cursor:pointer}.squad-node-setup .squad-mode-picker button.active{border-color:#315ee8;background:rgba(49,94,232,.08);box-shadow:inset 0 0 0 1px #315ee8}.squad-mode-picker button span{color:var(--dsw-alias-label-secondary,#666);font-size:12px;line-height:1.4}.squad-setup-fields{padding:2px 14px;border-radius:12px;background:var(--dsw-alias-interactive-bg-hover,#f6f7f9)}.squad-node-setup .squad-check{display:flex;align-items:center;gap:9px}.squad-node-setup .squad-check input{width:auto}.squad-node-setup button[type=submit]{border:0;border-radius:9px;padding:9px 14px;background:#315ee8;color:#fff;cursor:pointer}.squad-node-setup button:disabled{opacity:.55;cursor:not-allowed}.squad-node-setup .squad-secondary{border:1px solid var(--dsw-alias-border-l2,#ccc);border-radius:9px;padding:8px 13px;background:transparent;color:inherit;cursor:pointer}.squad-settings .squad-node-setup{border-bottom:1px solid var(--dsw-alias-border-l2,#ddd);margin-bottom:22px}.squad-settings .squad-node-setup>h2{margin-top:0}
+.squad-setup-fields hr{border:0;border-top:1px solid var(--dsw-alias-border-l2,#ddd);margin:16px 0}.squad-connection-required{display:grid;align-content:center;justify-items:start;max-width:620px}.squad-connection-required h2{margin-bottom:0}
 @media(max-width:700px){.squad-onboarding{padding:10px 16px 24px}.squad-mode-picker{grid-template-columns:1fr}.squad-node-setup>header h2{font-size:22px}}
 .squad-updates{overflow:auto;padding:22px 26px;max-width:760px}.squad-updates>header{display:flex;align-items:flex-start;justify-content:space-between;gap:16px}.squad-updates h2{margin:0}.squad-updates h3{font-size:14px;margin:24px 0 8px}.squad-updates label{display:grid;gap:6px;margin:12px 0;font-size:13px}.squad-updates select{box-sizing:border-box;width:100%;max-width:360px;border:1px solid var(--dsw-alias-border-l2,#ccc);border-radius:9px;background:var(--dsw-specific-dialog-fill,#fff);color:inherit;padding:9px;font:inherit}.squad-updates button{border:0;border-radius:9px;padding:8px 12px;background:#315ee8;color:#fff;cursor:pointer}.squad-updates button:disabled{opacity:.5;cursor:not-allowed}.squad-updates a{color:#315ee8}.squad-update-summary{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:10px;margin:18px 0}.squad-update-summary>div{display:grid;gap:5px;padding:13px;border:1px solid var(--dsw-alias-border-l2,#ddd);border-radius:11px}.squad-update-summary span{font-size:11px;color:var(--dsw-alias-label-secondary,#666)}.squad-update-summary strong{overflow-wrap:anywhere}.squad-update-status-failed,.squad-update-status-rolled_back{background:#fde4e1;color:#a52a24}.squad-update-status-available,.squad-update-status-requested,.squad-update-status-blocked{background:#fff0c7;color:#755400}.squad-update-status-installed,.squad-update-status-up_to_date{background:#dff5e6;color:#176c35}@media(max-width:700px){.squad-updates{padding:16px}.squad-update-summary{grid-template-columns:1fr}}
 .squad-trigger{position:relative}.squad-trigger-badge,.squad-tab-count{display:inline-flex;align-items:center;justify-content:center;box-sizing:border-box;min-width:18px;height:18px;padding:0 5px;border-radius:999px;background:#b13c35;color:#fff;font-size:10px;font-weight:700;line-height:1}.squad-trigger:not(.squad-trigger-wide) .squad-trigger-badge{position:absolute;right:0;top:-2px}.squad-tabs button{display:inline-flex;align-items:center;gap:6px}.squad-tabs button.active .squad-tab-count{background:#315ee8}.squad-overview{overflow:auto;padding:24px 28px;flex:1}.squad-overview>header h2{margin:4px 0}.squad-attention-grid{display:grid;grid-template-columns:repeat(4,minmax(0,1fr));gap:10px;margin:20px 0}.squad-attention-grid button{display:grid;gap:5px;text-align:left;border:1px solid var(--dsw-alias-border-l2,#ddd);border-radius:12px;background:transparent;color:inherit;padding:14px;cursor:pointer}.squad-attention-grid button.needs-attention{border-color:#d59b1b;background:#fff8e5;color:#5d470a}.squad-attention-grid strong{font-size:24px}.squad-attention-grid span{font-size:12px;color:var(--dsw-alias-label-secondary,#666)}.squad-next-step{margin-top:18px;padding:18px;border:1px solid var(--dsw-alias-border-l2,#ddd);border-radius:14px}.squad-next-step h3{margin:0 0 7px}.squad-next-step code{display:block;padding:10px;border-radius:9px;background:var(--dsw-alias-interactive-bg-hover,#f4f5f7);overflow-wrap:anywhere}.squad-next-step button,.squad-update-callout{border:0;border-radius:9px;padding:8px 12px;margin-top:12px;background:#315ee8;color:#fff;cursor:pointer}.squad-update-callout{display:block;width:100%;text-align:left;background:#fff0c7;color:#755400}@media(max-width:700px){.squad-attention-grid{grid-template-columns:1fr 1fr}.squad-overview{padding:18px 16px}}

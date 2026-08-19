@@ -96,11 +96,11 @@ export const zh = {
   "setup.title": "把这个节点加入团队",
   "setup.intro":
     "设置一个便于成员识别的名称，再选择 Relay 或 Direct。验证通过后配置会保存在本机，无需编辑 YAML。",
-  "setup.chooseMode": "选择组队方式",
+  "setup.chooseMode": "选择主连接方式",
   "setup.relayTitle": "加入 Relay（推荐）",
   "setup.relayDescription":
-    "适合跨地域和离线协作；个人电脑只需主动连接持续在线的中继。",
-  "setup.directTitle": "Direct 点对点",
+    "适合跨地域和离线协作；仍可为指定节点同时启用 Direct 直连。",
+  "setup.directTitle": "仅使用 Direct",
   "setup.directDescription":
     "适合局域网、VPN 或已有 HTTPS 可达地址的小团队；不需要 Relay。",
   "setup.relayUrl": "Relay 地址",
@@ -110,6 +110,9 @@ export const zh = {
   "setup.invitationHint":
     "首次登记此节点时填写；已登记节点可留空。只用于本次验证，不保存在节点数据库。",
   "setup.directReceive": "允许其他已配对节点向我直连投递",
+  "setup.optionalDirectReceive": "同时允许已配对节点向我 Direct 直连投递",
+  "setup.optionalDirectHint":
+    "这是 Relay 之外的可选投递路径；不会改变组织身份和成员关系。",
   "setup.directPublicUrl": "本节点的 Direct 公共地址",
   "setup.directPublicUrlHint":
     "启用接收时必填。Squad 不会自动配置 DNS、TLS、端口映射或反向代理。",
@@ -202,6 +205,7 @@ export const zh = {
   "context.noSession": "尚未选择 DSH 会话",
   "context.selectHint":
     "每个会话可独立选择一个组织；任务只在该组织成员目录内解析。",
+  "context.relayRequired": "当前没有 Relay 连接，已保存的组织暂不可用。",
   "organizations.title": "组织",
   "organizations.create": "创建新组织",
   "organizations.join": "使用一次性邀请申请加入",
@@ -220,6 +224,11 @@ export const zh = {
   "organizations.pendingHint": "加入申请已发送，等待 Owner 或 Admin 批准。",
   "organizations.securityHint":
     "组织目录由成员签名并在本机验证；Relay 只中继目录和加密身份边界，不获得本机 Agent 能力。",
+  "organizations.relayRequired": "组织目录需要 Relay 连接",
+  "organizations.relayRequiredHint":
+    "Direct 对等方仍可正常使用；创建、加入和同步组织需要先在设置中配置 Relay。",
+  "organizations.retainedHint":
+    "切换连接方式不会删除已保存的组织、身份或历史任务。",
   "organizationRole.OWNER": "所有者",
   "organizationRole.ADMIN": "管理员",
   "organizationRole.MEMBER": "成员",
@@ -413,11 +422,11 @@ export const en = {
   "setup.title": "Connect this Node to a team",
   "setup.intro":
     "Choose a recognizable name and either Relay or Direct. After validation, the settings stay on this computer—no YAML editing required.",
-  "setup.chooseMode": "Choose a team connection",
+  "setup.chooseMode": "Choose the primary connection",
   "setup.relayTitle": "Join a Relay (recommended)",
   "setup.relayDescription":
-    "Best for distributed and offline teams; personal computers make outbound connections to an always-on Relay.",
-  "setup.directTitle": "Direct peer-to-peer",
+    "Best for distributed and offline teams; selected peers may still use Direct alongside it.",
+  "setup.directTitle": "Direct only",
   "setup.directDescription":
     "Best for a LAN, VPN, or small team with reachable HTTPS endpoints; no Relay is required.",
   "setup.relayUrl": "Relay URL",
@@ -427,6 +436,10 @@ export const en = {
   "setup.invitationHint":
     "Enter it when enrolling this Node for the first time; an already enrolled Node may leave it blank. It is used only for validation and is not stored in the Node database.",
   "setup.directReceive": "Allow paired Nodes to deliver directly to me",
+  "setup.optionalDirectReceive":
+    "Also allow paired Nodes to deliver to me over Direct",
+  "setup.optionalDirectHint":
+    "This is an optional delivery path alongside Relay; it does not change organization identity or membership.",
   "setup.directPublicUrl": "This Node's public Direct URL",
   "setup.directPublicUrlHint":
     "Required when receiving is enabled. Squad does not configure DNS, TLS, port mapping, or a reverse proxy.",
@@ -521,6 +534,8 @@ export const en = {
   "context.noSession": "No DSH session is selected",
   "context.selectHint":
     "Each session can select one organization independently; recipients resolve only inside that signed member directory.",
+  "context.relayRequired":
+    "No Relay is connected, so saved organizations are temporarily unavailable.",
   "organizations.title": "Organizations",
   "organizations.create": "Create an organization",
   "organizations.join": "Request access with a one-time invitation",
@@ -542,6 +557,11 @@ export const en = {
     "The join request was sent and is waiting for an Owner or Admin.",
   "organizations.securityHint":
     "Members sign the organization directory and every Node verifies it locally. Relay only brokers the directory and identity boundary; it gains no local Agent capability.",
+  "organizations.relayRequired": "Organizations require a Relay connection",
+  "organizations.relayRequiredHint":
+    "Direct peers remain available. Configure a Relay in Settings before creating, joining, or synchronizing organizations.",
+  "organizations.retainedHint":
+    "Switching connections does not delete saved organizations, identity, or task history.",
   "organizationRole.OWNER": "Owner",
   "organizationRole.ADMIN": "Admin",
   "organizationRole.MEMBER": "Member",

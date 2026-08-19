@@ -132,12 +132,17 @@ describe("guided Node setup", () => {
         displayName: "Alice",
         relayUrl: `${http.url}/`,
         invitation,
+        directEnabled: true,
+        directPublicUrl: "http://127.0.0.1:37100",
       });
       expect(node.localState()).toMatchObject({
         setup: { required: false, mode: "RELAY", source: "INTERFACE" },
         identity: { displayName: "Alice" },
         relay: { configured: true, url: http.url },
-        direct: { serving: false },
+        direct: {
+          serving: true,
+          publicUrl: "http://127.0.0.1:37100",
+        },
       });
       expect(JSON.stringify(node.database.nodeSetup())).not.toContain(
         invitation,
@@ -147,6 +152,8 @@ describe("guided Node setup", () => {
         mode: "RELAY",
         displayName: "Alice workstation",
         relayUrl: http.url,
+        directEnabled: true,
+        directPublicUrl: "http://127.0.0.1:37100",
       });
       expect(node.localState().identity.displayName).toBe("Alice workstation");
     } finally {

@@ -63,6 +63,8 @@ export const nodeSetupInputSchema = z.discriminatedUnion("mode", [
     displayName: z.string().trim().min(1).max(120),
     relayUrl: z.string().trim().min(1).max(2_048),
     invitation: z.string().trim().min(16).max(512).optional(),
+    directEnabled: z.boolean().optional(),
+    directPublicUrl: z.string().trim().min(1).max(2_048).optional(),
   }),
   z.strictObject({
     mode: z.literal("DIRECT"),

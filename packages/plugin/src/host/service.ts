@@ -415,6 +415,7 @@ export class SquadService extends Service {
 
     if (input.mode === "RELAY") {
       let relayUrl: string | undefined;
+      let directPublicUrl: string | undefined;
       try {
         relayUrl = resolveRelayBaseUrl(input.relayUrl, "Relay URL");
       } catch (error) {
@@ -428,6 +429,24 @@ export class SquadService extends Service {
         throw new SquadConfigurationError(
           "INVALID_RELAY_URL",
           "Relay URL is required",
+        );
+      }
+      try {
+        directPublicUrl = resolveDirectBaseUrl(
+          input.directPublicUrl,
+          "Direct public URL",
+        );
+      } catch (error) {
+        throw new SquadConfigurationError(
+          "INVALID_DIRECT_URL",
+          "Direct public URL must be an HTTPS origin",
+          { cause: error },
+        );
+      }
+      if (input.directEnabled === true && directPublicUrl === undefined) {
+        throw new SquadConfigurationError(
+          "DIRECT_PUBLIC_URL_REQUIRED",
+          "Direct public URL is required when Direct receiving is enabled",
         );
       }
       nextRelayClient = new RelayClient(relayUrl, this.identity);
@@ -464,7 +483,8 @@ export class SquadService extends Service {
         setupMode: "RELAY",
         setupSource: "INTERFACE",
         relayUrl,
-        directEnabled: false,
+        directEnabled: input.directEnabled === true,
+        ...(directPublicUrl === undefined ? {} : { directPublicUrl }),
       };
     } else {
       let directPublicUrl: string | undefined;
