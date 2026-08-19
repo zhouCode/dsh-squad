@@ -345,7 +345,7 @@ async function openDshPage(context, port, selectWorkspace = true) {
     waitUntil: "domcontentloaded",
   });
   await page
-    .getByRole("button", { name: "Agent Inbox", exact: true })
+    .getByRole("button", { name: /^Squad(?:$|,)/u })
     .waitFor({ state: "visible", timeout: 30_000 });
   const continueButton = page.getByRole("button", {
     name: "Continue",
@@ -371,31 +371,55 @@ async function openDshPage(context, port, selectWorkspace = true) {
 }
 
 async function openInbox(page) {
-  const existing = page.getByRole("dialog", { name: "Agent Inbox" });
+  const existing = page.getByRole("dialog", { name: "Squad" });
   if (await existing.isVisible().catch(() => false)) return existing;
-  await page.getByRole("button", { name: "Agent Inbox", exact: true }).click();
+  await page.getByRole("button", { name: /^Squad(?:$|,)/u }).click();
   await existing.waitFor({ state: "visible" });
   return existing;
 }
 
 async function closeInbox(dialog) {
-  await dialog.getByRole("button", { name: "Close", exact: true }).click();
+  await dialog
+    .getByRole("button", { name: "Close Squad", exact: true })
+    .click();
   await dialog.waitFor({ state: "hidden" });
 }
 
 async function pairPeer(page, peer, displayName, autoExecute) {
   const dialog = await openInbox(page);
-  await dialog.getByRole("button", { name: "Settings", exact: true }).click();
-  await dialog.getByLabel("Display name").fill(displayName);
-  await dialog.getByLabel("Node ID").fill(peer.nodeId);
-  await dialog.getByLabel("Ed25519 public key").fill(peer.publicKey);
-  await dialog.getByLabel("Automatic execution").selectOption(autoExecute);
-  await dialog.getByRole("button", { name: "Save peer", exact: true }).click();
+  await dialog.getByRole("tab", { name: "Settings", exact: true }).click();
+  const manualPairing = dialog.locator("details.squad-advanced-pairing");
+  await manualPairing.locator("summary").click();
+  await manualPairing.getByLabel("Display name").fill(displayName);
+  await manualPairing.getByLabel("Node ID").fill(peer.nodeId);
+  await manualPairing.getByLabel("Ed25519 public key").fill(peer.publicKey);
+  await manualPairing
+    .getByLabel("Automatic execution")
+    .selectOption(autoExecute);
+  await manualPairing
+    .getByRole("button", { name: "Save peer", exact: true })
+    .click();
+  if (autoExecute === "TRUSTED") {
+    const confirmation = dialog.getByRole("alertdialog", {
+      name: "Allow execution without confirmation?",
+      exact: true,
+    });
+    await confirmation.waitFor({ state: "visible" });
+    await confirmation
+      .getByRole("button", {
+        name: "Enable trusted execution",
+        exact: true,
+      })
+      .click();
+  }
   const peerRow = dialog.locator(".squad-peer").filter({
     hasText: displayName,
   });
   await peerRow.waitFor({ state: "visible" });
-  assert.equal(await peerRow.locator("select").inputValue(), autoExecute);
+  assert.equal(
+    await peerRow.getByLabel("Automatic execution").inputValue(),
+    autoExecute,
+  );
   await closeInbox(dialog);
 }
 
@@ -410,17 +434,14 @@ async function assertChineseLocalization(browser, port) {
       waitUntil: "domcontentloaded",
     });
     const trigger = page.getByRole("button", {
-      name: "智能体收件箱",
+      name: "Squad 团队协作",
       exact: true,
     });
     await trigger.waitFor({ state: "visible", timeout: 30_000 });
     await trigger.click();
-    const dialog = page.getByRole("dialog", { name: "智能体收件箱" });
+    const dialog = page.getByRole("dialog", { name: "Squad 团队协作" });
     await dialog.waitFor({ state: "visible" });
-    assert.equal(
-      await dialog.locator(".squad-panel").getAttribute("lang"),
-      "zh-CN",
-    );
+    assert.equal(await dialog.getAttribute("lang"), "zh-CN");
     for (const tab of [
       "分派计划",
       "待我处理",
@@ -431,9 +452,9 @@ async function assertChineseLocalization(browser, port) {
       "更新",
       "设置",
     ]) {
-      await dialog.getByRole("button", { name: tab, exact: true }).waitFor();
+      await dialog.getByRole("tab", { name: tab, exact: true }).waitFor();
     }
-    await dialog.getByRole("button", { name: "更新", exact: true }).click();
+    await dialog.getByRole("tab", { name: "更新", exact: true }).click();
     await dialog.getByText("当前版本", { exact: true }).waitFor();
     await dialog
       .getByText(`v${String(pluginManifest.version)}`, {
@@ -444,14 +465,14 @@ async function assertChineseLocalization(browser, port) {
       await dialog.locator(".squad-update-policy select").inputValue(),
       "NOTIFY",
     );
-    await dialog.getByRole("button", { name: "设置", exact: true }).click();
+    await dialog.getByRole("tab", { name: "设置", exact: true }).click();
     await dialog.getByText("节点身份", { exact: true }).waitFor();
-    await dialog.getByLabel("显示名称", { exact: true }).waitFor();
-    const policySelect = dialog.locator('select[name="autoExecute"]');
+    await dialog.locator('input[name="nodeDisplayName"]').waitFor();
+    const policySelect = dialog.locator('select[name="pairingAutoExecute"]');
     await policySelect.waitFor({ state: "visible" });
     assert.equal(
       await policySelect.locator('option[value="SAFE"]').textContent(),
-      "仅安全目标",
+      "仅匹配本机规则",
     );
   } finally {
     await context.close();
@@ -487,12 +508,40 @@ async function waitForDelegation(port, marker, direction, status) {
 
 async function assertInboxItem(page, tab, marker) {
   const dialog = await openInbox(page);
-  await dialog.getByRole("button", { name: tab, exact: true }).click();
+  await dialog.getByRole("tab", { name: tab, exact: true }).click();
   await dialog
     .getByText(new RegExp(marker, "u"))
     .first()
     .waitFor({ timeout: 20_000 });
   return dialog;
+}
+
+async function submitHumanTodo(dialog, title, response) {
+  const todo = dialog.locator("form.squad-todo").filter({ hasText: title });
+  await todo.waitFor({ state: "visible" });
+  await todo
+    .getByLabel("Response for this todo", { exact: true })
+    .fill(response);
+  const submit = todo.locator('button[type="submit"]');
+  assert.equal(
+    (await submit.textContent())?.trim(),
+    "Submit this item and continue",
+  );
+  await waitFor(`${title} submit control`, async () =>
+    (await submit.isEnabled()) ? true : undefined,
+  );
+  await submit.click();
+  const confirmation = dialog.getByRole("alertdialog", {
+    name: "Submit and resume execution?",
+    exact: true,
+  });
+  await confirmation.waitFor({ state: "visible" });
+  await confirmation
+    .getByRole("button", {
+      name: "Submit this item and continue",
+      exact: true,
+    })
+    .click();
 }
 
 async function allFiles(directory) {
@@ -659,16 +708,29 @@ async function main() {
     log("starting one Relay plus two real, isolated DSH Web Hosts");
     await relay.start();
     const health = await fetchJson(`${relayUrl}/squad/v1/health`);
-    assert.deepEqual(health, {
-      ok: true,
-      version: String(pluginManifest.version),
-      protocolVersions: [1, 2],
-    });
+    assert.deepEqual(
+      {
+        ok: health.ok,
+        version: health.version,
+        protocolVersions: health.protocolVersions,
+      },
+      {
+        ok: true,
+        version: String(pluginManifest.version),
+        protocolVersions: [1, 2],
+      },
+    );
+    assert.equal(
+      health.nodeId,
+      (await localState(relayPort)).identity.nodeId,
+      "Relay health must expose the host identity that Nodes pin",
+    );
     await alice.start();
     await bob.start();
 
     browser = await chromium.launch({ headless: true });
     const context = await browser.newContext({
+      locale: "en-US",
       viewport: { width: 1440, height: 960 },
     });
     let alicePage = await openDshPage(context, alicePort);
@@ -722,12 +784,20 @@ async function main() {
       "a Team Planner draft must not dispatch before local approval",
     );
     let dialog = await openInbox(alicePage);
-    await dialog.getByRole("button", { name: "Plans", exact: true }).click();
+    await dialog.getByRole("tab", { name: "Plans", exact: true }).click();
     await dialog
       .getByText("Team Planner smoke plan", { exact: true })
       .first()
       .waitFor();
     await dialog
+      .getByRole("button", { name: "Approve and dispatch", exact: true })
+      .click();
+    const planConfirmation = dialog.getByRole("alertdialog", {
+      name: "Dispatch this plan?",
+      exact: true,
+    });
+    await planConfirmation.waitFor({ state: "visible" });
+    await planConfirmation
       .getByRole("button", { name: "Approve and dispatch", exact: true })
       .click();
     const dispatchedPlan = await waitFor(
@@ -797,7 +867,7 @@ async function main() {
       },
     );
     dialog = await assertInboxItem(alicePage, "Sent", "AUTO_SKILL_FIXTURE");
-    await dialog.getByRole("button", { name: "Settings", exact: true }).click();
+    await dialog.getByRole("tab", { name: "Settings", exact: true }).click();
     await dialog
       .getByText("Bob Personal Agent", { exact: true })
       .first()
@@ -903,36 +973,30 @@ async function main() {
 
     bobPage = await openDshPage(context, bobPort, false);
     dialog = await openInbox(bobPage);
-    await dialog.getByRole("button", { name: "Settings", exact: true }).click();
+    await dialog.getByRole("tab", { name: "Settings", exact: true }).click();
     const alicePeerRow = dialog.locator(".squad-peer").filter({
       hasText: "Alice Personal Agent",
     });
     await alicePeerRow.waitFor({ state: "visible" });
-    assert.equal(await alicePeerRow.locator("select").inputValue(), "TRUSTED");
-    await dialog
-      .getByRole("button", { name: "Waiting for me", exact: true })
-      .click();
+    assert.equal(
+      await alicePeerRow.getByLabel("Automatic execution").inputValue(),
+      "TRUSTED",
+    );
+    await dialog.getByRole("tab", { name: /^Waiting for me(?:$|\s)/u }).click();
     await dialog
       .getByText("HUMAN_HANDOFF_FIXTURE", { exact: false })
       .first()
       .waitFor();
-    const checkboxes = dialog.locator('.squad-todo input[type="checkbox"]');
-    await waitFor("two Todo checkboxes", async () =>
-      (await checkboxes.count()) === 2 ? true : undefined,
-    );
-    await waitFor("both Todo checkboxes to be selected by default", async () =>
-      (await checkboxes.nth(0).isChecked()) &&
-      (await checkboxes.nth(1).isChecked())
+    await waitFor("two independent Todo response forms", async () =>
+      (await dialog.locator("form.squad-todo").count()) === 2
         ? true
         : undefined,
     );
-    await checkboxes.nth(1).uncheck();
-    await dialog
-      .getByLabel("Response for the receiving Agent")
-      .fill("Release notes approved locally.");
-    await dialog
-      .getByRole("button", { name: "Complete selected", exact: true })
-      .click();
+    await submitHumanTodo(
+      dialog,
+      "Approve release notes",
+      "Release notes approved locally.",
+    );
     const partiallyDone = await waitForDelegation(
       bobPort,
       "HUMAN_HANDOFF_FIXTURE",
@@ -1001,20 +1065,17 @@ async function main() {
     );
     bobPage = await openDshPage(context, bobPort, false);
     dialog = await openInbox(bobPage);
+    await dialog.getByRole("tab", { name: /^Waiting for me(?:$|\s)/u }).click();
     await dialog
       .getByText("HUMAN_HANDOFF_FIXTURE", { exact: false })
       .first()
       .waitFor();
-    assert.equal(
-      await dialog.locator('.squad-todo input[type="checkbox"]').count(),
-      1,
+    assert.equal(await dialog.locator("form.squad-todo").count(), 1);
+    await submitHumanTodo(
+      dialog,
+      "Approve release window",
+      "Release window approved locally.",
     );
-    await dialog
-      .getByLabel("Response for the receiving Agent")
-      .fill("Release window approved locally.");
-    await dialog
-      .getByRole("button", { name: "Complete selected", exact: true })
-      .click();
 
     const bobCompleted = await waitForDelegation(
       bobPort,
@@ -1112,7 +1173,7 @@ async function main() {
       .waitFor();
     assert.equal(
       await disabledPage
-        .getByRole("button", { name: "Agent Inbox", exact: true })
+        .getByRole("button", { name: "Squad", exact: true })
         .count(),
       0,
     );
