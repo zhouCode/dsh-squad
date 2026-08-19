@@ -64,13 +64,20 @@ export const zh = {
   "field.acceptanceCriteria": "验收条件",
   "field.shareableSummary": "可共享摘要",
   "field.waitingForMe": "待我处理",
-  "field.response": "给接收方智能体的回复",
-  "field.attachmentRefs": "附件引用（可选 JSON 数组）",
+  "field.response": "对此待办的回复",
+  "field.attachmentRefs": "附件引用",
+  "field.attachmentUrl": "HTTPS 下载地址",
+  "field.attachmentName": "文件名",
+  "field.attachmentSha256": "SHA-256",
+  "field.attachmentSize": "大小（字节）",
   "field.outputs": "输出",
   "field.sourceSummary": "来源摘要",
   "field.planItems": "计划项",
   "field.delegationId": "委派 ID",
   "action.completeSelected": "完成所选项",
+  "action.submitTodo": "提交此项并继续",
+  "action.addAttachment": "添加附件引用",
+  "action.removeAttachment": "移除此附件",
   "action.reject": "拒绝",
   "action.acceptAndRun": "接受并运行",
   "action.retryDelivery": "重试投递",
@@ -107,8 +114,8 @@ export const zh = {
   "confirm.acceptTask":
     "任务将交给本机 Agent，可能调用工具并产生外部副作用。任务：“{objective}”",
   "confirm.resumeTaskTitle": "提交回复并继续运行？",
-  "confirm.resumeTask":
-    "将完成所选的 {count} 个待办，并让本机 Agent 继续任务：“{objective}”",
+  "confirm.resumeTodo":
+    "将完成待办“{todo}”，并让本机 Agent 继续任务：“{objective}”",
   "confirm.switchModeTitle": "切换团队连接方式？",
   "confirm.switchMode":
     "节点会立即切换到“{mode}”。身份、组织和任务会保留，但新连接无法投递的任务将留在本地队列中。",
@@ -146,6 +153,13 @@ export const zh = {
   "confirm.enableAutomaticUpdatesAction": "启用自动更新",
   "confirm.installUpdateTitle": "安装 Squad 更新？",
   "loading.title": "正在载入 Squad 状态…",
+  "humanTodo.oneAtATime": "每条待办分别回复；提交一条不会默认完成其他待办。",
+  "humanTodo.responsePlaceholder": "填写决定、补充信息或操作结果…",
+  "humanTodo.attachments": "附件引用（可选）",
+  "humanTodo.attachmentHint":
+    "Squad 只传递可验证的 HTTPS 引用，不上传本机文件；最多 10 个，每个不超过 25 MiB。",
+  "humanTodo.noAttachments": "没有附件引用。",
+  "humanTodo.attachmentNumber": "附件 {number}",
   "plan.approvalHint":
     "确认后，每个计划项会通过现有签名委派发送；接收方仍按自己的 Peer 策略决定是否执行。",
   "plan.itemCount": "共 {count} 个计划项",
@@ -398,8 +412,15 @@ export const zh = {
   "policy.TRUSTED": "受信任目标",
   "error.requestFailed": "Squad 请求失败",
   "error.actionFailed": "操作失败",
-  "error.attachmentArray": "附件引用必须是 JSON 数组。",
-  "error.attachmentInvalid": "附件 JSON 无效。",
+  "error.humanInputRequired": "请填写回复或至少添加一个附件引用。",
+  "error.attachmentTooMany": "一次最多提交 10 个附件引用。",
+  "error.attachmentIncomplete": "请补全附件 {row} 的全部字段。",
+  "error.attachmentUrl": "附件 {row} 的下载地址无效。",
+  "error.attachmentHttps": "附件 {row} 必须使用 HTTPS 下载地址。",
+  "error.attachmentSha256": "附件 {row} 的 SHA-256 必须是 64 位十六进制值。",
+  "error.attachmentSize":
+    "附件 {row} 的大小必须是 0 至 25 MiB 的整数（字节）。",
+  "error.attachmentName": "附件 {row} 的文件名不能超过 240 个字符。",
   "error.pairingFailed": "配对失败",
   "error.pairingExportFailed": "无法生成配对包",
   "error.copyFailed": "无法复制配对包",
@@ -522,13 +543,20 @@ export const en = {
   "field.acceptanceCriteria": "Acceptance criteria",
   "field.shareableSummary": "Shareable summary",
   "field.waitingForMe": "Waiting for me",
-  "field.response": "Response for the receiving Agent",
-  "field.attachmentRefs": "Attachment references (optional JSON array)",
+  "field.response": "Response for this todo",
+  "field.attachmentRefs": "Attachment references",
+  "field.attachmentUrl": "HTTPS download URL",
+  "field.attachmentName": "File name",
+  "field.attachmentSha256": "SHA-256",
+  "field.attachmentSize": "Size in bytes",
   "field.outputs": "Outputs",
   "field.sourceSummary": "Source summary",
   "field.planItems": "Plan items",
   "field.delegationId": "Delegation ID",
   "action.completeSelected": "Complete selected",
+  "action.submitTodo": "Submit this item and continue",
+  "action.addAttachment": "Add attachment reference",
+  "action.removeAttachment": "Remove this attachment",
   "action.reject": "Reject",
   "action.acceptAndRun": "Accept and run",
   "action.retryDelivery": "Retry delivery",
@@ -565,8 +593,8 @@ export const en = {
   "confirm.acceptTask":
     "The local Agent may invoke tools and cause external side effects. Task: “{objective}”",
   "confirm.resumeTaskTitle": "Submit and resume execution?",
-  "confirm.resumeTask":
-    "This completes the {count} selected todos and lets the local Agent resume: “{objective}”",
+  "confirm.resumeTodo":
+    "This completes “{todo}” and lets the local Agent resume: “{objective}”",
   "confirm.switchModeTitle": "Switch the team connection mode?",
   "confirm.switchMode":
     "This Node switches to “{mode}” immediately. Its identity, organizations, and tasks are retained, but work the new connection cannot deliver remains queued locally.",
@@ -604,6 +632,15 @@ export const en = {
   "confirm.enableAutomaticUpdatesAction": "Enable automatic updates",
   "confirm.installUpdateTitle": "Install the Squad update?",
   "loading.title": "Loading Squad state…",
+  "humanTodo.oneAtATime":
+    "Respond to each todo separately. Submitting one never completes the others by default.",
+  "humanTodo.responsePlaceholder":
+    "Enter a decision, additional context, or the result of an action…",
+  "humanTodo.attachments": "Attachment references (optional)",
+  "humanTodo.attachmentHint":
+    "Squad passes verifiable HTTPS references; it does not upload local files. Up to 10 files, 25 MiB each.",
+  "humanTodo.noAttachments": "No attachment references.",
+  "humanTodo.attachmentNumber": "Attachment {number}",
   "plan.approvalHint":
     "Approval creates one existing signed delegation per item; each recipient still decides execution through their own Peer policy.",
   "plan.itemCount": "{count} plan items",
@@ -864,8 +901,19 @@ export const en = {
   "policy.TRUSTED": "Trusted objectives",
   "error.requestFailed": "Squad request failed",
   "error.actionFailed": "Action failed",
-  "error.attachmentArray": "Attachment references must be a JSON array.",
-  "error.attachmentInvalid": "Attachment JSON is invalid.",
+  "error.humanInputRequired":
+    "Enter a response or add at least one attachment reference.",
+  "error.attachmentTooMany":
+    "You can submit up to 10 attachment references at once.",
+  "error.attachmentIncomplete": "Complete every field in attachment {row}.",
+  "error.attachmentUrl": "Attachment {row} has an invalid download URL.",
+  "error.attachmentHttps": "Attachment {row} must use an HTTPS download URL.",
+  "error.attachmentSha256":
+    "Attachment {row} needs a 64-character hexadecimal SHA-256 value.",
+  "error.attachmentSize":
+    "Attachment {row} size must be an integer from 0 through 25 MiB, in bytes.",
+  "error.attachmentName":
+    "Attachment {row} file name cannot exceed 240 characters.",
   "error.pairingFailed": "Pairing failed",
   "error.pairingExportFailed": "Could not create pairing bundle",
   "error.copyFailed": "Could not copy the pairing bundle",

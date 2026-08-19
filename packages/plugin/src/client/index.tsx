@@ -26,6 +26,11 @@ import {
 } from "../shared/state.ts";
 import type { UpdateMode, UpdateSnapshot } from "../shared/updates.ts";
 import {
+  parseAttachmentDrafts,
+  type AttachmentDraft,
+  type AttachmentDraftError,
+} from "./human-input.ts";
+import {
   SQUAD_LOCALE_NS,
   en,
   formatConnectionStatus,
@@ -377,6 +382,36 @@ function useConfirmation(t: SquadTranslate): {
   };
 }
 
+let attachmentDraftSequence = 0;
+
+function createAttachmentDraft(): AttachmentDraft {
+  attachmentDraftSequence += 1;
+  return {
+    id: `attachment-${attachmentDraftSequence}`,
+    url: "",
+    sha256: "",
+    size: "",
+    name: "",
+  };
+}
+
+function describeAttachmentDraftError(
+  t: SquadTranslate,
+  error: AttachmentDraftError,
+  row?: number,
+): string {
+  const keys: Record<AttachmentDraftError, SquadLocaleKey> = {
+    TOO_MANY: "error.attachmentTooMany",
+    INCOMPLETE: "error.attachmentIncomplete",
+    INVALID_URL: "error.attachmentUrl",
+    HTTPS_REQUIRED: "error.attachmentHttps",
+    INVALID_SHA256: "error.attachmentSha256",
+    INVALID_SIZE: "error.attachmentSize",
+    INVALID_NAME: "error.attachmentName",
+  };
+  return t(keys[error], { row: row ?? "—" });
+}
+
 function SquadTrigger({
   wide,
   t,
@@ -638,14 +673,17 @@ function DelegationDetail({
   openSession: (id: string) => void;
   t: SquadTranslate;
 }) {
-  const [response, setResponse] = useState("");
-  const [attachmentJson, setAttachmentJson] = useState("");
-  const [selectedTodoIds, setSelectedTodoIds] = useState<string[]>([]);
+  const [todoResponses, setTodoResponses] = useState<Record<string, string>>(
+    {},
+  );
+  const [todoAttachments, setTodoAttachments] = useState<
+    Record<string, AttachmentDraft[]>
+  >({});
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string>();
   const { confirm, confirmation } = useConfirmation(t);
 
-  const act = async (action: string, body: unknown = {}) => {
+  const act = async (action: string, body: unknown = {}): Promise<boolean> => {
     setBusy(true);
     setError(undefined);
     try {
@@ -653,55 +691,94 @@ function DelegationDetail({
         method: "POST",
         body: JSON.stringify(body),
       });
-      setResponse("");
-      setAttachmentJson("");
       await refresh();
+      return true;
     } catch (cause) {
       setError(describeError(cause, t, "error.actionFailed"));
+      return false;
     } finally {
       setBusy(false);
     }
   };
 
   const openTodos = item.todos.filter((todo) => todo.status === "OPEN");
-  const openTodoKey = openTodos.map((todo) => todo.id).join(":");
   useEffect(() => {
-    setSelectedTodoIds((current) => {
-      const retained = current.filter((id) =>
-        openTodos.some((todo) => todo.id === id),
-      );
-      return retained.length > 0 ? retained : openTodos.map((todo) => todo.id);
-    });
-  }, [item.id, openTodoKey]);
-  const submitHumanInput = async () => {
-    try {
-      const attachmentRefs = attachmentJson.trim()
-        ? (JSON.parse(attachmentJson) as unknown)
-        : [];
-      if (!Array.isArray(attachmentRefs)) {
-        throw new Error(t("error.attachmentArray"));
-      }
-      if (
-        !(await confirm({
-          title: t("confirm.resumeTaskTitle"),
-          message: t("confirm.resumeTask", {
-            count: selectedTodoIds.length,
-            objective: item.objective,
-          }),
-          confirmLabel: t("action.completeSelected"),
-        }))
-      ) {
-        return;
-      }
-      await act("human-input", {
-        todoIds: selectedTodoIds,
-        ...(response.trim() ? { response } : {}),
-        attachmentRefs,
-      });
-    } catch (cause) {
+    setTodoResponses({});
+    setTodoAttachments({});
+  }, [item.id]);
+  const updateAttachment = (
+    todoId: string,
+    draftId: string,
+    field: Exclude<keyof AttachmentDraft, "id">,
+    value: string,
+  ) => {
+    setTodoAttachments((current) => ({
+      ...current,
+      [todoId]: (current[todoId] ?? []).map((draft) =>
+        draft.id === draftId ? { ...draft, [field]: value } : draft,
+      ),
+    }));
+  };
+  const addAttachment = (todoId: string) => {
+    setTodoAttachments((current) => ({
+      ...current,
+      [todoId]: [...(current[todoId] ?? []), createAttachmentDraft()],
+    }));
+  };
+  const removeAttachment = (todoId: string, draftId: string) => {
+    setTodoAttachments((current) => ({
+      ...current,
+      [todoId]: (current[todoId] ?? []).filter((draft) => draft.id !== draftId),
+    }));
+  };
+  const submitHumanInput = async (todoId: string, todoTitle: string) => {
+    const response = todoResponses[todoId]?.trim() ?? "";
+    const parsedAttachments = parseAttachmentDrafts(
+      todoAttachments[todoId] ?? [],
+    );
+    if (!parsedAttachments.ok) {
       setError(
-        cause instanceof Error ? cause.message : t("error.attachmentInvalid"),
+        describeAttachmentDraftError(
+          t,
+          parsedAttachments.error,
+          parsedAttachments.row,
+        ),
       );
+      return;
+    }
+    if (response.length === 0 && parsedAttachments.refs.length === 0) {
+      setError(t("error.humanInputRequired"));
+      return;
+    }
+    if (
+      !(await confirm({
+        title: t("confirm.resumeTaskTitle"),
+        message: t("confirm.resumeTodo", {
+          todo: todoTitle,
+          objective: item.objective,
+        }),
+        confirmLabel: t("action.submitTodo"),
+      }))
+    ) {
+      return;
+    }
+    if (
+      await act("human-input", {
+        todoIds: [todoId],
+        ...(response ? { response } : {}),
+        attachmentRefs: parsedAttachments.refs,
+      })
+    ) {
+      setTodoResponses((current) => {
+        const next = { ...current };
+        delete next[todoId];
+        return next;
+      });
+      setTodoAttachments((current) => {
+        const next = { ...current };
+        delete next[todoId];
+        return next;
+      });
     }
   };
   const awaitingAcceptance =
@@ -809,55 +886,160 @@ function DelegationDetail({
       {openTodos.length > 0 ? (
         <section>
           <h3>{t("field.waitingForMe")}</h3>
-          {openTodos.map((todo) => (
-            <div className="squad-todo" key={todo.id}>
-              <label className="squad-todo-select">
-                <input
-                  type="checkbox"
-                  checked={selectedTodoIds.includes(todo.id)}
-                  onChange={(event) => {
-                    const checked = event.currentTarget.checked;
-                    setSelectedTodoIds((current) =>
-                      checked
-                        ? [...new Set([...current, todo.id])]
-                        : current.filter((id) => id !== todo.id),
-                    );
-                  }}
-                />
-                <strong>{todo.title}</strong>
-              </label>
-              <p>{todo.blockingReason}</p>
-              {todo.instructions ? <p>{todo.instructions}</p> : null}
-            </div>
-          ))}
-          <label>
-            {t("field.response")}
-            <textarea
-              value={response}
-              rows={5}
-              onChange={(event) => setResponse(event.currentTarget.value)}
-            />
-          </label>
-          <label>
-            {t("field.attachmentRefs")}
-            <textarea
-              value={attachmentJson}
-              rows={4}
-              placeholder='[{"url":"https://…","sha256":"…","size":123,"name":"evidence.txt"}]'
-              onChange={(event) => setAttachmentJson(event.currentTarget.value)}
-            />
-          </label>
+          <p className="squad-muted">{t("humanTodo.oneAtATime")}</p>
+          {openTodos.map((todo) => {
+            const response = todoResponses[todo.id] ?? "";
+            const attachments = todoAttachments[todo.id] ?? [];
+            return (
+              <form
+                className="squad-todo"
+                key={todo.id}
+                onSubmit={(event) => {
+                  event.preventDefault();
+                  void submitHumanInput(todo.id, todo.title);
+                }}
+              >
+                <header>
+                  <strong>{todo.title}</strong>
+                </header>
+                <p>{todo.blockingReason}</p>
+                {todo.instructions ? <p>{todo.instructions}</p> : null}
+                <label>
+                  {t("field.response")}
+                  <textarea
+                    value={response}
+                    rows={4}
+                    maxLength={50_000}
+                    placeholder={t("humanTodo.responsePlaceholder")}
+                    onChange={(event) =>
+                      setTodoResponses((current) => ({
+                        ...current,
+                        [todo.id]: event.currentTarget.value,
+                      }))
+                    }
+                  />
+                </label>
+                <div className="squad-attachment-editor">
+                  <header>
+                    <div>
+                      <strong>{t("humanTodo.attachments")}</strong>
+                      <small>{t("humanTodo.attachmentHint")}</small>
+                    </div>
+                    <button
+                      type="button"
+                      className="squad-secondary"
+                      disabled={busy || attachments.length >= 10}
+                      onClick={() => addAttachment(todo.id)}
+                    >
+                      {t("action.addAttachment")}
+                    </button>
+                  </header>
+                  {attachments.length === 0 ? (
+                    <p className="squad-muted">
+                      {t("humanTodo.noAttachments")}
+                    </p>
+                  ) : null}
+                  {attachments.map((draft, index) => (
+                    <fieldset key={draft.id}>
+                      <legend>
+                        {t("humanTodo.attachmentNumber", {
+                          number: index + 1,
+                        })}
+                      </legend>
+                      <div className="squad-attachment-fields">
+                        <label>
+                          {t("field.attachmentUrl")}
+                          <input
+                            type="url"
+                            required
+                            value={draft.url}
+                            placeholder="https://…"
+                            onChange={(event) =>
+                              updateAttachment(
+                                todo.id,
+                                draft.id,
+                                "url",
+                                event.currentTarget.value,
+                              )
+                            }
+                          />
+                        </label>
+                        <label>
+                          {t("field.attachmentName")}
+                          <input
+                            required
+                            maxLength={240}
+                            value={draft.name}
+                            onChange={(event) =>
+                              updateAttachment(
+                                todo.id,
+                                draft.id,
+                                "name",
+                                event.currentTarget.value,
+                              )
+                            }
+                          />
+                        </label>
+                        <label>
+                          {t("field.attachmentSha256")}
+                          <input
+                            required
+                            pattern="[a-fA-F0-9]{64}"
+                            maxLength={64}
+                            value={draft.sha256}
+                            onChange={(event) =>
+                              updateAttachment(
+                                todo.id,
+                                draft.id,
+                                "sha256",
+                                event.currentTarget.value,
+                              )
+                            }
+                          />
+                        </label>
+                        <label>
+                          {t("field.attachmentSize")}
+                          <input
+                            type="number"
+                            required
+                            min={0}
+                            max={25 * 1024 * 1024}
+                            step={1}
+                            value={draft.size}
+                            onChange={(event) =>
+                              updateAttachment(
+                                todo.id,
+                                draft.id,
+                                "size",
+                                event.currentTarget.value,
+                              )
+                            }
+                          />
+                        </label>
+                      </div>
+                      <button
+                        type="button"
+                        className="squad-link-button squad-danger-text"
+                        disabled={busy}
+                        onClick={() => removeAttachment(todo.id, draft.id)}
+                      >
+                        {t("action.removeAttachment")}
+                      </button>
+                    </fieldset>
+                  ))}
+                </div>
+                <button
+                  type="submit"
+                  disabled={
+                    busy || (!response.trim() && attachments.length === 0)
+                  }
+                >
+                  {t("action.submitTodo")}
+                </button>
+              </form>
+            );
+          })}
           <div className="squad-actions">
-            <button
-              disabled={
-                busy ||
-                selectedTodoIds.length === 0 ||
-                (!response.trim() && !attachmentJson.trim())
-              }
-              onClick={() => void submitHumanInput()}
-            >
-              {t("action.completeSelected")}
-            </button>
             <button
               className="squad-danger"
               disabled={busy}
@@ -3161,6 +3343,7 @@ const css = `
 .squad-diagnostics{overflow:auto;padding:22px 26px;flex:1}.squad-diagnostics>header{display:flex;align-items:flex-start;justify-content:space-between;gap:16px}.squad-diagnostics>header h2{margin:0}.squad-diagnostics button{border:0;border-radius:9px;padding:8px 12px;background:#315ee8;color:#fff;cursor:pointer}.squad-diagnostics button:disabled{opacity:.5}.squad-diagnostic-grid{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:12px;margin-top:18px}.squad-diagnostic-grid article{min-width:0;border:1px solid var(--dsw-alias-border-l2,#ddd);border-radius:13px;padding:14px}.squad-diagnostic-grid article>header{display:flex;align-items:center;justify-content:space-between;gap:10px}.squad-diagnostic-grid h3{margin:0;font-size:14px}.squad-diagnostic-grid code{display:block;margin:10px 0;overflow-wrap:anywhere;font-size:11px}.squad-diagnostic-grid p,.squad-diagnostic-grid dl{font-size:12px}.squad-diagnostic-grid dl div{display:grid;gap:3px}.squad-diagnostic-grid dt{color:var(--dsw-alias-label-secondary,#666)}.squad-diagnostic-grid dd{margin:0}.squad-connection-unreachable{background:#fde4e1;color:#a52a24}.squad-connection-unverified{background:#fff0c7;color:#755400}.squad-connection-connected,.squad-connection-ready,.squad-connection-serving{background:#dff5e6;color:#176c35}@media(max-width:800px){.squad-diagnostic-grid{grid-template-columns:1fr}.squad-diagnostics{padding:16px}}
 .squad-settings>.squad-peer{display:grid;grid-template-columns:1fr;gap:8px;margin:10px 0;padding:14px;border:1px solid var(--dsw-alias-border-l2,#ddd);border-radius:12px}.squad-peer>header{display:flex;align-items:flex-start;justify-content:space-between;gap:12px}.squad-peer>header span{display:block;margin-top:4px;color:var(--dsw-alias-label-secondary,#666);font-size:12px}.squad-peer-disabled{opacity:.72}.squad-peer details,.squad-advanced-pairing{margin-top:8px}.squad-peer summary,.squad-advanced-pairing summary{cursor:pointer;color:#315ee8;font-size:13px}.squad-settings .squad-secondary{border:1px solid var(--dsw-alias-border-l2,#ccc);background:transparent;color:inherit}.squad-settings button:disabled{opacity:.5;cursor:not-allowed}.squad-pairing{margin-top:24px;padding-top:2px}.squad-pairing-grid{display:grid;grid-template-columns:1fr 1fr;gap:12px}.squad-pairing-grid>div,.squad-pairing-grid>form{min-width:0;border:1px solid var(--dsw-alias-border-l2,#ddd);border-radius:12px;padding:14px}.squad-pairing-grid h4{margin:0 0 7px}.squad-pairing-result{display:grid;gap:8px;margin-top:12px}.squad-pairing-result textarea{font-family:monospace;font-size:11px}.squad-advanced-pairing{margin:20px 0;padding:14px;border:1px dashed var(--dsw-alias-border-l2,#ccc);border-radius:12px}@media(max-width:700px){.squad-pairing-grid{grid-template-columns:1fr}}
 .squad-confirm-layer{position:fixed;z-index:1100;inset:0;display:grid;place-items:center;padding:20px;background:rgba(10,14,22,.52);pointer-events:auto}.squad-confirm-dialog{box-sizing:border-box;width:min(460px,100%);padding:22px;border:1px solid var(--dsw-alias-border-l2,#ddd);border-radius:15px;background:var(--dsw-specific-dialog-fill,#fff);color:var(--dsw-alias-label-primary,#151515);box-shadow:0 18px 60px rgba(0,0,0,.3)}.squad-confirm-dialog h2{margin:0 0 10px;font-size:20px}.squad-confirm-dialog p{line-height:1.55;white-space:pre-wrap}.squad-confirm-dialog button{border:0;border-radius:9px;padding:9px 13px;background:#315ee8;color:#fff;cursor:pointer}.squad-confirm-dialog .squad-secondary{border:1px solid var(--dsw-alias-border-l2,#ccc);background:transparent;color:inherit}.squad-confirm-dialog .squad-danger{background:#b13c35;color:#fff}
+.squad-detail input{box-sizing:border-box;width:100%;border:1px solid var(--dsw-alias-border-l2,#ccc);border-radius:9px;background:transparent;color:inherit;padding:9px;font:inherit}.squad-todo{border:1px solid var(--dsw-alias-border-l2,#ddd);border-left:3px solid #d59b1b;border-radius:10px;padding:14px;margin:12px 0}.squad-todo>header{display:flex;align-items:center;justify-content:space-between;gap:10px}.squad-attachment-editor{margin:14px 0;padding-top:12px;border-top:1px solid var(--dsw-alias-border-l2,#ddd)}.squad-attachment-editor>header{display:flex;align-items:flex-start;justify-content:space-between;gap:12px}.squad-attachment-editor>header div{display:grid;gap:4px}.squad-attachment-editor small{display:block;color:var(--dsw-alias-label-secondary,#666);line-height:1.4}.squad-attachment-editor fieldset{margin:12px 0;padding:10px 12px;border:1px solid var(--dsw-alias-border-l2,#ddd);border-radius:10px}.squad-attachment-editor legend{padding:0 5px;font-size:12px;font-weight:600}.squad-attachment-fields{display:grid;grid-template-columns:minmax(0,1.4fr) minmax(130px,.7fr);gap:0 10px}.squad-detail .squad-secondary{border:1px solid var(--dsw-alias-border-l2,#ccc);background:transparent;color:inherit}.squad-detail .squad-danger-text{color:#b13c35}.squad-todo button[type=submit]{margin-top:4px}@media(max-width:700px){.squad-attachment-editor>header,.squad-attachment-fields{display:grid;grid-template-columns:1fr}.squad-attachment-editor>header button{justify-self:start}}
 `;
 
 function installStyles(): () => void {
