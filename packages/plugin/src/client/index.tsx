@@ -303,6 +303,18 @@ const tabKeys = {
   settings: "tab.settings",
 } as const satisfies Record<Tab, SquadLocaleKey>;
 
+const tabGroups: readonly {
+  label: SquadLocaleKey;
+  tabs: readonly Tab[];
+}[] = [
+  {
+    label: "nav.work",
+    tabs: ["overview", "waiting", "running", "sent", "completed", "plans"],
+  },
+  { label: "nav.team", tabs: ["organizations"] },
+  { label: "nav.system", tabs: ["updates", "settings"] },
+];
+
 function localAttention(state: LocalState): SquadAttentionSummary {
   return summarizeAttention({
     revision: state.revision,
@@ -1956,6 +1968,7 @@ function SquadPanel({
   const selected = items.find((item) => item.id === selectedId) ?? items[0];
   const plans = state?.plans ?? [];
   const selectedPlan = plans.find((plan) => plan.id === selectedId) ?? plans[0];
+  const attention = state === undefined ? undefined : localAttention(state);
   const locale = getLocale() === "zh" ? "zh-CN" : "en";
   if (!open) return null;
   return (
@@ -2001,51 +2014,65 @@ function SquadPanel({
             t={t}
           />
         ) : null}
-        {!state?.setup.required ? (
-          <nav className="squad-tabs" role="tablist">
-            {(
-              [
-                "overview",
-                "plans",
-                "waiting",
-                "running",
-                "sent",
-                "completed",
-                "organizations",
-                "updates",
-                "settings",
-              ] as const
-            ).map((value) => (
-              <button
-                key={value}
-                className={tab === value ? "active" : ""}
-                onClick={() => {
-                  setTab(value);
-                  setSelectedId(undefined);
-                }}
-                role="tab"
-                aria-selected={tab === value}
+        {state && !state.setup.required ? (
+          <nav className="squad-tabs" aria-label={t("nav.label")}>
+            {tabGroups.map((group) => (
+              <div
+                className="squad-tab-group"
+                role="tablist"
+                aria-label={t(group.label)}
+                key={group.label}
               >
-                {t(tabKeys[value])}
-                {state &&
-                value === "waiting" &&
-                localAttention(state).waitingHuman > 0 ? (
-                  <span className="squad-tab-count">
-                    {localAttention(state).waitingHuman}
-                  </span>
-                ) : null}
-                {state &&
-                value === "organizations" &&
-                localAttention(state).pendingJoinRequests > 0 ? (
-                  <span className="squad-tab-count">
-                    {localAttention(state).pendingJoinRequests}
-                  </span>
-                ) : null}
-              </button>
+                <span className="squad-tab-group-label">{t(group.label)}</span>
+                {group.tabs.map((value) => (
+                  <button
+                    key={value}
+                    className={tab === value ? "active" : ""}
+                    onClick={() => {
+                      setTab(value);
+                      setSelectedId(undefined);
+                    }}
+                    role="tab"
+                    aria-selected={tab === value}
+                    tabIndex={tab === value ? 0 : -1}
+                  >
+                    {t(tabKeys[value])}
+                    {value === "waiting" &&
+                    attention !== undefined &&
+                    attention.waitingHuman > 0 ? (
+                      <span className="squad-tab-count">
+                        {attention.waitingHuman}
+                      </span>
+                    ) : null}
+                    {value === "organizations" &&
+                    attention !== undefined &&
+                    attention.pendingJoinRequests > 0 ? (
+                      <span className="squad-tab-count">
+                        {attention.pendingJoinRequests}
+                      </span>
+                    ) : null}
+                  </button>
+                ))}
+              </div>
             ))}
           </nav>
         ) : null}
-        {error ? <p className="squad-error squad-load-error">{error}</p> : null}
+        {state === undefined ? (
+          <div className="squad-loading" role="status">
+            <span className="squad-spinner" aria-hidden="true" />
+            <strong>{t("loading.title")}</strong>
+            {error ? (
+              <>
+                <p className="squad-error">{error}</p>
+                <button onClick={() => void refresh()}>
+                  {t("action.retry")}
+                </button>
+              </>
+            ) : null}
+          </div>
+        ) : error ? (
+          <p className="squad-error squad-load-error">{error}</p>
+        ) : null}
         {state?.setup.required ? null : tab === "overview" && state ? (
           <Overview
             state={state}
@@ -2146,6 +2173,7 @@ const css = `
 @media(max-width:700px){.squad-onboarding{padding:10px 16px 24px}.squad-mode-picker{grid-template-columns:1fr}.squad-node-setup>header h2{font-size:22px}}
 .squad-updates{overflow:auto;padding:22px 26px;max-width:760px}.squad-updates>header{display:flex;align-items:flex-start;justify-content:space-between;gap:16px}.squad-updates h2{margin:0}.squad-updates h3{font-size:14px;margin:24px 0 8px}.squad-updates label{display:grid;gap:6px;margin:12px 0;font-size:13px}.squad-updates select{box-sizing:border-box;width:100%;max-width:360px;border:1px solid var(--dsw-alias-border-l2,#ccc);border-radius:9px;background:var(--dsw-specific-dialog-fill,#fff);color:inherit;padding:9px;font:inherit}.squad-updates button{border:0;border-radius:9px;padding:8px 12px;background:#315ee8;color:#fff;cursor:pointer}.squad-updates button:disabled{opacity:.5;cursor:not-allowed}.squad-updates a{color:#315ee8}.squad-update-summary{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:10px;margin:18px 0}.squad-update-summary>div{display:grid;gap:5px;padding:13px;border:1px solid var(--dsw-alias-border-l2,#ddd);border-radius:11px}.squad-update-summary span{font-size:11px;color:var(--dsw-alias-label-secondary,#666)}.squad-update-summary strong{overflow-wrap:anywhere}.squad-update-status-failed,.squad-update-status-rolled_back{background:#fde4e1;color:#a52a24}.squad-update-status-available,.squad-update-status-requested,.squad-update-status-blocked{background:#fff0c7;color:#755400}.squad-update-status-installed,.squad-update-status-up_to_date{background:#dff5e6;color:#176c35}@media(max-width:700px){.squad-updates{padding:16px}.squad-update-summary{grid-template-columns:1fr}}
 .squad-trigger{position:relative}.squad-trigger-badge,.squad-tab-count{display:inline-flex;align-items:center;justify-content:center;box-sizing:border-box;min-width:18px;height:18px;padding:0 5px;border-radius:999px;background:#b13c35;color:#fff;font-size:10px;font-weight:700;line-height:1}.squad-trigger:not(.squad-trigger-wide) .squad-trigger-badge{position:absolute;right:0;top:-2px}.squad-tabs button{display:inline-flex;align-items:center;gap:6px}.squad-tabs button.active .squad-tab-count{background:#315ee8}.squad-overview{overflow:auto;padding:24px 28px;flex:1}.squad-overview>header h2{margin:4px 0}.squad-attention-grid{display:grid;grid-template-columns:repeat(4,minmax(0,1fr));gap:10px;margin:20px 0}.squad-attention-grid button{display:grid;gap:5px;text-align:left;border:1px solid var(--dsw-alias-border-l2,#ddd);border-radius:12px;background:transparent;color:inherit;padding:14px;cursor:pointer}.squad-attention-grid button.needs-attention{border-color:#d59b1b;background:#fff8e5;color:#5d470a}.squad-attention-grid strong{font-size:24px}.squad-attention-grid span{font-size:12px;color:var(--dsw-alias-label-secondary,#666)}.squad-next-step{margin-top:18px;padding:18px;border:1px solid var(--dsw-alias-border-l2,#ddd);border-radius:14px}.squad-next-step h3{margin:0 0 7px}.squad-next-step code{display:block;padding:10px;border-radius:9px;background:var(--dsw-alias-interactive-bg-hover,#f4f5f7);overflow-wrap:anywhere}.squad-next-step button,.squad-update-callout{border:0;border-radius:9px;padding:8px 12px;margin-top:12px;background:#315ee8;color:#fff;cursor:pointer}.squad-update-callout{display:block;width:100%;text-align:left;background:#fff0c7;color:#755400}@media(max-width:700px){.squad-attention-grid{grid-template-columns:1fr 1fr}.squad-overview{padding:18px 16px}}
+.squad-tabs{align-items:stretch}.squad-tab-group{display:flex;align-items:center;gap:4px;padding-right:10px;border-right:1px solid var(--dsw-alias-border-l2,#ddd)}.squad-tab-group:last-child{border-right:0}.squad-tab-group-label{align-self:center;color:var(--dsw-alias-label-secondary,#666);font-size:10px;letter-spacing:.08em;text-transform:uppercase;white-space:nowrap}.squad-loading{display:grid;place-items:center;align-content:center;gap:12px;min-height:260px;flex:1;padding:24px;text-align:center}.squad-loading button{border:0;border-radius:9px;padding:8px 12px;background:#315ee8;color:#fff;cursor:pointer}.squad-spinner{width:24px;height:24px;border:3px solid var(--dsw-alias-border-l2,#ddd);border-top-color:#315ee8;border-radius:50%;animation:squad-spin .8s linear infinite}@keyframes squad-spin{to{transform:rotate(360deg)}}@media(max-width:700px){.squad-tab-group-label{display:none}.squad-tab-group{padding-right:4px}}
 `;
 
 function installStyles(): () => void {

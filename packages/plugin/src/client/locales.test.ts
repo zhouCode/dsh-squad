@@ -27,8 +27,8 @@ function translator(dictionary: Record<string, string>): SquadTranslate {
 describe("Squad locale dictionaries", () => {
   it("keeps Simplified Chinese and English key-complete", () => {
     expect(Object.keys(en).sort()).toEqual(Object.keys(zh).sort());
-    expect(zh["inbox.title"]).toBe("智能体收件箱");
-    expect(en["inbox.title"]).toBe("Agent Inbox");
+    expect(zh["inbox.title"]).toBe("Squad 团队协作");
+    expect(en["inbox.title"]).toBe("Squad");
   });
 
   it("localizes protocol enums without changing their stored values", () => {

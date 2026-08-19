@@ -14,9 +14,13 @@ export const SQUAD_LOCALE_NS = "dsh-squad";
 
 export const zh = {
   "html.lang": "zh-CN",
-  "inbox.title": "智能体收件箱",
-  "inbox.close": "关闭智能体收件箱",
-  "inbox.attentionLabel": "智能体收件箱，有 {count} 项需要处理",
+  "inbox.title": "Squad 团队协作",
+  "inbox.close": "关闭 Squad",
+  "inbox.attentionLabel": "Squad 有 {count} 项需要处理",
+  "nav.label": "Squad 功能导航",
+  "nav.work": "工作",
+  "nav.team": "团队",
+  "nav.system": "系统",
   "tab.overview": "概览",
   "tab.plans": "分派计划",
   "tab.waiting": "待我处理",
@@ -82,6 +86,8 @@ export const zh = {
   "action.enableMember": "启用成员",
   "action.disableMember": "禁用成员",
   "action.copyPrompt": "复制示例",
+  "action.retry": "重试",
+  "loading.title": "正在载入 Squad 状态…",
   "plan.approvalHint":
     "确认后，每个计划项会通过现有签名委派发送；接收方仍按自己的 Peer 策略决定是否执行。",
   "plan.itemCount": "共 {count} 个计划项",
@@ -323,9 +329,13 @@ export type SquadLocaleKey = keyof typeof zh;
 
 export const en = {
   "html.lang": "en",
-  "inbox.title": "Agent Inbox",
-  "inbox.close": "Close Agent Inbox",
-  "inbox.attentionLabel": "Agent Inbox, {count} items need attention",
+  "inbox.title": "Squad",
+  "inbox.close": "Close Squad",
+  "inbox.attentionLabel": "Squad, {count} items need attention",
+  "nav.label": "Squad navigation",
+  "nav.work": "Work",
+  "nav.team": "Team",
+  "nav.system": "System",
   "tab.overview": "Overview",
   "tab.plans": "Plans",
   "tab.waiting": "Waiting for me",
@@ -393,6 +403,8 @@ export const en = {
   "action.enableMember": "Enable member",
   "action.disableMember": "Disable member",
   "action.copyPrompt": "Copy example",
+  "action.retry": "Retry",
+  "loading.title": "Loading Squad state…",
   "plan.approvalHint":
     "Approval creates one existing signed delegation per item; each recipient still decides execution through their own Peer policy.",
   "plan.itemCount": "{count} plan items",
