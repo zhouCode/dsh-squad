@@ -118,6 +118,30 @@ describe("one-step team join package", () => {
           displayName: "Charlie",
         }),
       ).rejects.toMatchObject({ code: "INVITATION_ALREADY_USED" });
+
+      const request = ownerDirectory?.[0]?.pendingJoinRequests[0];
+      if (request === undefined) throw new Error("missing Bob join request");
+      await alice.approveOrganizationJoin(
+        organization.organizationId,
+        request.requestId,
+      );
+      const bobBundle = (await bob.relayClient?.organizations())?.[0];
+      if (bobBundle === undefined) throw new Error("missing Bob directory");
+      bob.database.applyOrganizationBundle(bobBundle, bob.identity.nodeId);
+      await bob.selectSessionOrganization(
+        "leave-session",
+        organization.organizationId,
+      );
+      expect(bob.sessionOrganization("leave-session")?.organizationId).toBe(
+        organization.organizationId,
+      );
+
+      await bob.leaveOrganization(organization.organizationId);
+      expect(bob.sessionOrganization("leave-session")).toBeUndefined();
+      expect(bob.localState().organizations[0]).toMatchObject({
+        organizationId: organization.organizationId,
+        membershipStatus: "DISABLED",
+      });
     } finally {
       await Promise.all([alice.close(), bob.close(), charlie.close()]);
       await http.close();

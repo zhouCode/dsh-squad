@@ -246,16 +246,24 @@ export function applyOrganizationCertificate(
         "owner transfer is not supported by this directory version",
       );
     }
-    if (issuer.role === "MEMBER") {
-      throw new Error("members cannot change the organization directory");
-    }
-    if (issuer.role === "ADMIN") {
-      if (
-        issuer.membershipId === certificate.membershipId ||
-        certificate.role !== "MEMBER" ||
-        (previous !== undefined && previous.role !== "MEMBER")
-      ) {
-        throw new Error("admins may only manage ordinary members");
+    const selfDeparture =
+      previous !== undefined &&
+      issuer.membershipId === certificate.membershipId &&
+      previous.status === "ACTIVE" &&
+      certificate.status === "DISABLED" &&
+      certificate.role === previous.role;
+    if (!selfDeparture) {
+      if (issuer.role === "MEMBER") {
+        throw new Error("members cannot change the organization directory");
+      }
+      if (issuer.role === "ADMIN") {
+        if (
+          issuer.membershipId === certificate.membershipId ||
+          certificate.role !== "MEMBER" ||
+          (previous !== undefined && previous.role !== "MEMBER")
+        ) {
+          throw new Error("admins may only manage ordinary members");
+        }
       }
     }
     if (previous === undefined && certificate.role !== "MEMBER") {

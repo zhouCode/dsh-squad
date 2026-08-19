@@ -525,6 +525,16 @@ export function createHttpHandler(squad: SquadService) {
         reply(res, 200, { ok: true });
         return;
       }
+      const leaveOrganization =
+        /^\/squad\/v1\/local\/organizations\/([0-9a-f-]{36})\/leave$/u.exec(
+          url.pathname,
+        );
+      if (req.method === "POST" && leaveOrganization?.[1] !== undefined) {
+        await readJson(req, 1_024);
+        await squad.leaveOrganization(leaveOrganization[1]);
+        reply(res, 200, { ok: true });
+        return;
+      }
       if (
         req.method === "POST" &&
         url.pathname === "/squad/v1/local/session-organization"

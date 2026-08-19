@@ -1450,6 +1450,30 @@ export class SquadService extends Service {
     });
   }
 
+  async leaveOrganization(organizationId: string): Promise<void> {
+    await this.syncOrganizations();
+    const directory = this.database.organizationDirectory(organizationId);
+    if (directory === undefined) throw new Error("unknown organization");
+    const self = this.selfOrganizationMember(directory);
+    if (self.role === "OWNER") {
+      throw new Error("the Owner must transfer ownership before leaving");
+    }
+    const certificate = this.memberCertificate(directory, {
+      membershipId: self.membershipId,
+      memberRevision: self.memberRevision + 1,
+      nodeId: self.nodeId,
+      publicKey: self.publicKey,
+      displayName: self.displayName,
+      role: self.role,
+      status: "DISABLED",
+    });
+    await this.requireRelayClient().leaveOrganization(
+      organizationId,
+      certificate,
+    );
+    await this.syncOrganizations();
+  }
+
   updateOrganizationMemberPolicy(
     organizationId: string,
     membershipId: string,

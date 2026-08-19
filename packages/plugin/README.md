@@ -64,6 +64,8 @@ The native WebUI exposes `Agent Inbox` / `智能体收件箱` for real-time Node
 
 Owners and Admins can inspect invitation status and revoke unused invitations. One-time tokens appear only when created; invitation history exposes neither tokens nor token hashes.
 
+Active Admins and Members can leave from the WebUI through a self-signed directory event. Local Session contexts for that organization are cleared automatically and audit history remains intact. Owners must transfer ownership before leaving.
+
 After dispatch, the plan rolls up live execution progress and collects only the result summaries and outputs explicitly published by recipients; each item links to its full delegation record.
 
 Chat triggering stays unobtrusive: use natural language or `@member`, or use namespaced `/squad-*` commands for tasks, plans, status, organizations, members, invitations, and roles. They are discovered through DSH's native `/` menu; this package adds no command buttons.

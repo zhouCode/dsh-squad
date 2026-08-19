@@ -1191,6 +1191,13 @@ export class SquadDatabase {
           request.requestedAt,
         );
       }
+      if (bundle.selfStatus !== "ACTIVE") {
+        this.#db
+          .prepare(
+            "DELETE FROM session_organizations WHERE organization_id = ?",
+          )
+          .run(bundle.document.organizationId);
+      }
     });
     return changed;
   }

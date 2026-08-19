@@ -9,6 +9,7 @@ All notable changes to this project are documented in this file. The format is b
 - Team Planner now rolls up live execution state, result summaries, and published outputs for every dispatched item, with direct navigation to its full delegation record.
 - Organization Owners and Admins can explicitly reject pending join requests; rejected applicants require a new one-time invitation before reapplying.
 - Organization invitation history exposes active, used, expired, and revoked states without returning secret tokens or hashes, and managers can revoke unused invitations.
+- Active Admins and Members can leave an organization with a self-signed directory event. Local Session contexts are cleared while membership history remains auditable; Owners must transfer ownership first.
 
 ## [0.7.0] - 2026-08-19
 

@@ -112,6 +112,7 @@ export const zh = {
   "action.viewDelegation": "查看完整任务",
   "action.createOrganization": "创建组织",
   "action.joinOrganization": "申请加入",
+  "action.leaveOrganization": "退出组织",
   "action.createInvitation": "创建一次性邀请",
   "action.revokeInvitation": "撤销邀请",
   "action.createJoinPackage": "为新节点创建加入包",
@@ -160,6 +161,9 @@ export const zh = {
   "confirm.revokeInvitationTitle": "撤销此邀请？",
   "confirm.revokeInvitation":
     "撤销后，尚未使用的邀请将立即失效；已经完成的加入申请不会受到影响。",
+  "confirm.leaveOrganizationTitle": "退出此组织？",
+  "confirm.leaveOrganization":
+    "退出“{organization}”后，本节点将不再出现在活动成员目录中，也无法通过该组织收发新任务；历史记录会保留。",
   "confirm.changeRoleTitle": "更改组织角色？",
   "confirm.changeRole":
     "将“{name}”在“{organization}”中的角色改为“{role}”。管理员可以邀请、批准和管理普通成员。",
@@ -449,6 +453,7 @@ export const zh = {
   "organizations.localPolicy": "本机接收策略",
   "organizations.directoryRevision": "签名目录修订 {revision}",
   "organizations.pendingHint": "加入申请已发送，等待 Owner 或 Admin 批准。",
+  "organizations.ownerLeaveHint": "Owner 需要先转让所有权，才能退出组织。",
   "organizations.securityHint":
     "组织目录由成员签名并在本机验证；Relay 只中继目录和加密身份边界，不获得本机 Agent 能力。",
   "organizations.relayRequired": "组织目录需要 Relay 连接",
@@ -573,6 +578,8 @@ export const zh = {
   "errorCode.ORGANIZATION_INVITATION_ALREADY_USED": "组织邀请已经使用",
   "errorCode.ORGANIZATION_INVITATION_EXPIRED": "组织邀请已过期",
   "errorCode.ORGANIZATION_INVITATION_NOT_FOUND": "找不到组织邀请",
+  "errorCode.OWNER_TRANSFER_REQUIRED": "Owner 必须先转让所有权",
+  "errorCode.LEAVE_CERTIFICATE_MISMATCH": "退出组织的签名凭证不匹配",
   "errorCode.INVALID_RESPONSE": "Relay 返回了无效响应",
   "summary.executionInterrupted":
     "接收方 DSH 在执行期间停止。可能已经发生的外部副作用不会自动重放。",
@@ -690,6 +697,7 @@ export const en = {
   "action.viewDelegation": "View full task",
   "action.createOrganization": "Create organization",
   "action.joinOrganization": "Request to join",
+  "action.leaveOrganization": "Leave organization",
   "action.createInvitation": "Create one-time invitation",
   "action.revokeInvitation": "Revoke invitation",
   "action.createJoinPackage": "Create join package for a new Node",
@@ -738,6 +746,9 @@ export const en = {
   "confirm.revokeInvitationTitle": "Revoke this invitation?",
   "confirm.revokeInvitation":
     "Any unused invitation becomes invalid immediately. Join requests already submitted are unaffected.",
+  "confirm.leaveOrganizationTitle": "Leave this organization?",
+  "confirm.leaveOrganization":
+    "After leaving “{organization}”, this Node disappears from the active directory and cannot send or receive new organization tasks. History is retained.",
   "confirm.changeRoleTitle": "Change organization role?",
   "confirm.changeRole":
     "Change “{name}” in “{organization}” to “{role}”. Admins can invite, approve, and manage regular members.",
@@ -1038,6 +1049,8 @@ export const en = {
   "organizations.directoryRevision": "Signed directory revision {revision}",
   "organizations.pendingHint":
     "The join request was sent and is waiting for an Owner or Admin.",
+  "organizations.ownerLeaveHint":
+    "The Owner must transfer ownership before leaving the organization.",
   "organizations.securityHint":
     "Members sign the organization directory and every Node verifies it locally. Relay only brokers the directory and identity boundary; it gains no local Agent capability.",
   "organizations.relayRequired": "Organizations require a Relay connection",
@@ -1177,6 +1190,10 @@ export const en = {
     "The organization invitation has expired",
   "errorCode.ORGANIZATION_INVITATION_NOT_FOUND":
     "The organization invitation was not found",
+  "errorCode.OWNER_TRANSFER_REQUIRED":
+    "The Owner must transfer ownership first",
+  "errorCode.LEAVE_CERTIFICATE_MISMATCH":
+    "The signed organization-leave certificate does not match",
   "errorCode.INVALID_RESPONSE": "The Relay returned an invalid response",
   "summary.executionInterrupted":
     "The receiving DSH process stopped while execution was active. Potential external side effects were not replayed.",
@@ -1339,6 +1356,8 @@ const errorCodeKeys = {
   ORGANIZATION_INVITATION_EXPIRED: "errorCode.ORGANIZATION_INVITATION_EXPIRED",
   ORGANIZATION_INVITATION_NOT_FOUND:
     "errorCode.ORGANIZATION_INVITATION_NOT_FOUND",
+  OWNER_TRANSFER_REQUIRED: "errorCode.OWNER_TRANSFER_REQUIRED",
+  LEAVE_CERTIFICATE_MISMATCH: "errorCode.LEAVE_CERTIFICATE_MISMATCH",
   INVALID_RESPONSE: "errorCode.INVALID_RESPONSE",
 } as const satisfies Record<string, SquadLocaleKey>;
 

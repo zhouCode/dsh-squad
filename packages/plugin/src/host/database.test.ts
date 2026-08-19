@@ -642,6 +642,47 @@ describe("SquadDatabase", () => {
       recipientMembershipId: memberMembershipId,
     });
     expect(reopened.listPeers()).toEqual([]);
+
+    reopened.setSessionOrganization(
+      "member-session",
+      organizationId,
+      member.nodeId,
+    );
+    const unsignedLeave = unsignedOrganizationMembershipCertificateSchema.parse(
+      {
+        ...unsignedMember,
+        organizationRevision: 3,
+        memberRevision: 2,
+        status: "DISABLED",
+        issuer: {
+          kind: "MEMBER",
+          membershipId: memberMembershipId,
+          nodeId: member.nodeId,
+        },
+        issuedAt: new Date().toISOString(),
+      },
+    );
+    const leaveCertificate = {
+      ...unsignedLeave,
+      signature: member.sign(unsignedLeave),
+    };
+    expect(
+      reopened.applyOrganizationBundle(
+        {
+          document,
+          revision: 3,
+          events: [ownerCertificate, memberCertificate, leaveCertificate],
+          selfStatus: "DISABLED",
+          pendingJoinRequests: [],
+        },
+        member.nodeId,
+      ),
+    ).toBe(true);
+    expect(reopened.sessionOrganization("member-session")).toBeUndefined();
+    expect(reopened.sessionOrganization("session-persistence")).toBeUndefined();
+    expect(
+      reopened.findOrganization(organizationId, member.nodeId),
+    ).toMatchObject({ membershipStatus: "DISABLED" });
     reopened.close();
   });
 });

@@ -1242,6 +1242,60 @@ export class RelayServer {
     return { organizationId, revision: certificate.organizationRevision };
   }
 
+  private leaveOrganization(
+    organizationId: string,
+    value: unknown,
+    authenticatedNodeId: string,
+  ): { organizationId: string; revision: number; status: "DISABLED" } {
+    const input = updateMemberCertificateSchema.parse(value);
+    const directory = this.organizationDirectory(organizationId);
+    const member = this.organizationMemberForNode(
+      directory,
+      authenticatedNodeId,
+    );
+    if (member === undefined || member.status !== "ACTIVE") {
+      throw new HttpError(403, "ORGANIZATION_MEMBERSHIP_REJECTED");
+    }
+    if (member.role === "OWNER") {
+      throw new HttpError(409, "OWNER_TRANSFER_REQUIRED");
+    }
+    const certificate = input.certificate;
+    if (
+      certificate.organizationId !== organizationId ||
+      certificate.membershipId !== member.membershipId ||
+      certificate.nodeId !== authenticatedNodeId ||
+      certificate.publicKey !== member.publicKey ||
+      certificate.displayName !== member.displayName ||
+      certificate.role !== member.role ||
+      certificate.status !== "DISABLED" ||
+      certificate.memberRevision !== member.memberRevision + 1 ||
+      certificate.issuer.kind !== "MEMBER" ||
+      certificate.issuer.membershipId !== member.membershipId ||
+      certificate.issuer.nodeId !== authenticatedNodeId
+    ) {
+      throw new HttpError(400, "LEAVE_CERTIFICATE_MISMATCH");
+    }
+    applyOrganizationCertificate(
+      directory.document,
+      directory.members,
+      directory.revision,
+      certificate,
+    );
+    this.#db.exec("BEGIN IMMEDIATE");
+    try {
+      this.insertOrganizationEventUnsafe(certificate);
+      this.#db.exec("COMMIT");
+    } catch (error) {
+      this.#db.exec("ROLLBACK");
+      throw error;
+    }
+    return {
+      organizationId,
+      revision: certificate.organizationRevision,
+      status: "DISABLED",
+    };
+  }
+
   private submit(
     value: unknown,
     authenticatedNodeId: string,
@@ -1667,6 +1721,24 @@ export class RelayServer {
           this.updateOrganizationMember(
             organizationMemberRoute[1],
             organizationMemberRoute[2],
+            jsonBody(body),
+            auth.nodeId,
+          ),
+        );
+        return true;
+      }
+      const leaveOrganizationRoute =
+        /^\/squad\/v1\/organizations\/([0-9a-f-]{36})\/leave$/u.exec(
+          url.pathname,
+        );
+      if (req.method === "POST" && leaveOrganizationRoute?.[1] !== undefined) {
+        const body = await readBody(req, 64 * 1024);
+        const auth = this.authenticate(req, path, body);
+        reply(
+          res,
+          200,
+          this.leaveOrganization(
+            leaveOrganizationRoute[1],
             jsonBody(body),
             auth.nodeId,
           ),

@@ -387,6 +387,17 @@ export class RelayClient {
     );
   }
 
+  async leaveOrganization(
+    organizationId: string,
+    certificate: OrganizationMembershipCertificate,
+  ): Promise<void> {
+    await this.request(
+      "POST",
+      `/squad/v1/organizations/${organizationId}/leave`,
+      { certificate },
+    );
+  }
+
   async nodes(): Promise<
     Array<{ nodeId: string; displayName: string; publicKey: string }>
   > {

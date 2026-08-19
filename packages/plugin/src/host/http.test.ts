@@ -268,6 +268,25 @@ describe("Squad host health", () => {
     );
   });
 
+  it("leaves an organization through the local API", async () => {
+    const organizationId = "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa";
+    const leaveOrganization = vi.fn(async () => undefined);
+    const squad = { leaveOrganization } as unknown as SquadService;
+    const server = createServer(createHttpHandler(squad));
+    servers.push(server);
+    await new Promise<void>((resolve) =>
+      server.listen(0, "127.0.0.1", resolve),
+    );
+    const address = server.address() as AddressInfo;
+    const response = await fetch(
+      `http://127.0.0.1:${address.port}/squad/v1/local/organizations/${organizationId}/leave`,
+      { method: "POST", body: "{}" },
+    );
+    expect(response.status).toBe(200);
+    expect(await response.json()).toEqual({ ok: true });
+    expect(leaveOrganization).toHaveBeenCalledWith(organizationId);
+  });
+
   it("validates and manages local automation rules", async () => {
     const created = {
       id: "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa",

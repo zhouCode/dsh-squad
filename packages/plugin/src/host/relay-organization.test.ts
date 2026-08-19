@@ -368,5 +368,51 @@ describe("Relay organization directory", () => {
     await expect(bob.submit(envelope)).rejects.toMatchObject({
       code: "ORGANIZATION_MEMBERSHIP_REJECTED",
     });
+
+    const ownerLeaveUnsigned =
+      unsignedOrganizationMembershipCertificateSchema.parse({
+        ...ownerUnsigned,
+        organizationRevision: 6,
+        memberRevision: 2,
+        status: "DISABLED",
+        issuer: {
+          kind: "MEMBER",
+          membershipId: ownerMembershipId,
+          nodeId: aliceIdentity.nodeId,
+        },
+        issuedAt: new Date().toISOString(),
+      });
+    await expect(
+      alice.leaveOrganization(organizationId, {
+        ...ownerLeaveUnsigned,
+        signature: aliceIdentity.sign(ownerLeaveUnsigned),
+      }),
+    ).rejects.toMatchObject({ code: "OWNER_TRANSFER_REQUIRED" });
+
+    const carolLeaveUnsigned =
+      unsignedOrganizationMembershipCertificateSchema.parse({
+        ...carolMemberUnsigned,
+        organizationRevision: 6,
+        memberRevision: 2,
+        status: "DISABLED",
+        issuer: {
+          kind: "MEMBER",
+          membershipId: carolMembershipId,
+          nodeId: carolIdentity.nodeId,
+        },
+        issuedAt: new Date().toISOString(),
+      });
+    const carolLeave: OrganizationMembershipCertificate = {
+      ...carolLeaveUnsigned,
+      signature: carolIdentity.sign(carolLeaveUnsigned),
+    };
+    await carol.leaveOrganization(organizationId, carolLeave);
+    expect((await carol.organizations())[0]?.selfStatus).toBe("DISABLED");
+    expect((await alice.nodes()).map(({ displayName }) => displayName)).toEqual(
+      ["Alice"],
+    );
+    await expect(
+      carol.leaveOrganization(organizationId, carolLeave),
+    ).rejects.toMatchObject({ code: "ORGANIZATION_MEMBERSHIP_REJECTED" });
   });
 });
