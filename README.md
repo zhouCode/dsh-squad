@@ -125,7 +125,7 @@ Owner 也可以从 WebUI 不可逆地解散组织。解散会追加一条 Owner 
 ```bash
 pnpm install --frozen-lockfile
 pnpm run pack
-dsh plugin --profile web add ./artifacts/dsh-squad-plugin-0.7.1.tgz --offline
+dsh plugin --profile web add ./artifacts/dsh-squad-plugin-0.7.2.tgz --offline
 dsh web
 ```
 
@@ -209,6 +209,8 @@ dsh web
 ## 承载 Relay
 
 同一个包可以在任意持续在线的 DSH Node 中启用 Relay Server。邀请在配置加载时写入 Relay SQLite，并在新 Node enrollment 时一次性消费。
+
+托管 Relay 与作为成员 Node 是两项独立能力。专用 Relay 在 WebUI 中默认显示为`Relay 主机（仅中继）`，无需再“加入 Relay”才能提供服务。只有明确展开可选成员配置并确认`混合角色`后，本机 Agent 才会成为普通成员；即使它登记到自己的 Relay，也不会获得额外组织权限或变成超级 Agent。
 
 ```yaml
 - id: dsh-squad
@@ -350,7 +352,7 @@ DSH_SQUAD_RELEASE_SIGNING_KEY=/secure/path/release-signing-key.pem \
   pnpm release:prepare
 ```
 
-发布 `v0.7.1` 时需要把 `artifacts/` 中的 `dsh-squad-plugin-0.7.1.tgz`、同名 `.sha256`、`dsh-squad-update-manifest-0.7.1.json` 和 `.sig` 四个文件全部作为 GitHub Release assets 上传。缺少任意一个、签名不符或 Release tag 不一致时，客户端都会拒绝更新。
+发布 `v0.7.2` 时需要把 `artifacts/` 中的 `dsh-squad-plugin-0.7.2.tgz`、同名 `.sha256`、`dsh-squad-update-manifest-0.7.2.json` 和 `.sig` 四个文件全部作为 GitHub Release assets 上传。缺少任意一个、签名不符或 Release tag 不一致时，客户端都会拒绝更新。
 
 `smoke:delegation` 会构建真实 tarball，安装到 Alice、Bob、Relay 三套隔离 DSH Home，并用真实 Chromium 验证：WebUI 配对、Team Planner 草案审批与幂等分派、Bob 离线投递、Relay/Node 重启、接收端专属 Skill、HumanTodo 部分完成、相同 Session 恢复、Outcome 隐私边界和插件可逆禁用；组织协议另由签名目录、Relay 权限与本地持久化集成测试覆盖。Direct 的签名回执、伪造回执拒绝、离线排队、恢复在线自动重投和幂等接收由独立端到端测试覆盖。
 

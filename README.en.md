@@ -123,7 +123,7 @@ Build and install the tarball from this repository:
 ```bash
 pnpm install --frozen-lockfile
 pnpm run pack
-dsh plugin --profile web add ./artifacts/dsh-squad-plugin-0.7.1.tgz --offline
+dsh plugin --profile web add ./artifacts/dsh-squad-plugin-0.7.2.tgz --offline
 dsh web
 ```
 
@@ -207,6 +207,8 @@ Production Direct URLs require HTTPS; HTTP is accepted only for `localhost` / lo
 ## Host a Relay
 
 The same package can enable a Relay Server in any always-on DSH Node. Invitations are written to Relay SQLite when configuration loads and consumed once when a new Node enrolls.
+
+Hosting Relay and acting as a member Node are independent capabilities. The WebUI identifies a dedicated Relay as `Relay host (infrastructure only)` and keeps member setup collapsed; it does not need to join a Relay to keep serving. The local Agent becomes a regular member only after the owner explicitly enables and confirms the optional hybrid role. Enrolling it with its own Relay grants no additional organization authority and does not create a super Agent.
 
 ```yaml
 - id: dsh-squad
@@ -348,7 +350,7 @@ DSH_SQUAD_RELEASE_SIGNING_KEY=/secure/path/release-signing-key.pem \
   pnpm release:prepare
 ```
 
-A `v0.7.1` GitHub Release must upload all four files from `artifacts/`: `dsh-squad-plugin-0.7.1.tgz`, its `.sha256`, `dsh-squad-update-manifest-0.7.1.json`, and its `.sig`. Clients reject an update when any asset is missing, the signature fails, or the Release tag does not match.
+A `v0.7.2` GitHub Release must upload all four files from `artifacts/`: `dsh-squad-plugin-0.7.2.tgz`, its `.sha256`, `dsh-squad-update-manifest-0.7.2.json`, and its `.sig`. Clients reject an update when any asset is missing, the signature fails, or the Release tag does not match.
 
 `smoke:delegation` builds a real tarball, installs it into isolated Alice, Bob, and Relay DSH homes, and uses real Chromium to verify WebUI pairing, Team Planner approval and idempotent dispatch, delivery while Bob is offline, Relay and Node restarts, a recipient-only Skill, partial HumanTodo completion, same-Session resume, Outcome privacy boundaries, and reversible plugin disablement. Signed-directory, Relay-authorization, and local-persistence integration tests separately cover organizations. Dedicated end-to-end tests cover Direct signed receipts, forged-receipt rejection, offline queueing, automatic retry after reconnect, and idempotent receipt.
 

@@ -27,6 +27,7 @@ import type {
   OrganizationView,
 } from "../shared/organizations.ts";
 import {
+  squadNodeRole,
   summarizeAttention,
   type SquadConnectionDiagnostics,
   type DelegationStatus,
@@ -3066,6 +3067,31 @@ function OrganizationCenter({
 
 type SetupMode = "RELAY" | "DIRECT";
 
+function RelayHostRoleSummary({
+  hybrid,
+  t,
+}: {
+  hybrid: boolean;
+  t: SquadTranslate;
+}) {
+  return (
+    <section
+      className={`squad-relay-role${hybrid ? " hybrid" : ""}`}
+      aria-label={t("setup.currentRole")}
+    >
+      <span>{t("setup.currentRole")}</span>
+      <strong>{t(hybrid ? "setup.roleHybrid" : "setup.roleRelayHost")}</strong>
+      <p>
+        {t(
+          hybrid
+            ? "setup.roleHybridDescription"
+            : "setup.roleRelayHostDescription",
+        )}
+      </p>
+    </section>
+  );
+}
+
 function NodeSetupForm({
   state,
   onboarding = false,
@@ -3079,6 +3105,8 @@ function NodeSetupForm({
   onLater?: () => void;
   t: SquadTranslate;
 }) {
+  const nodeRole = squadNodeRole(state);
+  const relayHostOnly = nodeRole === "RELAY_HOST";
   const initialMode =
     state.setup.mode ??
     (state.relay.configured
@@ -3098,6 +3126,7 @@ function NodeSetupForm({
   const [joinBusy, setJoinBusy] = useState(false);
   const [error, setError] = useState<string>();
   const [saved, setSaved] = useState(false);
+  const [memberSetupOpen, setMemberSetupOpen] = useState(!relayHostOnly);
   const { confirm, confirmation } = useConfirmation(t);
 
   useEffect(() => {
@@ -3122,9 +3151,27 @@ function NodeSetupForm({
     state.setup.mode,
   ]);
 
+  useEffect(() => {
+    setMemberSetupOpen(!relayHostOnly);
+  }, [relayHostOnly]);
+
   const submit = async (event: FormEvent<HTMLFormElement>) => {
     event.preventDefault();
+    let confirmRelayHostMembership = false;
+    if (relayHostOnly) {
+      if (
+        !(await confirm({
+          title: t("confirm.enableHybridTitle"),
+          message: t("confirm.enableHybrid"),
+          confirmLabel: t("confirm.enableHybridAction"),
+        }))
+      ) {
+        return;
+      }
+      confirmRelayHostMembership = true;
+    }
     if (
+      !relayHostOnly &&
       !onboarding &&
       mode !== initialMode &&
       !(await confirm({
@@ -3150,12 +3197,18 @@ function NodeSetupForm({
                 displayName,
                 relayUrl,
                 ...(invitation.trim() === "" ? {} : { invitation }),
+                ...(confirmRelayHostMembership
+                  ? { confirmRelayHostMembership: true }
+                  : {}),
                 directEnabled,
                 ...(directPublicUrl.trim() === "" ? {} : { directPublicUrl }),
               }
             : {
                 mode,
                 displayName,
+                ...(confirmRelayHostMembership
+                  ? { confirmRelayHostMembership: true }
+                  : {}),
                 directEnabled,
                 ...(directPublicUrl.trim() === "" ? {} : { directPublicUrl }),
               },
@@ -3194,6 +3247,25 @@ function NodeSetupForm({
     }
   };
 
+  if (relayHostOnly && !memberSetupOpen) {
+    return (
+      <section className="squad-node-setup">
+        <h2>{t("settings.connection")}</h2>
+        <RelayHostRoleSummary hybrid={false} t={t} />
+        <div className="squad-relay-host-actions">
+          <button
+            type="button"
+            className="squad-secondary"
+            onClick={() => setMemberSetupOpen(true)}
+          >
+            {t("setup.enableHybrid")}
+          </button>
+          <small>{t("setup.enableHybridHint")}</small>
+        </div>
+      </section>
+    );
+  }
+
   return (
     <section
       className={`squad-node-setup ${onboarding ? "squad-onboarding" : ""}`}
@@ -3207,6 +3279,25 @@ function NodeSetupForm({
       ) : (
         <h2>{t("settings.connection")}</h2>
       )}
+      {state.relay.serving ? (
+        <RelayHostRoleSummary hybrid={nodeRole === "HYBRID"} t={t} />
+      ) : null}
+      {relayHostOnly ? (
+        <header className="squad-member-setup-header">
+          <div>
+            <h3>{t("setup.memberConnectionTitle")}</h3>
+            <p>{t("setup.memberConnectionIntro")}</p>
+          </div>
+          <button
+            type="button"
+            className="squad-secondary"
+            disabled={busy}
+            onClick={() => setMemberSetupOpen(false)}
+          >
+            {t("setup.keepRelayOnly")}
+          </button>
+        </header>
+      ) : null}
       {onboarding ? (
         <form className="squad-onboarding-join" onSubmit={joinWithPackage}>
           <h3>{t("joinPackage.haveOne")}</h3>
@@ -3251,24 +3342,57 @@ function NodeSetupForm({
           />
         </label>
         <fieldset className="squad-mode-picker">
-          <legend>{t("setup.chooseMode")}</legend>
+          <legend>
+            {t(
+              state.relay.serving
+                ? "setup.chooseMemberMode"
+                : "setup.chooseMode",
+            )}
+          </legend>
           <button
             type="button"
             className={mode === "RELAY" ? "active" : ""}
             aria-pressed={mode === "RELAY"}
             onClick={() => setMode("RELAY")}
           >
-            <strong>{t("setup.relayTitle")}</strong>
-            <span>{t("setup.relayDescription")}</span>
+            <strong>
+              {t(
+                state.relay.serving
+                  ? "setup.memberRelayTitle"
+                  : "setup.relayTitle",
+              )}
+            </strong>
+            <span>
+              {t(
+                state.relay.serving
+                  ? "setup.memberRelayDescription"
+                  : "setup.relayDescription",
+              )}
+            </span>
           </button>
           <button
             type="button"
             className={mode === "DIRECT" ? "active" : ""}
             aria-pressed={mode === "DIRECT"}
-            onClick={() => setMode("DIRECT")}
+            onClick={() => {
+              setMode("DIRECT");
+              if (relayHostOnly) setDirectEnabled(true);
+            }}
           >
-            <strong>{t("setup.directTitle")}</strong>
-            <span>{t("setup.directDescription")}</span>
+            <strong>
+              {t(
+                state.relay.serving
+                  ? "setup.memberDirectTitle"
+                  : "setup.directTitle",
+              )}
+            </strong>
+            <span>
+              {t(
+                state.relay.serving
+                  ? "setup.memberDirectDescription"
+                  : "setup.directDescription",
+              )}
+            </span>
           </button>
         </fieldset>
         {mode === "RELAY" ? (
@@ -3335,6 +3459,7 @@ function NodeSetupForm({
                 name="directEnabled"
                 type="checkbox"
                 checked={directEnabled}
+                disabled={relayHostOnly}
                 onChange={(event) =>
                   setDirectEnabled(event.currentTarget.checked)
                 }
@@ -3359,7 +3484,7 @@ function NodeSetupForm({
             </label>
           </div>
         )}
-        {!onboarding && mode !== initialMode ? (
+        {!relayHostOnly && !onboarding && mode !== initialMode ? (
           <p className="squad-warning">{t("setup.switchWarning")}</p>
         ) : null}
         <p className="squad-muted">{t("setup.securityHint")}</p>
@@ -3371,7 +3496,9 @@ function NodeSetupForm({
               ? t("setup.saving")
               : onboarding
                 ? t("setup.complete")
-                : t("setup.save")}
+                : relayHostOnly
+                  ? t("setup.enableHybridAction")
+                  : t("setup.save")}
           </button>
           {onLater ? (
             <button
@@ -5499,8 +5626,9 @@ const css = `
 @media(max-width:700px){.squad-live-sync{padding:0 16px 10px;align-items:flex-start}.squad-live-sync>div{display:grid;grid-template-columns:auto 1fr}.squad-live-sync>div>span:last-child{grid-column:2}}
 .squad-pagination{position:sticky;bottom:-10px;display:grid;gap:7px;margin:10px -2px -10px;padding:10px 4px;background:var(--dsw-specific-dialog-fill,#fff);border-top:1px solid var(--dsw-alias-border-l2,#ddd);font-size:10px;color:var(--dsw-alias-label-secondary,#666)}.squad-pagination>span{margin:0;text-align:center}.squad-pagination>div{display:flex;align-items:center;justify-content:space-between;gap:5px}.squad-list .squad-pagination button{display:inline-flex;width:auto;margin:0;padding:5px 7px;border:1px solid var(--dsw-alias-border-l2,#ccc);border-radius:7px;background:transparent;color:inherit;font-size:10px}.squad-list .squad-pagination button:disabled{opacity:.45;cursor:not-allowed}.squad-pagination>div>span{margin:0;white-space:nowrap}
 .squad-node-setup{box-sizing:border-box;overflow:auto;width:100%;max-width:720px;padding:4px 0 20px}.squad-onboarding{align-self:center;flex:1;padding:18px 30px 34px}.squad-node-setup>header{margin-bottom:18px}.squad-node-setup>header h2{font-size:26px;margin:7px 0}.squad-node-setup>header p{color:var(--dsw-alias-label-secondary,#666);line-height:1.55;max-width:620px}.squad-step{font-size:11px;letter-spacing:.12em;text-transform:uppercase;color:#315ee8}.squad-node-setup label{display:grid;gap:6px;margin:13px 0;font-size:13px}.squad-node-setup input,.squad-node-setup textarea{box-sizing:border-box;width:100%;border:1px solid var(--dsw-alias-border-l2,#ccc);border-radius:9px;background:transparent;color:inherit;padding:9px;font:inherit}.squad-node-setup input:disabled{opacity:.55}.squad-node-setup small{color:var(--dsw-alias-label-secondary,#666);line-height:1.45}.squad-mode-picker{display:grid;grid-template-columns:1fr 1fr;gap:10px;border:0;margin:18px 0;padding:0}.squad-mode-picker legend{grid-column:1/-1;padding:0 0 8px;font-size:13px;font-weight:600}.squad-node-setup .squad-mode-picker button{display:grid;gap:6px;border:1px solid var(--dsw-alias-border-l2,#ccc);border-radius:12px;background:transparent;color:inherit;padding:14px;text-align:left;cursor:pointer}.squad-node-setup .squad-mode-picker button.active{border-color:#315ee8;background:rgba(49,94,232,.08);box-shadow:inset 0 0 0 1px #315ee8}.squad-mode-picker button span{color:var(--dsw-alias-label-secondary,#666);font-size:12px;line-height:1.4}.squad-setup-fields{padding:2px 14px;border-radius:12px;background:var(--dsw-alias-interactive-bg-hover,#f6f7f9)}.squad-node-setup .squad-check{display:flex;align-items:center;gap:9px}.squad-node-setup .squad-check input{width:auto}.squad-node-setup button[type=submit]{border:0;border-radius:9px;padding:9px 14px;background:#315ee8;color:#fff;cursor:pointer}.squad-node-setup button:disabled{opacity:.55;cursor:not-allowed}.squad-node-setup .squad-secondary{border:1px solid var(--dsw-alias-border-l2,#ccc);border-radius:9px;padding:8px 13px;background:transparent;color:inherit;cursor:pointer}.squad-settings .squad-node-setup{border-bottom:1px solid var(--dsw-alias-border-l2,#ddd);margin-bottom:22px}.squad-settings .squad-node-setup>h2{margin-top:0}.squad-onboarding-join{padding:14px;border:1px solid #315ee8;border-radius:12px;background:rgba(49,94,232,.06)}.squad-onboarding-join h3{margin:0}.squad-onboarding-join p{font-size:12px;color:var(--dsw-alias-label-secondary,#666)}.squad-form-divider{display:flex;align-items:center;gap:10px;margin:18px 0;color:var(--dsw-alias-label-secondary,#666);font-size:12px}.squad-form-divider:before,.squad-form-divider:after{content:"";height:1px;flex:1;background:var(--dsw-alias-border-l2,#ddd)}
+.squad-relay-role{display:grid;gap:5px;margin:14px 0;padding:15px;border:1px solid #278447;border-radius:13px;background:#edf8f0;color:#176c35}.squad-relay-role.hybrid{border-color:#315ee8;background:rgba(49,94,232,.07);color:var(--dsw-alias-label-primary,#151515)}.squad-relay-role>span{font-size:10px;font-weight:700;letter-spacing:.1em;text-transform:uppercase;opacity:.78}.squad-relay-role>strong{font-size:16px}.squad-relay-role>p{margin:0;max-width:620px;font-size:12px;line-height:1.55}.squad-relay-host-actions{display:grid;justify-items:start;gap:7px;margin:14px 0 4px}.squad-member-setup-header{display:flex;align-items:flex-start;justify-content:space-between;gap:16px;margin:20px 0 8px!important;padding-top:18px;border-top:1px solid var(--dsw-alias-border-l2,#ddd)}.squad-member-setup-header h3,.squad-member-setup-header p{margin:0}.squad-member-setup-header p{max-width:500px;margin-top:5px;color:var(--dsw-alias-label-secondary,#666);font-size:12px;line-height:1.5}
 .squad-setup-fields hr{border:0;border-top:1px solid var(--dsw-alias-border-l2,#ddd);margin:16px 0}.squad-connection-required{display:grid;align-content:center;justify-items:start;max-width:620px}.squad-connection-required h2{margin-bottom:0}
-@media(max-width:700px){.squad-onboarding{padding:10px 16px 24px}.squad-mode-picker{grid-template-columns:1fr}.squad-node-setup>header h2{font-size:22px}}
+@media(max-width:700px){.squad-onboarding{padding:10px 16px 24px}.squad-mode-picker{grid-template-columns:1fr}.squad-node-setup>header h2{font-size:22px}.squad-member-setup-header{display:grid}}
 .squad-updates{overflow:auto;padding:22px 26px;max-width:760px}.squad-updates>header{display:flex;align-items:flex-start;justify-content:space-between;gap:16px}.squad-updates h2{margin:0}.squad-updates h3{font-size:14px;margin:24px 0 8px}.squad-updates label{display:grid;gap:6px;margin:12px 0;font-size:13px}.squad-updates select{box-sizing:border-box;width:100%;max-width:360px;border:1px solid var(--dsw-alias-border-l2,#ccc);border-radius:9px;background:var(--dsw-specific-dialog-fill,#fff);color:inherit;padding:9px;font:inherit}.squad-updates button{border:0;border-radius:9px;padding:8px 12px;background:#315ee8;color:#fff;cursor:pointer}.squad-updates button:disabled{opacity:.5;cursor:not-allowed}.squad-updates a{color:#315ee8}.squad-update-summary{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:10px;margin:18px 0}.squad-update-summary>div{display:grid;gap:5px;padding:13px;border:1px solid var(--dsw-alias-border-l2,#ddd);border-radius:11px}.squad-update-summary span{font-size:11px;color:var(--dsw-alias-label-secondary,#666)}.squad-update-summary strong{overflow-wrap:anywhere}.squad-update-status-failed,.squad-update-status-rolled_back{background:#fde4e1;color:#a52a24}.squad-update-status-available,.squad-update-status-requested,.squad-update-status-blocked{background:#fff0c7;color:#755400}.squad-update-status-installed,.squad-update-status-up_to_date{background:#dff5e6;color:#176c35}@media(max-width:700px){.squad-updates{padding:16px}.squad-update-summary{grid-template-columns:1fr}}
 .squad-update-readiness{margin-top:22px;padding:15px;border:1px solid var(--dsw-alias-border-l2,#ddd);border-radius:13px}.squad-update-readiness>header{display:flex;align-items:flex-start;justify-content:space-between;gap:12px}.squad-update-readiness>header h3{margin:0 0 4px}.squad-update-readiness>header p{margin:0}.squad-update-readiness ul{display:grid;gap:8px;margin:14px 0 0;padding:0;list-style:none}.squad-update-readiness li{display:flex;align-items:flex-start;gap:9px;padding:9px;border-radius:9px}.squad-update-readiness li>span{display:grid;place-items:center;flex:0 0 20px;width:20px;height:20px;border-radius:50%;font-weight:700}.squad-update-readiness li>div{display:grid;gap:2px}.squad-update-readiness li small{color:inherit;opacity:.82}.squad-update-readiness li.ready{background:#edf8f0;color:#176c35}.squad-update-readiness li.ready>span,.squad-update-ready{background:#d3efdc;color:#176c35}.squad-update-readiness li.blocked{background:#fff8e5;color:#755400}.squad-update-readiness li.blocked>span,.squad-update-not-ready{background:#fff0c7;color:#755400}@media(max-width:700px){.squad-update-readiness>header{display:grid}}
 .squad-trigger{position:relative}.squad-trigger-badge,.squad-tab-count{display:inline-flex;align-items:center;justify-content:center;box-sizing:border-box;min-width:18px;height:18px;padding:0 5px;border-radius:999px;background:#b13c35;color:#fff;font-size:10px;font-weight:700;line-height:1}.squad-trigger:not(.squad-trigger-wide) .squad-trigger-badge{position:absolute;right:0;top:-2px}.squad-tabs button{display:inline-flex;align-items:center;gap:6px}.squad-tabs button.active .squad-tab-count{background:#315ee8}.squad-overview{overflow:auto;padding:24px 28px;flex:1}.squad-overview>header h2{margin:4px 0}.squad-attention-grid{display:grid;grid-template-columns:repeat(4,minmax(0,1fr));gap:10px;margin:20px 0}.squad-attention-grid button{display:grid;gap:5px;text-align:left;border:1px solid var(--dsw-alias-border-l2,#ddd);border-radius:12px;background:transparent;color:inherit;padding:14px;cursor:pointer}.squad-attention-grid button.needs-attention{border-color:#d59b1b;background:#fff8e5;color:#5d470a}.squad-attention-grid strong{font-size:24px}.squad-attention-grid span{font-size:12px;color:var(--dsw-alias-label-secondary,#666)}.squad-next-step{margin-top:18px;padding:18px;border:1px solid var(--dsw-alias-border-l2,#ddd);border-radius:14px}.squad-next-step h3{margin:0 0 7px}.squad-next-step code{display:block;padding:10px;border-radius:9px;background:var(--dsw-alias-interactive-bg-hover,#f4f5f7);overflow-wrap:anywhere}.squad-next-step button,.squad-update-callout{border:0;border-radius:9px;padding:8px 12px;margin-top:12px;background:#315ee8;color:#fff;cursor:pointer}.squad-update-callout{display:block;width:100%;text-align:left;background:#fff0c7;color:#755400}@media(max-width:700px){.squad-attention-grid{grid-template-columns:1fr 1fr}.squad-overview{padding:18px 16px}}

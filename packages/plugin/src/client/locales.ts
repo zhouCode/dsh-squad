@@ -173,6 +173,10 @@ export const zh = {
   "confirm.switchMode":
     "节点会立即切换到“{mode}”。身份、组织和任务会保留，但新连接无法投递的任务将留在本地队列中。",
   "confirm.switchModeAction": "确认切换",
+  "confirm.enableHybridTitle": "启用 Relay 混合角色？",
+  "confirm.enableHybrid":
+    "这台 DSH 当前只托管 Relay。继续后，本机还会成为普通成员 Node，可以接收任务并调用本机 Agent；如果 Relay 地址指向本机，它会登记到自己的 Relay。中继权限不会因此升级，也不会变成超级 Agent。",
+  "confirm.enableHybridAction": "启用混合角色",
   "confirm.automationRuleTitle": "启用本机自动执行规则？",
   "confirm.automationRule":
     "规则“{name}”会让匹配“{pattern}”的任务无需人工确认，并最多开放 {count} 个指定工具。仅对已设为“匹配本机规则”的成员生效。",
@@ -293,12 +297,33 @@ export const zh = {
   "setup.intro":
     "设置一个便于成员识别的名称，再选择 Relay 或 Direct。验证通过后配置会保存在本机，无需编辑 YAML。",
   "setup.chooseMode": "选择主连接方式",
+  "setup.chooseMemberMode": "选择成员节点的连接方式",
   "setup.relayTitle": "加入 Relay（推荐）",
   "setup.relayDescription":
     "适合跨地域和离线协作；仍可为指定节点同时启用 Direct 直连。",
+  "setup.memberRelayTitle": "作为成员加入 Relay",
+  "setup.memberRelayDescription":
+    "把本机 Agent 登记为普通成员；可以连接当前 Relay 或另一个 Relay。",
   "setup.directTitle": "仅使用 Direct",
   "setup.directDescription":
     "适合局域网、VPN 或已有 HTTPS 可达地址的小团队；不需要 Relay。",
+  "setup.memberDirectTitle": "作为成员使用 Direct",
+  "setup.memberDirectDescription":
+    "保留本机 Relay 服务，同时让成员通过已配对的 Direct 地址投递任务。",
+  "setup.currentRole": "当前节点角色",
+  "setup.roleRelayHost": "Relay 主机（仅中继）",
+  "setup.roleRelayHostDescription":
+    "本机正在提供中继、离线邮箱和组织路由，不需要加入 Relay 才能继续提供服务。",
+  "setup.roleHybrid": "Relay 主机 + 成员 Agent",
+  "setup.roleHybridDescription":
+    "本机既提供 Relay 服务，也能作为普通成员接收和执行任务；它不拥有额外组织权限。",
+  "setup.enableHybrid": "同时将本机作为成员 Agent 接入团队",
+  "setup.enableHybridHint": "这是可选的混合角色；专用 Relay 无需执行此操作。",
+  "setup.memberConnectionTitle": "可选：启用成员 Agent",
+  "setup.memberConnectionIntro":
+    "只有希望这台服务器上的 Agent 也接收任务时才需要配置。",
+  "setup.keepRelayOnly": "保持仅 Relay",
+  "setup.enableHybridAction": "验证并启用混合角色",
   "setup.relayUrl": "Relay 地址",
   "setup.relayUrlHint":
     "生产环境必须使用 HTTPS；本机开发可使用 loopback HTTP。",
@@ -690,6 +715,8 @@ export const zh = {
   "errorCode.UPDATE_RUN_FAILED": "更新任务失败",
   "errorCode.SQUAD_SERVICE_CLOSED": "Squad 服务已停止",
   "errorCode.SQUAD_CONFIGURATION_IN_PROGRESS": "另一项节点配置正在验证",
+  "errorCode.RELAY_HOST_MEMBERSHIP_CONFIRMATION_REQUIRED":
+    "专用 Relay 变为成员节点前需要明确确认混合角色",
   "errorCode.INVALID_RELAY_URL": "Relay 地址必须是 HTTPS 原点",
   "errorCode.INVALID_DIRECT_URL": "Direct 地址必须是 HTTPS 原点",
   "errorCode.RELAY_ENROLLMENT_REQUIRED":
@@ -905,6 +932,10 @@ export const en = {
   "confirm.switchMode":
     "This Node switches to “{mode}” immediately. Its identity, organizations, and tasks are retained, but work the new connection cannot deliver remains queued locally.",
   "confirm.switchModeAction": "Confirm switch",
+  "confirm.enableHybridTitle": "Enable the hybrid Relay role?",
+  "confirm.enableHybrid":
+    "This DSH currently only hosts Relay. Continuing also makes it a regular member Node that can receive work and invoke its local Agent. If the Relay URL points back to this host, the Node enrolls with its own Relay. This grants no extra Relay authority and does not create a super Agent.",
+  "confirm.enableHybridAction": "Enable hybrid role",
   "confirm.automationRuleTitle": "Enable this local automation rule?",
   "confirm.automationRule":
     "Rule “{name}” lets tasks matching “{pattern}” skip human confirmation with at most {count} explicitly allowed tools. It only affects senders set to “Match local rules”.",
@@ -1028,12 +1059,34 @@ export const en = {
   "setup.intro":
     "Choose a recognizable name and either Relay or Direct. After validation, the settings stay on this computer—no YAML editing required.",
   "setup.chooseMode": "Choose the primary connection",
+  "setup.chooseMemberMode": "Choose the member Node connection",
   "setup.relayTitle": "Join a Relay (recommended)",
   "setup.relayDescription":
     "Best for distributed and offline teams; selected peers may still use Direct alongside it.",
+  "setup.memberRelayTitle": "Join a Relay as a member",
+  "setup.memberRelayDescription":
+    "Enroll the local Agent as a regular member with this Relay or another Relay.",
   "setup.directTitle": "Direct only",
   "setup.directDescription":
     "Best for a LAN, VPN, or small team with reachable HTTPS endpoints; no Relay is required.",
+  "setup.memberDirectTitle": "Use Direct as a member",
+  "setup.memberDirectDescription":
+    "Keep hosting Relay while paired members deliver work to this Agent over Direct.",
+  "setup.currentRole": "Current Node role",
+  "setup.roleRelayHost": "Relay host (infrastructure only)",
+  "setup.roleRelayHostDescription":
+    "This host provides routing, durable offline mailboxes, and organization transport. It does not need to join a Relay to keep serving.",
+  "setup.roleHybrid": "Relay host + member Agent",
+  "setup.roleHybridDescription":
+    "This host serves Relay and can also receive and execute work as a regular member. It receives no additional organization authority.",
+  "setup.enableHybrid": "Also connect this host as a member Agent",
+  "setup.enableHybridHint":
+    "This hybrid role is optional; a dedicated Relay does not need it.",
+  "setup.memberConnectionTitle": "Optional: enable the member Agent",
+  "setup.memberConnectionIntro":
+    "Configure this only when the Agent on this server should also receive team work.",
+  "setup.keepRelayOnly": "Keep Relay only",
+  "setup.enableHybridAction": "Validate and enable hybrid role",
   "setup.relayUrl": "Relay URL",
   "setup.relayUrlHint":
     "Production requires HTTPS; loopback HTTP is accepted for local development.",
@@ -1451,6 +1504,8 @@ export const en = {
   "errorCode.SQUAD_SERVICE_CLOSED": "Squad service has stopped",
   "errorCode.SQUAD_CONFIGURATION_IN_PROGRESS":
     "Another Node configuration is being validated",
+  "errorCode.RELAY_HOST_MEMBERSHIP_CONFIRMATION_REQUIRED":
+    "Explicit hybrid-role confirmation is required before a dedicated Relay becomes a member Node",
   "errorCode.INVALID_RELAY_URL": "Relay URL must be an HTTPS origin",
   "errorCode.INVALID_DIRECT_URL": "Direct URL must be an HTTPS origin",
   "errorCode.RELAY_ENROLLMENT_REQUIRED":
@@ -1659,6 +1714,8 @@ const errorCodeKeys = {
   UPDATE_RUN_FAILED: "errorCode.UPDATE_RUN_FAILED",
   SQUAD_SERVICE_CLOSED: "errorCode.SQUAD_SERVICE_CLOSED",
   SQUAD_CONFIGURATION_IN_PROGRESS: "errorCode.SQUAD_CONFIGURATION_IN_PROGRESS",
+  RELAY_HOST_MEMBERSHIP_CONFIRMATION_REQUIRED:
+    "errorCode.RELAY_HOST_MEMBERSHIP_CONFIRMATION_REQUIRED",
   INVALID_RELAY_URL: "errorCode.INVALID_RELAY_URL",
   INVALID_DIRECT_URL: "errorCode.INVALID_DIRECT_URL",
   RELAY_ENROLLMENT_REQUIRED: "errorCode.RELAY_ENROLLMENT_REQUIRED",

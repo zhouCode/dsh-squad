@@ -53,6 +53,11 @@ describe("Squad locale dictionaries", () => {
     expect(formatErrorCode(t, "NODE_STATE_UNAVAILABLE")).toBe(
       "无法验证本地节点状态（NODE_STATE_UNAVAILABLE）",
     );
+    expect(
+      formatErrorCode(t, "RELAY_HOST_MEMBERSHIP_CONFIRMATION_REQUIRED"),
+    ).toBe(
+      "专用 Relay 变为成员节点前需要明确确认混合角色（RELAY_HOST_MEMBERSHIP_CONFIRMATION_REQUIRED）",
+    );
     expect(formatErrorCode(t, "FUTURE_ERROR")).toBe("FUTURE_ERROR");
   });
 

@@ -84,6 +84,7 @@ import {
   type UpdatePeerConnection,
 } from "../shared/pairing.ts";
 import {
+  isRelayHostOnly,
   isTerminalStatus,
   summarizeAttention,
   type SquadConnectionDiagnostics,
@@ -149,6 +150,7 @@ type SetupSource = "UNCONFIGURED" | "FILE" | "INTERFACE" | "EXISTING_DATA";
 type SquadConfigurationErrorCode =
   | "SQUAD_SERVICE_CLOSED"
   | "SQUAD_CONFIGURATION_IN_PROGRESS"
+  | "RELAY_HOST_MEMBERSHIP_CONFIRMATION_REQUIRED"
   | "INVALID_RELAY_URL"
   | "INVALID_DIRECT_URL"
   | "RELAY_ENROLLMENT_REQUIRED"
@@ -589,6 +591,21 @@ export class SquadService extends Service {
   private async configureNodeNow(
     input: NodeSetupInput,
   ): Promise<SquadLocalState> {
+    if (
+      isRelayHostOnly({
+        relay: {
+          serving: this.relayServer !== undefined,
+          configured: this.relayClient !== undefined,
+        },
+        direct: { serving: this.#nodeSettings.directEnabled },
+      }) &&
+      input.confirmRelayHostMembership !== true
+    ) {
+      throw new SquadConfigurationError(
+        "RELAY_HOST_MEMBERSHIP_CONFIRMATION_REQUIRED",
+        "explicit confirmation is required before a dedicated Relay host also becomes a member Node",
+      );
+    }
     let nextRelayClient: RelayClient | undefined;
     let nextRelayTransport: RelayEnvelopeTransport | undefined;
     let nextSettings: RuntimeNodeSettings;

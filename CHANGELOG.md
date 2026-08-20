@@ -4,6 +4,12 @@ All notable changes to this project are documented in this file. The format is b
 
 ## [Unreleased]
 
+## [0.7.2] - 2026-08-20
+
+### Changed
+
+- Dedicated Relay hosts are now identified as infrastructure-only in the WebUI. Member connectivity is collapsed behind an explicit hybrid-role action, and the Host rejects accidental conversion into a member Node unless that role change is confirmed.
+
 ## [0.7.1] - 2026-08-20
 
 ### Added
@@ -172,7 +178,8 @@ All notable changes to this project are documented in this file. The format is b
 - Production Relay URLs require HTTPS; loopback HTTP is accepted only for local development.
 - The Relay is explicitly documented as a trusted content intermediary without end-to-end payload encryption.
 
-[Unreleased]: https://github.com/zhouCode/dsh-squad/compare/v0.7.1...HEAD
+[Unreleased]: https://github.com/zhouCode/dsh-squad/compare/v0.7.2...HEAD
+[0.7.2]: https://github.com/zhouCode/dsh-squad/compare/v0.7.1...v0.7.2
 [0.7.1]: https://github.com/zhouCode/dsh-squad/compare/v0.7.0...v0.7.1
 [0.7.0]: https://github.com/zhouCode/dsh-squad/compare/v0.6.0...v0.7.0
 [0.6.0]: https://github.com/zhouCode/dsh-squad/compare/v0.5.0...v0.6.0

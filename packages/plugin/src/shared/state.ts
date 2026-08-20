@@ -64,6 +64,39 @@ export interface SquadConnectionDiagnostics {
   };
 }
 
+export type SquadNodeRole =
+  | "UNCONFIGURED"
+  | "MEMBER_NODE"
+  | "RELAY_HOST"
+  | "HYBRID";
+
+export interface SquadNodeRoleSource {
+  relay: {
+    configured: boolean;
+    serving: boolean;
+  };
+  direct: {
+    serving: boolean;
+  };
+}
+
+/**
+ * Relay hosting and member connectivity are independent capabilities. Keeping
+ * the distinction explicit prevents a dedicated Relay from looking like an
+ * unconfigured member Node in the WebUI.
+ */
+export function squadNodeRole(source: SquadNodeRoleSource): SquadNodeRole {
+  const memberConnected = source.relay.configured || source.direct.serving;
+  if (source.relay.serving) {
+    return memberConnected ? "HYBRID" : "RELAY_HOST";
+  }
+  return memberConnected ? "MEMBER_NODE" : "UNCONFIGURED";
+}
+
+export function isRelayHostOnly(source: SquadNodeRoleSource): boolean {
+  return squadNodeRole(source) === "RELAY_HOST";
+}
+
 export interface RelayOperationsSnapshot {
   capturedAt: string;
   startedAt: string;

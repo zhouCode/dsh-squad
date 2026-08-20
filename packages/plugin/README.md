@@ -24,7 +24,7 @@ The package contains one Cordis Host plugin, six native Agent tools, a DSH Web C
 ## Install
 
 ```bash
-dsh plugin --profile web add ./dsh-squad-plugin-0.7.1.tgz --offline
+dsh plugin --profile web add ./dsh-squad-plugin-0.7.2.tgz --offline
 dsh web
 ```
 
@@ -79,6 +79,8 @@ Delegation details expose a four-stage created/delivery/execution/result timelin
 The workbench reports local live-event health and the latest successful read. `Sync now` actively pumps organization, outbox, mailbox, and update state.
 
 When the current Node hosts Relay, Connection diagnostics includes a loopback-only operations overview of aggregate enrollment, live mailbox connections, durable backlog age, organization activity, invitations, startup, capacity, and rate limits. It exposes no task payloads or private metrics from remote Nodes.
+
+A Relay host defaults to an infrastructure-only role and does not need to join a Relay. Its local Agent becomes a regular member only after the owner explicitly enables and confirms the optional hybrid role; joining its own Relay creates neither a super Agent nor extra organization authority.
 
 Delegation and Team Planner lists paginate independently in batches of 25 and navigate directly to records opened across views.
 

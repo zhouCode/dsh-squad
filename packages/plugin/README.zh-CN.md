@@ -24,7 +24,7 @@ DSH Squad 把运行在不同电脑、网络和地点上的个人 Agent 组成任
 ## 安装
 
 ```bash
-dsh plugin --profile web add ./dsh-squad-plugin-0.7.1.tgz --offline
+dsh plugin --profile web add ./dsh-squad-plugin-0.7.2.tgz --offline
 dsh web
 ```
 
@@ -61,6 +61,8 @@ Direct 模式需要双方固定对方的 Node ID、公钥和 Direct URL，并在
 Direct 不提供 NAT 穿透或第三方离线邮箱：任务保存在发送方，直到双方同时在线且可达。生产入口必须使用 HTTPS；v0.6 的签名组织目录仍由 Relay 承载。
 
 原生 WebUI 提供`智能体收件箱` / `Agent Inbox`，实时显示节点和当前 Session 组织，并管理签名成员目录、邀请批准或拒绝、逐成员策略、Team Planner 草案、收发箱、HumanTodo 和原生 Session 链接。Agent 还获得组织列表与切换工具。计划草案会一直保留在本地，直到负责人确认；接收方自己的策略和审批仍然独立生效。
+
+Relay 主机默认是仅中继的基础设施角色，不需要再加入 Relay。只有用户在设置中明确启用并确认混合角色后，本机 Agent 才会额外成为普通成员节点；加入自身 Relay 也不会产生超级 Agent 或额外组织权限。
 
 Owner/Admin 可查看邀请的有效、已使用、已过期或已撤销状态，并撤销未使用邀请。一次性 token 只在创建时显示，邀请记录不会泄露 token 或其哈希。
 

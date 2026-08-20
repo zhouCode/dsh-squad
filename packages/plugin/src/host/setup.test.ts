@@ -5,6 +5,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { Context } from "@deepseek-ai/cordis";
 import { describe, expect, it } from "vitest";
+import { SQUAD_VERSION } from "../shared/version.ts";
 import { resolveConfig } from "./config.ts";
 import { createHttpHandler } from "./http.ts";
 import { NodeIdentity } from "./identity.ts";
@@ -30,6 +31,66 @@ async function listen(handler: RequestListener): Promise<{
 }
 
 describe("guided Node setup", () => {
+  it("requires explicit confirmation before a Relay host becomes a member Node", async () => {
+    const root = mkdtempSync(join(tmpdir(), "dsh-squad-guided-hybrid-"));
+    const invitation = "relay-self-membership-invitation-1234";
+    const relay = new SquadService(
+      new Context(),
+      resolveConfig({
+        dataDir: join(root, "relay-node"),
+        displayName: "Relay",
+        relay: {
+          enabled: true,
+          databasePath: join(root, "relay.sqlite"),
+          invites: [
+            {
+              token: invitation,
+              expiresAt: new Date(Date.now() + 60_000).toISOString(),
+            },
+          ],
+        },
+        updates: { stateDir: join(root, "relay-updates") },
+      }),
+    );
+    await relay.start();
+    const http = await listen(createHttpHandler(relay));
+    try {
+      expect(relay.localState()).toMatchObject({
+        relay: { serving: true, configured: false },
+        direct: { serving: false },
+      });
+      await expect(
+        relay.configureNode({
+          mode: "RELAY",
+          displayName: "Relay member",
+          relayUrl: http.url,
+          invitation,
+        }),
+      ).rejects.toMatchObject({
+        code: "RELAY_HOST_MEMBERSHIP_CONFIRMATION_REQUIRED",
+      });
+      expect(relay.database.nodeSetup()).toBeUndefined();
+
+      await relay.configureNode({
+        mode: "RELAY",
+        displayName: "Relay member",
+        relayUrl: http.url,
+        invitation,
+        confirmRelayHostMembership: true,
+      });
+      expect(relay.localState()).toMatchObject({
+        identity: { displayName: "Relay member" },
+        relay: { serving: true, configured: true, url: http.url },
+      });
+      expect(relay.database.nodeSetup()).not.toHaveProperty(
+        "confirmRelayHostMembership",
+      );
+    } finally {
+      await http.close();
+      await relay.close();
+    }
+  });
+
   it("persists Direct setup and restores it without YAML configuration", async () => {
     const root = mkdtempSync(join(tmpdir(), "dsh-squad-guided-direct-"));
     const config = resolveConfig({
@@ -158,7 +219,7 @@ describe("guided Node setup", () => {
       });
       expect(node.localState().identity.displayName).toBe("Alice workstation");
       await expect(node.checkConnections()).resolves.toMatchObject({
-        relay: { status: "CONNECTED", remoteVersion: "0.7.1" },
+        relay: { status: "CONNECTED", remoteVersion: SQUAD_VERSION },
         direct: { status: "READY" },
         queue: { pending: 0, retrying: 0 },
       });
