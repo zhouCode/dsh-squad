@@ -1,6 +1,6 @@
 {
   "name": "dsh-squad",
-  "version": "0.7.0",
+  "version": "0.7.1",
   "description": "DSH-native delegation for distributed teams of independently owned personal Agents",
   "private": true,
   "license": "MIT",

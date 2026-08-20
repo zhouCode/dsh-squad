@@ -123,7 +123,7 @@ Build and install the tarball from this repository:
 ```bash
 pnpm install --frozen-lockfile
 pnpm run pack
-dsh plugin --profile web add ./artifacts/dsh-squad-plugin-0.7.0.tgz --offline
+dsh plugin --profile web add ./artifacts/dsh-squad-plugin-0.7.1.tgz --offline
 dsh web
 ```
 
@@ -348,7 +348,7 @@ DSH_SQUAD_RELEASE_SIGNING_KEY=/secure/path/release-signing-key.pem \
   pnpm release:prepare
 ```
 
-A `v0.7.0` GitHub Release must upload all four files from `artifacts/`: `dsh-squad-plugin-0.7.0.tgz`, its `.sha256`, `dsh-squad-update-manifest-0.7.0.json`, and its `.sig`. Clients reject an update when any asset is missing, the signature fails, or the Release tag does not match.
+A `v0.7.1` GitHub Release must upload all four files from `artifacts/`: `dsh-squad-plugin-0.7.1.tgz`, its `.sha256`, `dsh-squad-update-manifest-0.7.1.json`, and its `.sig`. Clients reject an update when any asset is missing, the signature fails, or the Release tag does not match.
 
 `smoke:delegation` builds a real tarball, installs it into isolated Alice, Bob, and Relay DSH homes, and uses real Chromium to verify WebUI pairing, Team Planner approval and idempotent dispatch, delivery while Bob is offline, Relay and Node restarts, a recipient-only Skill, partial HumanTodo completion, same-Session resume, Outcome privacy boundaries, and reversible plugin disablement. Signed-directory, Relay-authorization, and local-persistence integration tests separately cover organizations. Dedicated end-to-end tests cover Direct signed receipts, forged-receipt rejection, offline queueing, automatic retry after reconnect, and idempotent receipt.
 

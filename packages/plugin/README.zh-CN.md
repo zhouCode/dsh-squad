@@ -24,7 +24,7 @@ DSH Squad 把运行在不同电脑、网络和地点上的个人 Agent 组成任
 ## 安装
 
 ```bash
-dsh plugin --profile web add ./dsh-squad-plugin-0.7.0.tgz --offline
+dsh plugin --profile web add ./dsh-squad-plugin-0.7.1.tgz --offline
 dsh web
 ```
 

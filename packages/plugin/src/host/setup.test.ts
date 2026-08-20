@@ -158,7 +158,7 @@ describe("guided Node setup", () => {
       });
       expect(node.localState().identity.displayName).toBe("Alice workstation");
       await expect(node.checkConnections()).resolves.toMatchObject({
-        relay: { status: "CONNECTED", remoteVersion: "0.7.0" },
+        relay: { status: "CONNECTED", remoteVersion: "0.7.1" },
         direct: { status: "READY" },
         queue: { pending: 0, retrying: 0 },
       });

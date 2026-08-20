@@ -4,8 +4,19 @@ All notable changes to this project are documented in this file. The format is b
 
 ## [Unreleased]
 
+## [0.7.1] - 2026-08-20
+
 ### Added
 
+- An actionable overview summarizes work needing attention, connection health, organization context, update readiness, and the safest next step without turning Relay into a privileged coordinator Agent.
+- Grouped workspace navigation separates daily work, team administration, and system operations while preserving direct access to every existing view.
+- Relay and Direct connectivity can run together on one Node, with explicit per-Peer transport selection and persisted connection changes from the WebUI.
+- Connection diagnostics explain Relay reachability, event-stream health, Direct serving state, queue pressure, retry timing, and sanitized recent failures.
+- Signed, expiring pairing bundles replace routine public-key copy/paste and support import, disable, removal, re-pairing, transport choice, and local execution policy selection.
+- A one-step team join package combines Relay enrollment and organization join intent without persisting either one-time secret.
+- Local automation rules match normalized objectives with explicit glob patterns and independently control execution; unmatched work remains subject to confirmation.
+- Human Todo responses are submitted one item at a time with independent text and verified attachment references, preserving partial progress across restart.
+- Draft Team Planner proposals can be edited locally before approval, including recipients, order, objectives, context, acceptance criteria, and attachment references with optimistic revision checks.
 - Relay hosts now expose a local-only operations dashboard with aggregate enrolled-node, live mailbox connection, durable backlog/oldest item, organization/join/invitation, startup, capacity, and rate-limit metrics. It never exposes task payloads or remote-node private metrics.
 - The Update Center now explains installation readiness before accepting a request: external-updater setup, verified-release availability, duplicate requests, active Delegations, and dispatching plans appear as one preflight checklist. The Host and external updater share the same active-work rules and both enforce them.
 - The Squad workbench now behaves as a keyboard-contained modal: opening and closing restore focus, Escape closes, Tab stays inside, confirmation dialogs preserve their invoker, tab groups support Arrow/Home/End navigation, focus indicators are explicit, and reduced-motion preferences disable the loading animation.
@@ -21,6 +32,16 @@ All notable changes to this project are documented in this file. The format is b
 - Two-party signed ownership transfer lets the current Owner propose and the target explicitly accept before Relay atomically establishes one new Owner and demotes the previous Owner to Admin. Proposals support cancellation, rejection, expiry, and stale-revision invalidation.
 - Owners can rename organizations through an append-only signed metadata event that preserves the pinned root and auditable name history.
 - Owners can irreversibly dissolve organizations through a signed terminal event. Relay closes invitations, pending joins, ownership proposals, and new protocol-v2 routing; Nodes clear Session context while retaining signed directories and task history for audit.
+
+### Changed
+
+- High-impact actions now require focused, keyboard-accessible confirmation dialogs, including trusted execution, plan dispatch, task rejection or cancellation, organization authority changes, dissolution, and automatic updates.
+- Per-member and per-Peer automatic execution now uses receiver-local rules for `SAFE`; only `TRUSTED` bypasses rule matching, and enabling it requires an explicit warning confirmation.
+
+### Fixed
+
+- Controlled Human Todo and Team Planner inputs now capture DOM values before deferred React state updates, preventing forms from disappearing while typing.
+- The Squad close control now uses the correct localized accessible name.
 
 ## [0.7.0] - 2026-08-19
 
@@ -151,7 +172,8 @@ All notable changes to this project are documented in this file. The format is b
 - Production Relay URLs require HTTPS; loopback HTTP is accepted only for local development.
 - The Relay is explicitly documented as a trusted content intermediary without end-to-end payload encryption.
 
-[Unreleased]: https://github.com/zhouCode/dsh-squad/compare/v0.7.0...HEAD
+[Unreleased]: https://github.com/zhouCode/dsh-squad/compare/v0.7.1...HEAD
+[0.7.1]: https://github.com/zhouCode/dsh-squad/compare/v0.7.0...v0.7.1
 [0.7.0]: https://github.com/zhouCode/dsh-squad/compare/v0.6.0...v0.7.0
 [0.6.0]: https://github.com/zhouCode/dsh-squad/compare/v0.5.0...v0.6.0
 [0.5.0]: https://github.com/zhouCode/dsh-squad/compare/v0.4.0...v0.5.0

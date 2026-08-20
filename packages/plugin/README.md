@@ -24,7 +24,7 @@ The package contains one Cordis Host plugin, six native Agent tools, a DSH Web C
 ## Install
 
 ```bash
-dsh plugin --profile web add ./dsh-squad-plugin-0.7.0.tgz --offline
+dsh plugin --profile web add ./dsh-squad-plugin-0.7.1.tgz --offline
 dsh web
 ```
 
