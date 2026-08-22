@@ -6,9 +6,10 @@ import {
 } from "../packages/plugin/src/shared/version.ts";
 
 const root = new URL("../", import.meta.url);
-const expectedDsh = "0.1.0-rc.6";
+const expectedDsh = "0.1.1-rc.2";
+const expectedDshPeers = "0.1.0-rc.6 || 0.1.1-rc.2";
 const expectedCordis = "4.0.1";
-const expectedSquad = "0.7.2";
+const expectedSquad = "0.7.3";
 const dependencyFields = [
   "dependencies",
   "devDependencies",
@@ -71,10 +72,13 @@ for (const path of await packageFiles(projectRoot)) {
     for (const [name, version] of Object.entries(dependencies)) {
       if (
         (name === "@deepseek-ai/dsh" || name.startsWith("@deepseek-ai/dsh-")) &&
-        version !== expectedDsh
+        version !==
+          (field === "peerDependencies" ? expectedDshPeers : expectedDsh)
       ) {
+        const expected =
+          field === "peerDependencies" ? expectedDshPeers : expectedDsh;
         failures.push(
-          `${relative(projectRoot, path)}: ${name} must be ${expectedDsh}, found ${version}`,
+          `${relative(projectRoot, path)}: ${name} must be ${expected}, found ${version}`,
         );
       }
       if (name === "@deepseek-ai/cordis" && version !== expectedCordis) {
@@ -107,5 +111,5 @@ if (failures.length > 0) {
 }
 
 console.log(
-  `Verified Squad ${expectedSquad}, Node 24.18.0, pnpm 10.28.2, DSH ${expectedDsh}, and Cordis ${expectedCordis} pins.`,
+  `Verified Squad ${expectedSquad}, Node 24.18.0, pnpm 10.28.2, DSH target ${expectedDsh}, DSH peers ${expectedDshPeers}, and Cordis ${expectedCordis} pins.`,
 );

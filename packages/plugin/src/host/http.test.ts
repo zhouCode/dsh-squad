@@ -200,6 +200,56 @@ describe("Squad host health", () => {
     expect(checkConnections).toHaveBeenCalledOnce();
   });
 
+  it("routes native Skill discovery and local Team Skill controls", async () => {
+    const releaseId = "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa";
+    const listPublishableSkills = vi.fn(async () => [
+      {
+        name: "release-notes",
+        description: "Prepare release notes",
+        source: "filesystem",
+        provider: "filesystem",
+      },
+    ]);
+    const setTeamSkillActivation = vi.fn((_id: string, activation: string) => ({
+      releaseId,
+      activation,
+    }));
+    const removeTeamSkill = vi.fn();
+    const squad = {
+      listPublishableSkills,
+      setTeamSkillActivation,
+      removeTeamSkill,
+    } as unknown as SquadService;
+    const server = createServer(createHttpHandler(squad));
+    servers.push(server);
+    await new Promise<void>((resolve) =>
+      server.listen(0, "127.0.0.1", resolve),
+    );
+    const address = server.address() as AddressInfo;
+    const base = `http://127.0.0.1:${address.port}/squad/v1/local/team-skills`;
+
+    const native = await fetch(`${base}/native`);
+    expect(native.status).toBe(200);
+    expect(await native.json()).toMatchObject({
+      skills: [{ name: "release-notes" }],
+    });
+
+    const activation = await fetch(`${base}/${releaseId}/activation`, {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({ activation: "DELEGATION" }),
+    });
+    expect(activation.status).toBe(200);
+    expect(setTeamSkillActivation).toHaveBeenCalledWith(
+      releaseId,
+      "DELEGATION",
+    );
+
+    const removal = await fetch(`${base}/${releaseId}`, { method: "DELETE" });
+    expect(removal.status).toBe(200);
+    expect(removeTeamSkill).toHaveBeenCalledWith(releaseId);
+  });
+
   it("actively synchronizes before returning refreshed local state", async () => {
     const refreshNow = vi.fn(async () => ({
       revision: 42,

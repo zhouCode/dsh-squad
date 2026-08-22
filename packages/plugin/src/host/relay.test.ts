@@ -66,7 +66,7 @@ describe("Relay mailbox", () => {
           .prepare("SELECT version FROM schema_meta WHERE singleton = 1")
           .get() as Record<string, unknown>
       ).version,
-    ).toBe(6);
+    ).toBe(7);
     const transferTable = migrated
       .prepare(
         "SELECT name FROM sqlite_master WHERE type = 'table' AND name = 'relay_organization_owner_transfers'",
@@ -79,6 +79,12 @@ describe("Relay mailbox", () => {
     expect(
       organizationColumns.some((column) => column.name === "dissolved_at"),
     ).toBe(true);
+    const teamSkillTable = migrated
+      .prepare(
+        "SELECT name FROM sqlite_master WHERE type = 'table' AND name = 'relay_team_skill_releases'",
+      )
+      .get() as Record<string, unknown> | undefined;
+    expect(teamSkillTable?.name).toBe("relay_team_skill_releases");
     const row = migrated
       .prepare(
         "SELECT invitation_id, revoked_at FROM relay_organization_invites WHERE token_hash = ?",

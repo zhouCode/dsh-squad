@@ -8,6 +8,11 @@ import {
 import { automationRuleInputSchema } from "../shared/automation.ts";
 import { updateModeSchema } from "../shared/updates.ts";
 import {
+  publishTeamSkillInputSchema,
+  teamSkillActivationSchema,
+  teamSkillReviewActionSchema,
+} from "../shared/team-skills.ts";
+import {
   importPairingBundleSchema,
   updatePeerConnectionSchema,
 } from "../shared/pairing.ts";
@@ -206,6 +211,77 @@ export function createHttpHandler(squad: SquadService) {
       ) {
         await readJson(req, 1_024);
         reply(res, 202, await squad.requestUpdateInstall());
+        return;
+      }
+      if (
+        req.method === "GET" &&
+        url.pathname === "/squad/v1/local/team-skills/native"
+      ) {
+        reply(res, 200, { skills: await squad.listPublishableSkills() });
+        return;
+      }
+      if (
+        req.method === "POST" &&
+        url.pathname === "/squad/v1/local/team-skills/publish"
+      ) {
+        const body = await readJson(req, 16 * 1024);
+        reply(
+          res,
+          201,
+          await squad.publishTeamSkill(publishTeamSkillInputSchema.parse(body)),
+        );
+        return;
+      }
+      const teamSkillAction =
+        /^\/squad\/v1\/local\/team-skills\/([0-9a-f-]{36})\/(review|install|activation)$/u.exec(
+          url.pathname,
+        );
+      if (
+        req.method === "POST" &&
+        teamSkillAction?.[1] !== undefined &&
+        teamSkillAction[2] !== undefined
+      ) {
+        const body = (await readJson(req, 16 * 1024)) as Record<
+          string,
+          unknown
+        >;
+        if (teamSkillAction[2] === "review") {
+          reply(
+            res,
+            200,
+            await squad.reviewTeamSkill(
+              teamSkillAction[1],
+              teamSkillReviewActionSchema.parse(body.action),
+              typeof body.reason === "string" ? body.reason : undefined,
+            ),
+          );
+          return;
+        }
+        if (teamSkillAction[2] === "install") {
+          reply(
+            res,
+            200,
+            await squad.installTeamSkill(teamSkillAction[1], body),
+          );
+          return;
+        }
+        reply(
+          res,
+          200,
+          squad.setTeamSkillActivation(
+            teamSkillAction[1],
+            teamSkillActivationSchema.parse(body.activation),
+          ),
+        );
+        return;
+      }
+      const teamSkillRemoval =
+        /^\/squad\/v1\/local\/team-skills\/([0-9a-f-]{36})$/u.exec(
+          url.pathname,
+        );
+      if (req.method === "DELETE" && teamSkillRemoval?.[1] !== undefined) {
+        squad.removeTeamSkill(teamSkillRemoval[1]);
+        reply(res, 200, { ok: true });
         return;
       }
       if (

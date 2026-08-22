@@ -130,10 +130,11 @@ function localState(port) {
 }
 
 class DshHost {
-  constructor(label, home, port) {
+  constructor(label, home, port, suppressBrowserOpen) {
     this.label = label;
     this.home = home;
     this.port = port;
+    this.suppressBrowserOpen = suppressBrowserOpen;
     this.output = "";
     this.child = undefined;
     this.exit = undefined;
@@ -141,29 +142,27 @@ class DshHost {
 
   async start(expectSquad = true) {
     assert.equal(this.child, undefined, `${this.label} is already running`);
-    const child = spawn(
-      "pnpm",
-      [
-        "exec",
-        "dsh",
-        "web",
-        "--host",
-        "127.0.0.1",
-        "--port",
-        String(this.port),
-      ],
-      {
-        cwd: root,
-        env: {
-          ...process.env,
-          DSH_HOME: this.home,
-          DSH_TELEMETRY_MODE: "DISABLED",
-          DSH_TOOLS_MODE: "native",
-        },
-        detached: process.platform !== "win32",
-        stdio: ["ignore", "pipe", "pipe"],
+    const args = [
+      "exec",
+      "dsh",
+      "web",
+      "--host",
+      "127.0.0.1",
+      "--port",
+      String(this.port),
+    ];
+    if (this.suppressBrowserOpen) args.push("--no-open");
+    const child = spawn("pnpm", args, {
+      cwd: root,
+      env: {
+        ...process.env,
+        DSH_HOME: this.home,
+        DSH_TELEMETRY_MODE: "DISABLED",
+        DSH_TOOLS_MODE: "native",
       },
-    );
+      detached: process.platform !== "win32",
+      stdio: ["ignore", "pipe", "pipe"],
+    });
     this.child = child;
     this.output = "";
     const capture = (chunk) => {
@@ -629,6 +628,13 @@ async function main() {
     "v24.18.0",
     "smoke requires the pinned Node.js 24.18.0",
   );
+  const dshVersionOutput = run("pnpm", ["exec", "dsh", "--version"]);
+  const dshVersion = dshVersionOutput.match(/0\.1\.\d+-rc\.\d+/gu)?.at(-1);
+  assert(
+    dshVersion === "0.1.0-rc.6" || dshVersion === "0.1.1-rc.2",
+    `smoke requires a supported DSH version, found ${dshVersion ?? "unknown"}`,
+  );
+  log(`testing DeepSeek Harness ${dshVersion}`);
   await mkdir(artifactsDir, { recursive: true });
 
   log("building and packing the independently installable plugin");
@@ -664,9 +670,20 @@ async function main() {
     freePort(),
     freePort(),
   ]);
-  const alice = new DshHost("Alice DSH", aliceHome, alicePort);
-  const bob = new DshHost("Bob DSH", bobHome, bobPort);
-  const relay = new DshHost("Relay DSH", relayHome, relayPort);
+  const suppressBrowserOpen = dshVersion !== "0.1.0-rc.6";
+  const alice = new DshHost(
+    "Alice DSH",
+    aliceHome,
+    alicePort,
+    suppressBrowserOpen,
+  );
+  const bob = new DshHost("Bob DSH", bobHome, bobPort, suppressBrowserOpen);
+  const relay = new DshHost(
+    "Relay DSH",
+    relayHome,
+    relayPort,
+    suppressBrowserOpen,
+  );
   let browser;
 
   try {
@@ -1159,12 +1176,15 @@ async function main() {
     const relayRoot = await fetch(`http://127.0.0.1:${relayPort}/`);
     assert.equal(relayRoot.status, 200);
     const removedRoute = await fetch(`${relayUrl}/squad/v1/local/state`);
-    assert.equal(removedRoute.status, 200);
-    assert.match(
-      removedRoute.headers.get("content-type") ?? "",
-      /^text\/html(?:;|$)/u,
-    );
-    assert(!(await removedRoute.text()).includes('"identity"'));
+    const expectedMissingRouteStatus = dshVersion === "0.1.0-rc.6" ? 200 : 404;
+    assert.equal(removedRoute.status, expectedMissingRouteStatus);
+    if (expectedMissingRouteStatus === 200) {
+      assert.match(
+        removedRoute.headers.get("content-type") ?? "",
+        /^text\/html(?:;|$)/u,
+      );
+      assert(!(await removedRoute.text()).includes('"identity"'));
+    }
     const disabledPage = await context.newPage();
     await disabledPage.goto(`http://127.0.0.1:${relayPort}`);
     await disabledPage
@@ -1180,7 +1200,7 @@ async function main() {
     await disabledPage.close();
 
     log(
-      "PASS: tarball, Team Planner approval, bilingual DSH UI, offline Relay, Skill, Todo, resume, privacy, and Chromium",
+      `PASS on DSH ${dshVersion}: tarball, Team Planner approval, bilingual DSH UI, offline Relay, Skill, Todo, resume, privacy, and Chromium`,
     );
   } catch (error) {
     for (const host of [alice, bob, relay]) {

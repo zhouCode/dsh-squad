@@ -4,6 +4,24 @@ All notable changes to this project are documented in this file. The format is b
 
 ## [Unreleased]
 
+## [0.7.3] - 2026-08-22
+
+### Added
+
+- A Relay-backed organization Team Skill catalog with Node-signed immutable releases, organization-revision-bound Owner/Admin approval and revocation, explicit member installation, and locally retained audit state.
+- Native Skill Registry integration that places installed Team Skills beside native Skills in the chat `/` menu without introducing a second invocation mechanism.
+- Per-installation `Disabled`, `Manual only`, `Local`, and `Delegation` activation policies in the bilingual WebUI. New installations default to manual invocation, while delegated auto-selection requires an explicit opt-in.
+
+### Changed
+
+- Updated the primary development and acceptance target to DeepSeek Harness `0.1.1-rc.2` while retaining an explicit `0.1.0-rc.6` peer range and isolated legacy regression.
+- Adapted command test fixtures to the new attachment-aware invocation contract and made the three-node smoke honor each supported Harness version's disabled-plugin route behavior.
+- Update compatibility checks now read the Node's actually installed Harness package version, so an rc.6 Node cannot accept a future release that requires rc.2 merely because the plugin was built against rc.2.
+
+### Security
+
+- Team Skill bundles grant no tool or credential authority and are verified against the signed organization directory, publisher signature, content hash, safe relative paths, and bounded file/size limits. Publication rejects symlinks, private-key material, and common secret filenames; revocation automatically disables installed copies.
+
 ## [0.7.2] - 2026-08-20
 
 ### Changed
@@ -178,7 +196,8 @@ All notable changes to this project are documented in this file. The format is b
 - Production Relay URLs require HTTPS; loopback HTTP is accepted only for local development.
 - The Relay is explicitly documented as a trusted content intermediary without end-to-end payload encryption.
 
-[Unreleased]: https://github.com/zhouCode/dsh-squad/compare/v0.7.2...HEAD
+[Unreleased]: https://github.com/zhouCode/dsh-squad/compare/v0.7.3...HEAD
+[0.7.3]: https://github.com/zhouCode/dsh-squad/compare/v0.7.2...v0.7.3
 [0.7.2]: https://github.com/zhouCode/dsh-squad/compare/v0.7.1...v0.7.2
 [0.7.1]: https://github.com/zhouCode/dsh-squad/compare/v0.7.0...v0.7.1
 [0.7.0]: https://github.com/zhouCode/dsh-squad/compare/v0.6.0...v0.7.0

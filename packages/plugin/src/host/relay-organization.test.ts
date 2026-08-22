@@ -17,6 +17,11 @@ import { NodeIdentity } from "./identity.ts";
 import { OrganizationAuthority } from "./organization.ts";
 import { RelayClient } from "./relay-client.ts";
 import { RelayServer } from "./relay.ts";
+import {
+  unsignedTeamSkillReleaseSchema,
+  unsignedTeamSkillReviewSchema,
+} from "../shared/team-skills.ts";
+import { measureTeamSkillBundle } from "./team-skills.ts";
 
 const cleanups: Array<() => Promise<void> | void> = [];
 
@@ -292,6 +297,98 @@ describe("Relay organization directory", () => {
     expect((await carol.nodes()).map(({ displayName }) => displayName)).toEqual(
       ["Alice", "Bob", "Carol"],
     );
+
+    const skillBundle = {
+      version: 1 as const,
+      content: "Create a concise weekly team summary.",
+      files: [],
+    };
+    const skillMetrics = measureTeamSkillBundle(skillBundle);
+    const skillUnsigned = unsignedTeamSkillReleaseSchema.parse({
+      version: 1,
+      releaseId: randomUUID(),
+      organizationId,
+      skillName: "weekly-summary",
+      skillVersion: "1.0.0",
+      description: "Create a weekly team summary",
+      publisherMembershipId: carolMembershipId,
+      publisherNodeId: carolIdentity.nodeId,
+      bundleSha256: skillMetrics.sha256,
+      bundleSize: skillMetrics.bundleSize,
+      fileCount: skillMetrics.fileCount,
+      unpackedSize: skillMetrics.unpackedSize,
+      createdAt: new Date().toISOString(),
+    });
+    const skillRelease = {
+      ...skillUnsigned,
+      signature: carolIdentity.sign(skillUnsigned),
+    };
+    expect(
+      await carol.publishTeamSkill(organizationId, skillRelease, skillBundle),
+    ).toMatchObject({ status: "PENDING" });
+    expect(await dave.teamSkills()).toEqual([]);
+    expect((await alice.teamSkills())[0]).toMatchObject({
+      status: "PENDING",
+      release: { skillName: "weekly-summary" },
+    });
+    await expect(
+      dave.downloadTeamSkill(skillRelease.releaseId),
+    ).rejects.toMatchObject({ code: "ORGANIZATION_MEMBERSHIP_REQUIRED" });
+
+    const memberReviewUnsigned = unsignedTeamSkillReviewSchema.parse({
+      version: 1,
+      reviewId: randomUUID(),
+      organizationId,
+      organizationRevision: 4,
+      releaseId: skillRelease.releaseId,
+      action: "APPROVE",
+      reviewerMembershipId: carolMembershipId,
+      reviewerNodeId: carolIdentity.nodeId,
+      reviewedAt: new Date().toISOString(),
+    });
+    await expect(
+      carol.reviewTeamSkill(organizationId, skillRelease.releaseId, {
+        ...memberReviewUnsigned,
+        signature: carolIdentity.sign(memberReviewUnsigned),
+      }),
+    ).rejects.toMatchObject({ code: "ORGANIZATION_MANAGER_REQUIRED" });
+
+    const adminReviewUnsigned = unsignedTeamSkillReviewSchema.parse({
+      ...memberReviewUnsigned,
+      reviewId: randomUUID(),
+      reviewerMembershipId: bobMembershipId,
+      reviewerNodeId: bobIdentity.nodeId,
+      reviewedAt: new Date().toISOString(),
+    });
+    expect(
+      await bob.reviewTeamSkill(organizationId, skillRelease.releaseId, {
+        ...adminReviewUnsigned,
+        signature: bobIdentity.sign(adminReviewUnsigned),
+      }),
+    ).toMatchObject({ status: "APPROVED" });
+    expect(await alice.downloadTeamSkill(skillRelease.releaseId)).toEqual({
+      release: skillRelease,
+      bundle: skillBundle,
+    });
+
+    const revokeUnsigned = unsignedTeamSkillReviewSchema.parse({
+      ...adminReviewUnsigned,
+      reviewId: randomUUID(),
+      action: "REVOKE",
+      reviewerMembershipId: ownerMembershipId,
+      reviewerNodeId: aliceIdentity.nodeId,
+      reviewedAt: new Date().toISOString(),
+    });
+    expect(
+      await alice.reviewTeamSkill(organizationId, skillRelease.releaseId, {
+        ...revokeUnsigned,
+        signature: aliceIdentity.sign(revokeUnsigned),
+      }),
+    ).toMatchObject({ status: "REVOKED" });
+    await expect(
+      alice.downloadTeamSkill(skillRelease.releaseId),
+    ).rejects.toMatchObject({ code: "TEAM_SKILL_REVOKED" });
+
     await expect(
       carol.createOrganizationInvitation(organizationId, 60),
     ).rejects.toMatchObject({ code: "ORGANIZATION_MANAGER_REQUIRED" });

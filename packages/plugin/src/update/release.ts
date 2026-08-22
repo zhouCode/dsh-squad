@@ -5,17 +5,18 @@ import {
   type KeyObject,
 } from "node:crypto";
 import { readFileSync } from "node:fs";
+import { createRequire } from "node:module";
 import { canonicalBytes, sha256Hex } from "../shared/canonical.ts";
 import {
   compareVersions,
   releaseManifestSchema,
   type ReleaseManifest,
 } from "../shared/updates.ts";
-import { DSH_VERSION } from "../shared/version.ts";
 
 const MAX_METADATA_BYTES = 256 * 1024;
 const MAX_REDIRECTS = 5;
 const DEFAULT_REPOSITORY = "zhouCode/dsh-squad";
+const requireFromPlugin = createRequire(import.meta.url);
 
 export const PINNED_RELEASE_PUBLIC_KEY = readFileSync(
   new URL("../../release-signing-public.pem", import.meta.url),
@@ -47,6 +48,39 @@ export interface ReleaseCheck {
   available: boolean;
   latestVersion: string;
   release?: VerifiedRelease;
+}
+
+export function installedDshVersion(): string {
+  let manifest: unknown;
+  try {
+    manifest = requireFromPlugin(
+      "@deepseek-ai/dsh-agent/package.json",
+    ) as unknown;
+  } catch (error) {
+    throw new Error("could not determine the installed DSH version", {
+      cause: error,
+    });
+  }
+  if (
+    typeof manifest !== "object" ||
+    manifest === null ||
+    !("version" in manifest) ||
+    typeof manifest.version !== "string"
+  ) {
+    throw new Error("the installed DSH package has no valid version");
+  }
+  return manifest.version;
+}
+
+export function assertCompatibleDshVersion(
+  minimumVersion: string,
+  actualVersion = installedDshVersion(),
+): void {
+  if (compareVersions(minimumVersion, actualVersion) > 0) {
+    throw new Error(
+      `release requires DSH ${minimumVersion}, but this Node runs ${actualVersion}`,
+    );
+  }
 }
 
 function publicKeyObject(publicKeyPem: string): KeyObject {
@@ -302,11 +336,7 @@ export async function checkLatestRelease(
   if (manifest.asset.name !== `dsh-squad-plugin-${version}.tgz`) {
     throw new Error("signed manifest contains an unexpected package filename");
   }
-  if (compareVersions(manifest.minDshVersion, DSH_VERSION) > 0) {
-    throw new Error(
-      `release requires DSH ${manifest.minDshVersion}, but this updater is pinned to ${DSH_VERSION}`,
-    );
-  }
+  assertCompatibleDshVersion(manifest.minDshVersion);
   const packageAsset = asset(release, manifest.asset.name);
   if (packageAsset.size !== manifest.asset.size) {
     throw new Error("GitHub asset size and signed manifest do not match");

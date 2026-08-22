@@ -30,6 +30,7 @@ export const zh = {
   "tab.completed": "已完成",
   "tab.archived": "归档",
   "tab.organizations": "组织",
+  "tab.skills": "团队 Skill",
   "tab.diagnostics": "连接诊断",
   "tab.updates": "更新",
   "tab.settings": "设置",
@@ -177,6 +178,10 @@ export const zh = {
   "confirm.enableHybrid":
     "这台 DSH 当前只托管 Relay。继续后，本机还会成为普通成员 Node，可以接收任务并调用本机 Agent；如果 Relay 地址指向本机，它会登记到自己的 Relay。中继权限不会因此升级，也不会变成超级 Agent。",
   "confirm.enableHybridAction": "启用混合角色",
+  "confirm.teamSkillDelegationTitle": "允许团队 Skill 用于委派？",
+  "confirm.teamSkillDelegation":
+    "这会允许模型在接收 Squad 委派时自动选择该团队 Skill。Skill 不会获得额外工具权限，但其指令会影响自动执行；请仅对已审核且信任的版本启用。",
+  "confirm.enableTeamSkillDelegationAction": "允许用于委派",
   "confirm.automationRuleTitle": "启用本机自动执行规则？",
   "confirm.automationRule":
     "规则“{name}”会让匹配“{pattern}”的任务无需人工确认，并最多开放 {count} 个指定工具。仅对已设为“匹配本机规则”的成员生效。",
@@ -607,6 +612,60 @@ export const zh = {
     "Direct 对等方仍可正常使用；创建、加入和同步组织需要先在设置中配置 Relay。",
   "organizations.retainedHint":
     "切换连接方式不会删除已保存的组织、身份或历史任务。",
+  "teamSkills.title": "团队 Skill",
+  "teamSkills.intro":
+    "将本机原生 Skill 以签名版本发布到组织目录；成员审核、安装后仍由各自节点控制是否启用。",
+  "teamSkills.slashHint":
+    "已启用的团队 Skill 与原生 Skill 使用同一个对话框 / 菜单；默认仅允许本人手动调用。",
+  "teamSkills.relayRequired":
+    "组织 Skill 目录需要 Relay。已安装的 Skill 仍保留在本机，并继续遵循本机启用策略。",
+  "teamSkills.publishTitle": "发布原生 Skill",
+  "teamSkills.publishHint":
+    "发布包会过滤密钥类文件并由当前节点签名。Owner / Admin 发布后自动批准，Member 发布后等待审核。",
+  "teamSkills.organization": "目标组织",
+  "teamSkills.selectOrganization": "选择组织",
+  "teamSkills.nativeSkill": "本机原生 Skill",
+  "teamSkills.loadingNative": "正在读取…",
+  "teamSkills.selectNative": "选择要发布的 Skill",
+  "teamSkills.version": "版本",
+  "teamSkills.changelog": "变更说明",
+  "teamSkills.publish": "签名并发布",
+  "teamSkills.catalogTitle": "组织目录",
+  "teamSkills.empty": "组织目录中还没有可见的 Skill 版本。",
+  "teamSkills.installedTitle": "本机安装",
+  "teamSkills.installedEmpty": "本机还没有安装团队 Skill。",
+  "teamSkills.installedVersion":
+    "已安装为 /{name}；在下方本机安装区调整启用方式。",
+  "teamSkills.publisher": "发布者",
+  "teamSkills.packageSize": "文件 / 解包大小",
+  "teamSkills.localName": "本地调用名称",
+  "teamSkills.approve": "批准",
+  "teamSkills.revoke": "撤销",
+  "teamSkills.install": "安装（默认仅手动）",
+  "teamSkills.update": "更新本地版本",
+  "teamSkills.activation": "本机启用方式",
+  "teamSkills.remove": "移除本地安装",
+  "teamSkills.status.PENDING": "待审核",
+  "teamSkills.status.APPROVED": "已批准",
+  "teamSkills.status.REVOKED": "已撤销",
+  "teamSkills.activation.DISABLED": "禁用",
+  "teamSkills.activation.MANUAL": "仅手动 / 调用",
+  "teamSkills.activation.LOCAL": "本地对话可自动选择",
+  "teamSkills.activation.DELEGATION": "本地与委派均可自动选择",
+  "teamSkills.activationHint.DISABLED": "不出现在 / 菜单中，模型也不能加载。",
+  "teamSkills.activationHint.MANUAL": "出现在 / 菜单中，但模型不会自行选择。",
+  "teamSkills.activationHint.LOCAL":
+    "普通本地对话可由模型选择；Squad 接收的委派不会自动使用。",
+  "teamSkills.activationHint.DELEGATION":
+    "普通对话和 Squad 委派都可由模型选择；仍受本机工具与权限策略限制。",
+  "teamSkills.notice.published": "Skill 版本已发布。",
+  "teamSkills.notice.approved": "Skill 版本已批准。",
+  "teamSkills.notice.revoked": "Skill 版本已撤销，已安装副本会自动禁用。",
+  "teamSkills.notice.installed": "Skill 已安装，默认仅允许手动调用。",
+  "teamSkills.notice.updated": "本地 Skill 版本已更新。",
+  "teamSkills.notice.activationSaved": "本机启用方式已保存。",
+  "teamSkills.notice.removed": "本地安装已移除。",
+  "teamSkills.error.action": "团队 Skill 操作失败。",
   "joinPackage.haveOne": "已有团队加入包？",
   "joinPackage.onboardingHint":
     "粘贴管理员发来的加入包，Squad 会一次完成 Relay 登记和组织加入申请。",
@@ -786,6 +845,7 @@ export const en = {
   "tab.completed": "Completed",
   "tab.archived": "Archive",
   "tab.organizations": "Organizations",
+  "tab.skills": "Team Skills",
   "tab.diagnostics": "Connection",
   "tab.updates": "Updates",
   "tab.settings": "Settings",
@@ -936,6 +996,11 @@ export const en = {
   "confirm.enableHybrid":
     "This DSH currently only hosts Relay. Continuing also makes it a regular member Node that can receive work and invoke its local Agent. If the Relay URL points back to this host, the Node enrolls with its own Relay. This grants no extra Relay authority and does not create a super Agent.",
   "confirm.enableHybridAction": "Enable hybrid role",
+  "confirm.teamSkillDelegationTitle":
+    "Allow this Team Skill in delegated work?",
+  "confirm.teamSkillDelegation":
+    "This lets the model select the Team Skill automatically while handling Squad delegations. It gains no extra tool permissions, but its instructions can affect automatic execution. Enable only a reviewed version you trust.",
+  "confirm.enableTeamSkillDelegationAction": "Allow in delegations",
   "confirm.automationRuleTitle": "Enable this local automation rule?",
   "confirm.automationRule":
     "Rule “{name}” lets tasks matching “{pattern}” skip human confirmation with at most {count} explicitly allowed tools. It only affects senders set to “Match local rules”.",
@@ -1387,6 +1452,66 @@ export const en = {
     "Direct peers remain available. Configure a Relay in Settings before creating, joining, or synchronizing organizations.",
   "organizations.retainedHint":
     "Switching connections does not delete saved organizations, identity, or task history.",
+  "teamSkills.title": "Team Skills",
+  "teamSkills.intro":
+    "Publish a signed version of a native local Skill to an organization. Each member still reviews, installs, and activates it on their own Node.",
+  "teamSkills.slashHint":
+    "Enabled team Skills and native Skills share the same chat / menu. New installations default to explicit manual invocation only.",
+  "teamSkills.relayRequired":
+    "The organization Skill catalog requires Relay. Existing installations remain local and keep their local activation policy.",
+  "teamSkills.publishTitle": "Publish a native Skill",
+  "teamSkills.publishHint":
+    "Squad filters secret-like files and signs the package with this Node. Owner and Admin releases are approved immediately; Member releases await review.",
+  "teamSkills.organization": "Organization",
+  "teamSkills.selectOrganization": "Select an organization",
+  "teamSkills.nativeSkill": "Native local Skill",
+  "teamSkills.loadingNative": "Loading…",
+  "teamSkills.selectNative": "Select a Skill to publish",
+  "teamSkills.version": "Version",
+  "teamSkills.changelog": "Changelog",
+  "teamSkills.publish": "Sign and publish",
+  "teamSkills.catalogTitle": "Organization catalog",
+  "teamSkills.empty":
+    "No visible Skill releases are in the organization catalog.",
+  "teamSkills.installedTitle": "Local installations",
+  "teamSkills.installedEmpty": "No Team Skill is installed on this Node.",
+  "teamSkills.installedVersion":
+    "Installed as /{name}; change its activation under Local installations below.",
+  "teamSkills.publisher": "Publisher",
+  "teamSkills.packageSize": "Files / unpacked size",
+  "teamSkills.localName": "Local invocation name",
+  "teamSkills.approve": "Approve",
+  "teamSkills.revoke": "Revoke",
+  "teamSkills.install": "Install (manual by default)",
+  "teamSkills.update": "Update local version",
+  "teamSkills.activation": "Local activation",
+  "teamSkills.remove": "Remove local installation",
+  "teamSkills.status.PENDING": "Pending review",
+  "teamSkills.status.APPROVED": "Approved",
+  "teamSkills.status.REVOKED": "Revoked",
+  "teamSkills.activation.DISABLED": "Disabled",
+  "teamSkills.activation.MANUAL": "Manual / invocation only",
+  "teamSkills.activation.LOCAL": "Model-selectable in local chats",
+  "teamSkills.activation.DELEGATION":
+    "Model-selectable locally and in delegations",
+  "teamSkills.activationHint.DISABLED":
+    "Hidden from the / menu and unavailable to the model.",
+  "teamSkills.activationHint.MANUAL":
+    "Shown in the / menu, but the model cannot select it on its own.",
+  "teamSkills.activationHint.LOCAL":
+    "The model may select it in ordinary local chats, but not in received Squad delegations.",
+  "teamSkills.activationHint.DELEGATION":
+    "The model may select it in local chats and Squad delegations, still bounded by local tools and permissions.",
+  "teamSkills.notice.published": "The Skill release was published.",
+  "teamSkills.notice.approved": "The Skill release was approved.",
+  "teamSkills.notice.revoked":
+    "The Skill release was revoked and installed copies were disabled.",
+  "teamSkills.notice.installed":
+    "The Skill was installed with manual-only invocation by default.",
+  "teamSkills.notice.updated": "The local Skill version was updated.",
+  "teamSkills.notice.activationSaved": "The local activation policy was saved.",
+  "teamSkills.notice.removed": "The local installation was removed.",
+  "teamSkills.error.action": "The team Skill operation failed.",
   "joinPackage.haveOne": "Already have a team join package?",
   "joinPackage.onboardingHint":
     "Paste the package from an administrator. Squad enrolls this Node with Relay and submits the organization join request in one step.",

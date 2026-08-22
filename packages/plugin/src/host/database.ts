@@ -39,6 +39,16 @@ import {
   type AutomationRuleInput,
 } from "../shared/automation.ts";
 import {
+  teamSkillActivationSchema,
+  teamSkillCatalogEntrySchema,
+  teamSkillInstallationSchema,
+  teamSkillReleaseSchema,
+  type TeamSkillActivation,
+  type TeamSkillCatalogEntry,
+  type TeamSkillInstallation,
+  type TeamSkillRelease,
+} from "../shared/team-skills.ts";
+import {
   defaultOrganizationPeerPolicy,
   organizationDirectoryBundleSchema,
   organizationDirectoryEventSchema,
@@ -156,6 +166,10 @@ export interface ResolvedDelegationRecipient {
   organizationId?: string;
   membershipId?: string;
   senderMembershipId?: string;
+}
+
+export interface TeamSkillInstallationRecord extends TeamSkillInstallation {
+  installPath: string;
 }
 
 type SqlRow = Record<string, unknown>;
@@ -455,7 +469,32 @@ export class SquadDatabase {
         updated_at TEXT NOT NULL,
         FOREIGN KEY(organization_id) REFERENCES organizations(organization_id) ON DELETE CASCADE
       );
-    `);
+
+      CREATE TABLE IF NOT EXISTS team_skill_catalog (
+        release_id TEXT PRIMARY KEY,
+        organization_id TEXT NOT NULL,
+        skill_name TEXT NOT NULL,
+        skill_version TEXT NOT NULL,
+        entry_json TEXT NOT NULL,
+        synced_at TEXT NOT NULL,
+        UNIQUE(organization_id, skill_name, skill_version)
+      );
+      CREATE INDEX IF NOT EXISTS team_skill_catalog_org_idx
+        ON team_skill_catalog(organization_id, skill_name, skill_version);
+
+      CREATE TABLE IF NOT EXISTS team_skill_installations (
+        organization_id TEXT NOT NULL,
+        skill_name TEXT NOT NULL,
+        release_id TEXT NOT NULL,
+        release_json TEXT NOT NULL,
+        local_name TEXT NOT NULL UNIQUE,
+        activation TEXT NOT NULL CHECK (activation IN ('DISABLED', 'MANUAL', 'LOCAL', 'DELEGATION')),
+        install_path TEXT NOT NULL,
+        installed_at TEXT NOT NULL,
+        updated_at TEXT NOT NULL,
+        PRIMARY KEY(organization_id, skill_name)
+      );
+      `);
     const version = this.#db
       .prepare("SELECT version FROM schema_meta WHERE singleton = 1")
       .get() as SqlRow | undefined;
@@ -633,7 +672,36 @@ export class SquadDatabase {
       this.#db.exec("UPDATE schema_meta SET version = 12 WHERE singleton = 1");
       currentVersion = 12;
     }
-    if (currentVersion !== 12) {
+    if (currentVersion === 12) {
+      this.#db.exec(`
+        CREATE TABLE IF NOT EXISTS team_skill_catalog (
+          release_id TEXT PRIMARY KEY,
+          organization_id TEXT NOT NULL,
+          skill_name TEXT NOT NULL,
+          skill_version TEXT NOT NULL,
+          entry_json TEXT NOT NULL,
+          synced_at TEXT NOT NULL,
+          UNIQUE(organization_id, skill_name, skill_version)
+        );
+        CREATE INDEX IF NOT EXISTS team_skill_catalog_org_idx
+          ON team_skill_catalog(organization_id, skill_name, skill_version);
+        CREATE TABLE IF NOT EXISTS team_skill_installations (
+          organization_id TEXT NOT NULL,
+          skill_name TEXT NOT NULL,
+          release_id TEXT NOT NULL,
+          release_json TEXT NOT NULL,
+          local_name TEXT NOT NULL UNIQUE,
+          activation TEXT NOT NULL CHECK (activation IN ('DISABLED', 'MANUAL', 'LOCAL', 'DELEGATION')),
+          install_path TEXT NOT NULL,
+          installed_at TEXT NOT NULL,
+          updated_at TEXT NOT NULL,
+          PRIMARY KEY(organization_id, skill_name)
+        );
+        UPDATE schema_meta SET version = 13 WHERE singleton = 1;
+      `);
+      currentVersion = 13;
+    }
+    if (currentVersion !== 13) {
       throw new Error(
         `unsupported Squad database version ${String(currentVersion)}`,
       );
@@ -850,6 +918,222 @@ export class SquadDatabase {
       .prepare("DELETE FROM automation_rules WHERE id = ?")
       .run(idSchema.parse(id)).changes;
     if (changed !== 1) throw new Error("unknown automation rule");
+  }
+
+  applyTeamSkillCatalog(entries: TeamSkillCatalogEntry[]): boolean {
+    const parsed = entries.map((entry) =>
+      teamSkillCatalogEntrySchema.parse(entry),
+    );
+    let changed = false;
+    const syncedAt = new Date().toISOString();
+    this.transaction(() => {
+      const receivedIds = new Set(
+        parsed.map((entry) => entry.release.releaseId),
+      );
+      const existingIds = this.#db
+        .prepare("SELECT release_id FROM team_skill_catalog")
+        .all() as SqlRow[];
+      const remove = this.#db.prepare(
+        "DELETE FROM team_skill_catalog WHERE release_id = ?",
+      );
+      const disable = this.#db.prepare(`
+        UPDATE team_skill_installations
+        SET activation = 'DISABLED', updated_at = ?
+        WHERE release_id = ? AND activation <> 'DISABLED'
+      `);
+      for (const row of existingIds) {
+        const releaseId = String(row.release_id);
+        if (!receivedIds.has(releaseId)) {
+          remove.run(releaseId);
+          if (disable.run(syncedAt, releaseId).changes > 0) changed = true;
+          changed = true;
+        }
+      }
+      const find = this.#db.prepare(
+        "SELECT entry_json FROM team_skill_catalog WHERE release_id = ?",
+      );
+      const upsert = this.#db.prepare(`
+        INSERT INTO team_skill_catalog(
+          release_id, organization_id, skill_name, skill_version,
+          entry_json, synced_at
+        ) VALUES (?, ?, ?, ?, ?, ?)
+        ON CONFLICT(release_id) DO UPDATE SET
+          entry_json = excluded.entry_json,
+          synced_at = excluded.synced_at
+      `);
+      for (const entry of parsed) {
+        const serialized = JSON.stringify(entry);
+        const existing = find.get(entry.release.releaseId) as
+          | SqlRow
+          | undefined;
+        if (existing?.entry_json !== serialized) changed = true;
+        upsert.run(
+          entry.release.releaseId,
+          entry.release.organizationId,
+          entry.release.skillName,
+          entry.release.skillVersion,
+          serialized,
+          syncedAt,
+        );
+        if (entry.status === "REVOKED") {
+          if (disable.run(syncedAt, entry.release.releaseId).changes > 0) {
+            changed = true;
+          }
+        }
+      }
+    });
+    return changed;
+  }
+
+  listTeamSkillCatalog(): TeamSkillCatalogEntry[] {
+    return (
+      this.#db
+        .prepare(
+          `SELECT entry_json FROM team_skill_catalog
+           ORDER BY organization_id, skill_name, skill_version DESC, release_id`,
+        )
+        .all() as SqlRow[]
+    ).map((row) =>
+      parseJson(row.entry_json, (input) =>
+        teamSkillCatalogEntrySchema.parse(input),
+      ),
+    );
+  }
+
+  findTeamSkillCatalogEntry(
+    releaseId: string,
+  ): TeamSkillCatalogEntry | undefined {
+    const row = this.#db
+      .prepare("SELECT entry_json FROM team_skill_catalog WHERE release_id = ?")
+      .get(idSchema.parse(releaseId)) as SqlRow | undefined;
+    return row === undefined
+      ? undefined
+      : parseJson(row.entry_json, (input) =>
+          teamSkillCatalogEntrySchema.parse(input),
+        );
+  }
+
+  private teamSkillInstallationFromRow(
+    row: SqlRow,
+  ): TeamSkillInstallationRecord {
+    const release = parseJson(row.release_json, (input) =>
+      teamSkillReleaseSchema.parse(input),
+    );
+    const installation = teamSkillInstallationSchema.parse({
+      release,
+      localName: row.local_name,
+      activation: row.activation,
+      installedAt: row.installed_at,
+      updatedAt: row.updated_at,
+    });
+    return { ...installation, installPath: String(row.install_path) };
+  }
+
+  listTeamSkillInstallations(): TeamSkillInstallationRecord[] {
+    return (
+      this.#db
+        .prepare(
+          `SELECT * FROM team_skill_installations
+           ORDER BY local_name, organization_id, skill_name`,
+        )
+        .all() as SqlRow[]
+    ).map((row) => this.teamSkillInstallationFromRow(row));
+  }
+
+  findTeamSkillInstallation(
+    releaseId: string,
+  ): TeamSkillInstallationRecord | undefined {
+    const row = this.#db
+      .prepare("SELECT * FROM team_skill_installations WHERE release_id = ?")
+      .get(idSchema.parse(releaseId)) as SqlRow | undefined;
+    return row === undefined
+      ? undefined
+      : this.teamSkillInstallationFromRow(row);
+  }
+
+  findTeamSkillInstallationFor(
+    organizationId: string,
+    skillName: string,
+  ): TeamSkillInstallationRecord | undefined {
+    const row = this.#db
+      .prepare(
+        "SELECT * FROM team_skill_installations WHERE organization_id = ? AND skill_name = ?",
+      )
+      .get(idSchema.parse(organizationId), skillName) as SqlRow | undefined;
+    return row === undefined
+      ? undefined
+      : this.teamSkillInstallationFromRow(row);
+  }
+
+  saveTeamSkillInstallation(input: {
+    release: TeamSkillRelease;
+    localName: string;
+    activation: TeamSkillActivation;
+    installPath: string;
+  }): TeamSkillInstallationRecord {
+    const release = teamSkillReleaseSchema.parse(input.release);
+    const activation = teamSkillActivationSchema.parse(input.activation);
+    const now = new Date().toISOString();
+    const previous = this.findTeamSkillInstallationFor(
+      release.organizationId,
+      release.skillName,
+    );
+    this.#db
+      .prepare(
+        `
+        INSERT INTO team_skill_installations(
+          organization_id, skill_name, release_id, release_json, local_name,
+          activation, install_path, installed_at, updated_at
+        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+        ON CONFLICT(organization_id, skill_name) DO UPDATE SET
+          release_id = excluded.release_id,
+          release_json = excluded.release_json,
+          local_name = excluded.local_name,
+          activation = excluded.activation,
+          install_path = excluded.install_path,
+          updated_at = excluded.updated_at
+      `,
+      )
+      .run(
+        release.organizationId,
+        release.skillName,
+        release.releaseId,
+        JSON.stringify(release),
+        input.localName,
+        activation,
+        input.installPath,
+        previous?.installedAt ?? now,
+        now,
+      );
+    const saved = this.findTeamSkillInstallation(release.releaseId);
+    if (saved === undefined)
+      throw new Error("team Skill installation disappeared");
+    return saved;
+  }
+
+  setTeamSkillActivation(
+    releaseId: string,
+    activationCandidate: TeamSkillActivation,
+  ): TeamSkillInstallationRecord {
+    const activation = teamSkillActivationSchema.parse(activationCandidate);
+    const parsedReleaseId = idSchema.parse(releaseId);
+    const changed = this.#db
+      .prepare(
+        "UPDATE team_skill_installations SET activation = ?, updated_at = ? WHERE release_id = ?",
+      )
+      .run(activation, new Date().toISOString(), parsedReleaseId).changes;
+    if (changed !== 1) throw new Error("unknown installed team Skill");
+    const updated = this.findTeamSkillInstallation(parsedReleaseId);
+    if (updated === undefined)
+      throw new Error("team Skill installation disappeared");
+    return updated;
+  }
+
+  removeTeamSkillInstallation(releaseId: string): void {
+    const changed = this.#db
+      .prepare("DELETE FROM team_skill_installations WHERE release_id = ?")
+      .run(idSchema.parse(releaseId)).changes;
+    if (changed !== 1) throw new Error("unknown installed team Skill");
   }
 
   upsertPeer(input: {

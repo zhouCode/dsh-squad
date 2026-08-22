@@ -1,6 +1,6 @@
 {
   "name": "dsh-squad",
-  "version": "0.7.2",
+  "version": "0.7.3",
   "description": "DSH-native delegation for distributed teams of independently owned personal Agents",
   "private": true,
   "license": "MIT",
@@ -44,10 +44,11 @@
     "release:manifest": "node scripts/create-release-manifest.mjs",
     "release:prepare": "pnpm verify:pins && pnpm run pack && pnpm release:manifest",
     "smoke:dsh": "pnpm smoke:delegation",
-    "smoke:delegation": "node scripts/smoke-delegation.mjs"
+    "smoke:delegation": "node scripts/smoke-delegation.mjs",
+    "compat:rc6": "node scripts/test-dsh-compat.mjs 0.1.0-rc.6"
   },
   "devDependencies": {
-    "@deepseek-ai/dsh": "0.1.0-rc.6",
+    "@deepseek-ai/dsh": "0.1.1-rc.2",
     "@types/node": "24.10.13",
     "@types/react": "18.3.27",
     "@types/react-dom": "18.3.7",

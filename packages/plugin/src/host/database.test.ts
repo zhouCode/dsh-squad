@@ -12,6 +12,8 @@ import {
 import { NodeIdentity } from "./identity.ts";
 import { SquadDatabase } from "./database.ts";
 import { OrganizationAuthority } from "./organization.ts";
+import { unsignedTeamSkillReleaseSchema } from "../shared/team-skills.ts";
+import { measureTeamSkillBundle } from "./team-skills.ts";
 
 describe("SquadDatabase", () => {
   it("migrates repeatedly and deduplicates request envelopes", () => {
@@ -94,7 +96,7 @@ describe("SquadDatabase", () => {
     const schema = migrated
       .prepare("SELECT version FROM schema_meta WHERE singleton = 1")
       .get();
-    expect(schema?.version).toBe(12);
+    expect(schema?.version).toBe(13);
     const organizationColumns = migrated
       .prepare("PRAGMA table_info(organizations)")
       .all() as Array<{ name?: string }>;
@@ -193,6 +195,60 @@ describe("SquadDatabase", () => {
     expect(reopened.nodeSetup()).toEqual(saved);
     expect(JSON.stringify(reopened.nodeSetup())).not.toContain("invitation");
     reopened.close();
+  });
+
+  it("persists team Skill installations and disables revoked releases", () => {
+    const root = mkdtempSync(join(tmpdir(), "dsh-squad-skill-db-"));
+    const identity = NodeIdentity.load(join(root, "identity.json"));
+    const database = new SquadDatabase(join(root, "node.sqlite"));
+    const bundle = {
+      version: 1 as const,
+      content: "Prepare a release note.",
+      files: [],
+    };
+    const metrics = measureTeamSkillBundle(bundle);
+    const unsigned = unsignedTeamSkillReleaseSchema.parse({
+      version: 1,
+      releaseId: randomUUID(),
+      organizationId: randomUUID(),
+      skillName: "release-note",
+      skillVersion: "1.0.0",
+      description: "Prepare release notes",
+      publisherMembershipId: randomUUID(),
+      publisherNodeId: identity.nodeId,
+      bundleSha256: metrics.sha256,
+      bundleSize: metrics.bundleSize,
+      fileCount: metrics.fileCount,
+      unpackedSize: metrics.unpackedSize,
+      createdAt: new Date().toISOString(),
+    });
+    const release = { ...unsigned, signature: identity.sign(unsigned) };
+    expect(
+      database.applyTeamSkillCatalog([{ release, status: "APPROVED" }]),
+    ).toBe(true);
+    database.saveTeamSkillInstallation({
+      release,
+      localName: "release-note",
+      activation: "DELEGATION",
+      installPath: join(root, "installed"),
+    });
+    expect(database.applyTeamSkillCatalog([])).toBe(true);
+    expect(
+      database.findTeamSkillInstallation(release.releaseId)?.activation,
+    ).toBe("DISABLED");
+    expect(
+      database.applyTeamSkillCatalog([{ release, status: "APPROVED" }]),
+    ).toBe(true);
+    database.setTeamSkillActivation(release.releaseId, "DELEGATION");
+    expect(
+      database.applyTeamSkillCatalog([{ release, status: "REVOKED" }]),
+    ).toBe(true);
+    expect(
+      database.findTeamSkillInstallation(release.releaseId)?.activation,
+    ).toBe("DISABLED");
+    expect(database.applyTeamSkillCatalog([])).toBe(true);
+    expect(database.listTeamSkillCatalog()).toEqual([]);
+    database.close();
   });
 
   it("commits selected HumanTodos and resumes only after every item is done", () => {

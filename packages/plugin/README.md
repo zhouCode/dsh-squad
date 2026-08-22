@@ -13,6 +13,7 @@ DSH Squad turns personal Agents on different computers, networks, and locations 
 - Observable delivery through authenticated Relay wakeups or a recipient-signed Direct Node Receipt.
 - Optional safe maintenance for an always-on Relay: signed-release verification, backup, restart, health check, and rollback, with notify-only as the default.
 - Signed multi-organization membership with Owner/Admin/Member roles, one-time invitations, approval, and revocation—without pairwise Peer setup.
+- A reviewable Team Skill catalog: publish a Node-signed native Skill, obtain Owner/Admin approval, then explicitly install it beside native Skills in DSH's `/` menu.
 - One Node may join multiple organizations; each DSH Session selects one organization-scoped recipient directory or compatible direct Peers.
 - Per-member always-ask, local-rule, and always-auto-run modes; local rules enforce objective, tool, attachment, preset, runtime, and token limits and are managed in the WebUI.
 - Editable local Team Planner drafts with explicit owner review, optimistic conflict protection, and idempotent batch dispatch.
@@ -24,9 +25,11 @@ The package contains one Cordis Host plugin, six native Agent tools, a DSH Web C
 ## Install
 
 ```bash
-dsh plugin --profile web add ./dsh-squad-plugin-0.7.2.tgz --offline
+dsh plugin --profile web add ./dsh-squad-plugin-0.7.3.tgz --offline
 dsh web
 ```
+
+Version 0.7.3 is fully tested with DeepSeek Harness `0.1.1-rc.2` and retains a dedicated compatibility regression for `0.1.0-rc.6`.
 
 The bundled `cordis.patch.yml` inserts the `dsh-squad` entry. A fresh installation shows a short guide the first time `Agent Inbox` opens: name the Node, then join a Relay or choose Direct peer-to-peer. Relay settings are saved only after the one-time invitation and signed identity are validated, and the invitation is never written to the Node database. Change the connection later under `Settings → Team connection`; no manual YAML edit is required.
 
@@ -92,6 +95,14 @@ The workbench is a keyboard-contained modal with focus restoration, Escape handl
 
 On compact screens, Delegations, plans, and archives switch from the desktop two-pane layout to a full-height list followed by one focused detail view with an explicit back action and touch-sized controls.
 
+## Team Skills
+
+`Agent Inbox → Team Skills` publishes a native Skill already discovered by DSH as a signed, immutable release in the Relay organization catalog. Member submissions require Owner/Admin review, and every recipient must explicitly install an approved release locally; joining an organization never installs a Skill automatically.
+
+Installations use DSH's native Skill Registry, so native and team Skills share the chat `/` menu and invocation mechanism. The WebUI provides `Disabled`, `Manual only`, `Local`, and `Delegation` policies. `Manual only` is the default, and only `Delegation` permits automatic model selection during a Squad delegated run. Revocation automatically disables a local copy.
+
+Bundles contain only `SKILL.md` and directory resources and grant no tools, MCP connections, accounts, or credentials. Publisher signatures, content hashes, path safety, and size limits are checked across publication and installation. Relay can read Skill content, so Owner/Admin review remains an explicit code-trust boundary.
+
 ## Updates
 
 v0.5.0 adds `Agent Inbox → Updates` and a separate `dsh-squad-update` executable. The default is notify-only; users may instead disable checks or opt into installation while the Node is idle. The plugin process never replaces itself. Only a separately configured systemd updater may stop the service, back up the profile and explicit data paths, install a GitHub Release verified by both an Ed25519-signed manifest and SHA-256, restart, and check the reported version. Failure restores the old profile and data.
@@ -110,7 +121,7 @@ Production Relay and Direct URLs require HTTPS. Each Node keeps a local Ed25519 
 
 Update APIs are also loopback-only. Releases must come from the configured GitHub repository and match the package-pinned release public key, signed manifest, filename, size, SHA-256, and minimum DSH version. Unattended installation is never the default.
 
-Only explicit task data, public status, summaries, and outcomes cross Nodes. Receiver Session IDs, HumanTodo details, human responses, credentials, and workspace paths remain local.
+Only explicit task data, public status, summaries, outcomes, and Team Skill content deliberately published by a user cross Nodes. Receiver Session IDs, HumanTodo details, human responses, credentials, and workspace paths remain local.
 
 ## License
 

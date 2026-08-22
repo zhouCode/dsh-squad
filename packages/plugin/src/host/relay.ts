@@ -42,6 +42,18 @@ import {
   type OrganizationOwnershipTransferEvent,
   type OrganizationOwnershipTransferProposal,
 } from "../shared/organizations.ts";
+import {
+  MAX_TEAM_SKILL_BUNDLE_BYTES,
+  teamSkillBundleSchema,
+  teamSkillCatalogEntrySchema,
+  teamSkillReleaseSchema,
+  teamSkillReviewSchema,
+  unsignedTeamSkillReview,
+  type TeamSkillBundle,
+  type TeamSkillCatalogEntry,
+  type TeamSkillRelease,
+  type TeamSkillReview,
+} from "../shared/team-skills.ts";
 import { nodeIdFromPublicKey, verifySignature } from "./identity.ts";
 import {
   applyOrganizationDirectoryEvent,
@@ -52,6 +64,7 @@ import {
 } from "./organization.ts";
 import type { RelayInviteConfig } from "./config.ts";
 import type { RelayOperationsSnapshot } from "../shared/state.ts";
+import { verifyTeamSkillRelease } from "./team-skills.ts";
 
 const enrollmentSchema = z.strictObject({
   invitation: z.string().min(16).max(512),
@@ -104,6 +117,15 @@ const dissolveOrganizationSchema = z.strictObject({
 
 const createOrganizationInvitationSchema = z.strictObject({
   expiresInMinutes: z.number().int().min(5).max(10_080).default(1_440),
+});
+
+const submitTeamSkillSchema = z.strictObject({
+  release: teamSkillReleaseSchema,
+  bundle: teamSkillBundleSchema,
+});
+
+const reviewTeamSkillSchema = z.strictObject({
+  review: teamSkillReviewSchema,
 });
 
 type SqlRow = Record<string, unknown>;
@@ -328,6 +350,35 @@ export class RelayServer {
       CREATE UNIQUE INDEX IF NOT EXISTS relay_organization_owner_transfer_pending_idx
         ON relay_organization_owner_transfers(organization_id)
         WHERE status = 'PENDING';
+
+      CREATE TABLE IF NOT EXISTS relay_team_skill_releases (
+        release_id TEXT PRIMARY KEY,
+        organization_id TEXT NOT NULL,
+        skill_name TEXT NOT NULL,
+        skill_version TEXT NOT NULL,
+        publisher_membership_id TEXT NOT NULL,
+        publisher_node_id TEXT NOT NULL,
+        release_json TEXT NOT NULL,
+        bundle_json TEXT NOT NULL,
+        bundle_sha256 TEXT NOT NULL,
+        status TEXT NOT NULL CHECK (status IN ('PENDING', 'APPROVED', 'REVOKED')),
+        submitted_at TEXT NOT NULL,
+        reviewed_at TEXT,
+        UNIQUE(organization_id, skill_name, skill_version),
+        FOREIGN KEY(organization_id) REFERENCES relay_organizations(organization_id) ON DELETE CASCADE
+      );
+      CREATE INDEX IF NOT EXISTS relay_team_skill_org_idx
+        ON relay_team_skill_releases(organization_id, skill_name, submitted_at DESC);
+
+      CREATE TABLE IF NOT EXISTS relay_team_skill_reviews (
+        review_id TEXT PRIMARY KEY,
+        release_id TEXT NOT NULL,
+        review_json TEXT NOT NULL,
+        reviewed_at TEXT NOT NULL,
+        FOREIGN KEY(release_id) REFERENCES relay_team_skill_releases(release_id) ON DELETE CASCADE
+      );
+      CREATE INDEX IF NOT EXISTS relay_team_skill_review_release_idx
+        ON relay_team_skill_reviews(release_id, reviewed_at DESC, review_id DESC);
     `);
     let version = Number(
       (
@@ -410,7 +461,40 @@ export class RelayServer {
       this.#db.exec("UPDATE schema_meta SET version = 6 WHERE singleton = 1");
       version = 6;
     }
-    if (version !== 6) {
+    if (version === 6) {
+      this.#db.exec(`
+        CREATE TABLE IF NOT EXISTS relay_team_skill_releases (
+          release_id TEXT PRIMARY KEY,
+          organization_id TEXT NOT NULL,
+          skill_name TEXT NOT NULL,
+          skill_version TEXT NOT NULL,
+          publisher_membership_id TEXT NOT NULL,
+          publisher_node_id TEXT NOT NULL,
+          release_json TEXT NOT NULL,
+          bundle_json TEXT NOT NULL,
+          bundle_sha256 TEXT NOT NULL,
+          status TEXT NOT NULL CHECK (status IN ('PENDING', 'APPROVED', 'REVOKED')),
+          submitted_at TEXT NOT NULL,
+          reviewed_at TEXT,
+          UNIQUE(organization_id, skill_name, skill_version),
+          FOREIGN KEY(organization_id) REFERENCES relay_organizations(organization_id) ON DELETE CASCADE
+        );
+        CREATE INDEX IF NOT EXISTS relay_team_skill_org_idx
+          ON relay_team_skill_releases(organization_id, skill_name, submitted_at DESC);
+        CREATE TABLE IF NOT EXISTS relay_team_skill_reviews (
+          review_id TEXT PRIMARY KEY,
+          release_id TEXT NOT NULL,
+          review_json TEXT NOT NULL,
+          reviewed_at TEXT NOT NULL,
+          FOREIGN KEY(release_id) REFERENCES relay_team_skill_releases(release_id) ON DELETE CASCADE
+        );
+        CREATE INDEX IF NOT EXISTS relay_team_skill_review_release_idx
+          ON relay_team_skill_reviews(release_id, reviewed_at DESC, review_id DESC);
+        UPDATE schema_meta SET version = 7 WHERE singleton = 1;
+      `);
+      version = 7;
+    }
+    if (version !== 7) {
       throw new Error(
         `unsupported Squad Relay database version ${String(version)}`,
       );
@@ -816,6 +900,216 @@ export class RelayServer {
       throw new HttpError(403, "ORGANIZATION_MANAGER_REQUIRED");
     }
     return member;
+  }
+
+  private assertOrganizationMember(
+    directory: ReturnType<RelayServer["organizationDirectory"]>,
+    nodeId: string,
+  ): OrganizationMembershipCertificate {
+    this.assertOrganizationActive(directory);
+    const member = this.organizationMemberForNode(directory, nodeId);
+    if (member === undefined || member.status !== "ACTIVE") {
+      throw new HttpError(403, "ORGANIZATION_MEMBERSHIP_REQUIRED");
+    }
+    return member;
+  }
+
+  private latestTeamSkillReview(
+    releaseId: string,
+  ): TeamSkillReview | undefined {
+    const row = this.#db
+      .prepare(
+        `SELECT review_json FROM relay_team_skill_reviews
+         WHERE release_id = ? ORDER BY rowid DESC LIMIT 1`,
+      )
+      .get(releaseId) as SqlRow | undefined;
+    return row === undefined
+      ? undefined
+      : teamSkillReviewSchema.parse(
+          JSON.parse(String(row.review_json)) as unknown,
+        );
+  }
+
+  private teamSkillEntryFromRow(row: SqlRow): TeamSkillCatalogEntry {
+    const latestReview = this.latestTeamSkillReview(String(row.release_id));
+    return teamSkillCatalogEntrySchema.parse({
+      release: JSON.parse(String(row.release_json)) as unknown,
+      status: row.status,
+      ...(latestReview === undefined ? {} : { latestReview }),
+    });
+  }
+
+  private teamSkillCatalog(nodeId: string): TeamSkillCatalogEntry[] {
+    const rows = this.#db
+      .prepare(
+        `SELECT release.*, self.role AS requester_role
+         FROM relay_team_skill_releases AS release
+         JOIN relay_organization_members AS self
+           ON self.organization_id = release.organization_id
+          AND self.node_id = ?
+          AND self.status = 'ACTIVE'
+         JOIN relay_organizations AS organization
+           ON organization.organization_id = release.organization_id
+          AND organization.dissolved_at IS NULL
+         WHERE release.status <> 'PENDING'
+            OR release.publisher_node_id = ?
+            OR self.role IN ('OWNER', 'ADMIN')
+         ORDER BY release.organization_id, release.skill_name,
+                  release.submitted_at DESC, release.release_id`,
+      )
+      .all(nodeId, nodeId) as SqlRow[];
+    return rows.map((row) => this.teamSkillEntryFromRow(row));
+  }
+
+  private submitTeamSkill(
+    organizationId: string,
+    value: unknown,
+    nodeId: string,
+  ): TeamSkillCatalogEntry {
+    const input = submitTeamSkillSchema.parse(value);
+    const directory = this.organizationDirectory(organizationId);
+    const member = this.assertOrganizationMember(directory, nodeId);
+    const { release, bundle } = input;
+    if (
+      release.organizationId !== organizationId ||
+      release.publisherMembershipId !== member.membershipId ||
+      release.publisherNodeId !== nodeId
+    ) {
+      throw new HttpError(403, "TEAM_SKILL_PUBLISHER_MISMATCH");
+    }
+    verifyTeamSkillRelease(release, bundle, member.publicKey);
+    const now = new Date().toISOString();
+    try {
+      this.#db
+        .prepare(
+          `INSERT INTO relay_team_skill_releases(
+             release_id, organization_id, skill_name, skill_version,
+             publisher_membership_id, publisher_node_id, release_json,
+             bundle_json, bundle_sha256, status, submitted_at
+           ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, 'PENDING', ?)`,
+        )
+        .run(
+          release.releaseId,
+          organizationId,
+          release.skillName,
+          release.skillVersion,
+          release.publisherMembershipId,
+          release.publisherNodeId,
+          JSON.stringify(release),
+          JSON.stringify(bundle),
+          release.bundleSha256,
+          now,
+        );
+    } catch (error) {
+      if (String(error).includes("UNIQUE constraint failed")) {
+        throw new HttpError(409, "TEAM_SKILL_VERSION_EXISTS");
+      }
+      throw error;
+    }
+    return teamSkillCatalogEntrySchema.parse({
+      release,
+      status: "PENDING",
+    });
+  }
+
+  private downloadTeamSkill(
+    releaseId: string,
+    nodeId: string,
+  ): { release: TeamSkillRelease; bundle: TeamSkillBundle } {
+    const row = this.#db
+      .prepare("SELECT * FROM relay_team_skill_releases WHERE release_id = ?")
+      .get(releaseId) as SqlRow | undefined;
+    if (row === undefined) throw new HttpError(404, "TEAM_SKILL_NOT_FOUND");
+    const directory = this.organizationDirectory(String(row.organization_id));
+    const member = this.assertOrganizationMember(directory, nodeId);
+    const status = String(row.status);
+    if (status === "REVOKED") {
+      throw new HttpError(410, "TEAM_SKILL_REVOKED");
+    }
+    if (
+      status !== "APPROVED" &&
+      row.publisher_node_id !== nodeId &&
+      !["OWNER", "ADMIN"].includes(member.role)
+    ) {
+      throw new HttpError(403, "TEAM_SKILL_PENDING_REVIEW");
+    }
+    return {
+      release: teamSkillReleaseSchema.parse(
+        JSON.parse(String(row.release_json)) as unknown,
+      ),
+      bundle: teamSkillBundleSchema.parse(
+        JSON.parse(String(row.bundle_json)) as unknown,
+      ),
+    };
+  }
+
+  private reviewTeamSkill(
+    organizationId: string,
+    releaseId: string,
+    value: unknown,
+    nodeId: string,
+  ): TeamSkillCatalogEntry {
+    const { review } = reviewTeamSkillSchema.parse(value);
+    const directory = this.organizationDirectory(organizationId);
+    const reviewer = this.assertOrganizationManager(directory, nodeId);
+    if (
+      review.organizationId !== organizationId ||
+      review.organizationRevision !== directory.revision ||
+      review.releaseId !== releaseId ||
+      review.reviewerMembershipId !== reviewer.membershipId ||
+      review.reviewerNodeId !== nodeId ||
+      !verifySignature(
+        unsignedTeamSkillReview(review),
+        review.signature,
+        reviewer.publicKey,
+      )
+    ) {
+      throw new HttpError(403, "TEAM_SKILL_REVIEW_SIGNATURE_INVALID");
+    }
+    const row = this.#db
+      .prepare("SELECT * FROM relay_team_skill_releases WHERE release_id = ?")
+      .get(releaseId) as SqlRow | undefined;
+    if (row === undefined || row.organization_id !== organizationId) {
+      throw new HttpError(404, "TEAM_SKILL_NOT_FOUND");
+    }
+    const current = String(row.status);
+    if (review.action === "APPROVE" && current !== "PENDING") {
+      throw new HttpError(409, "TEAM_SKILL_NOT_PENDING");
+    }
+    if (review.action === "REVOKE" && current === "REVOKED") {
+      throw new HttpError(409, "TEAM_SKILL_ALREADY_REVOKED");
+    }
+    const next = review.action === "APPROVE" ? "APPROVED" : "REVOKED";
+    this.#db.exec("BEGIN IMMEDIATE");
+    try {
+      this.#db
+        .prepare(
+          "INSERT INTO relay_team_skill_reviews(review_id, release_id, review_json, reviewed_at) VALUES (?, ?, ?, ?)",
+        )
+        .run(
+          review.reviewId,
+          releaseId,
+          JSON.stringify(review),
+          review.reviewedAt,
+        );
+      const updated = this.#db
+        .prepare(
+          "UPDATE relay_team_skill_releases SET status = ?, reviewed_at = ? WHERE release_id = ? AND status = ?",
+        )
+        .run(next, review.reviewedAt, releaseId, current);
+      if (updated.changes !== 1) {
+        throw new HttpError(409, "TEAM_SKILL_REVIEW_CONFLICT");
+      }
+      this.#db.exec("COMMIT");
+    } catch (error) {
+      this.#db.exec("ROLLBACK");
+      throw error;
+    }
+    return teamSkillCatalogEntrySchema.parse({
+      release: JSON.parse(String(row.release_json)) as unknown,
+      status: next,
+      latestReview: review,
+    });
   }
 
   private pendingOwnershipTransfer(
@@ -2193,6 +2487,66 @@ export class RelayServer {
       if (req.method === "GET" && url.pathname === "/squad/v1/nodes") {
         const auth = this.authenticate(req, path, Buffer.alloc(0));
         reply(res, 200, { nodes: this.nodes(auth.nodeId) });
+        return true;
+      }
+      if (req.method === "GET" && url.pathname === "/squad/v1/team-skills") {
+        const auth = this.authenticate(req, path, Buffer.alloc(0));
+        reply(res, 200, { skills: this.teamSkillCatalog(auth.nodeId) });
+        return true;
+      }
+      const teamSkillDownloadRoute =
+        /^\/squad\/v1\/team-skills\/([0-9a-f-]{36})$/u.exec(url.pathname);
+      if (req.method === "GET" && teamSkillDownloadRoute?.[1] !== undefined) {
+        const auth = this.authenticate(req, path, Buffer.alloc(0));
+        reply(
+          res,
+          200,
+          this.downloadTeamSkill(teamSkillDownloadRoute[1], auth.nodeId),
+        );
+        return true;
+      }
+      const teamSkillPublishRoute =
+        /^\/squad\/v1\/organizations\/([0-9a-f-]{36})\/team-skills$/u.exec(
+          url.pathname,
+        );
+      if (req.method === "POST" && teamSkillPublishRoute?.[1] !== undefined) {
+        const body = await readBody(
+          req,
+          MAX_TEAM_SKILL_BUNDLE_BYTES + 256 * 1024,
+        );
+        const auth = this.authenticate(req, path, body);
+        reply(
+          res,
+          201,
+          this.submitTeamSkill(
+            teamSkillPublishRoute[1],
+            jsonBody(body),
+            auth.nodeId,
+          ),
+        );
+        return true;
+      }
+      const teamSkillReviewRoute =
+        /^\/squad\/v1\/organizations\/([0-9a-f-]{36})\/team-skills\/([0-9a-f-]{36})\/reviews$/u.exec(
+          url.pathname,
+        );
+      if (
+        req.method === "POST" &&
+        teamSkillReviewRoute?.[1] !== undefined &&
+        teamSkillReviewRoute[2] !== undefined
+      ) {
+        const body = await readBody(req, 32 * 1024);
+        const auth = this.authenticate(req, path, body);
+        reply(
+          res,
+          200,
+          this.reviewTeamSkill(
+            teamSkillReviewRoute[1],
+            teamSkillReviewRoute[2],
+            jsonBody(body),
+            auth.nodeId,
+          ),
+        );
         return true;
       }
       if (req.method === "POST" && url.pathname === "/squad/v1/organizations") {

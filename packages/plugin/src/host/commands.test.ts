@@ -43,8 +43,9 @@ function invocation(
       session: { append },
     } as unknown as Agent,
     rawInput,
+    attachments: [],
     signal: new AbortController().signal,
-  };
+  } as CommandInvocation;
 }
 
 describe("Squad slash commands", () => {

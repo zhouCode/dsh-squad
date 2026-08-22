@@ -6,6 +6,7 @@ import type {} from "@deepseek-ai/dsh-agent-presets";
 import { createUserMessage } from "@deepseek-ai/dsh-llm";
 import { SessionId } from "@deepseek-ai/dsh-session";
 import type {} from "@deepseek-ai/dsh-session-persistence";
+import type {} from "@deepseek-ai/dsh-skill";
 import { ZodError } from "zod";
 import {
   canonicalBytes,
@@ -97,6 +98,22 @@ import {
   type UpdateReadiness,
   type UpdateSnapshot,
 } from "../shared/updates.ts";
+import {
+  installTeamSkillInputSchema,
+  publishTeamSkillInputSchema,
+  teamSkillActivationSchema,
+  unsignedTeamSkillRelease,
+  unsignedTeamSkillReview,
+  unsignedTeamSkillReleaseSchema,
+  unsignedTeamSkillReviewSchema,
+  type PublishTeamSkillInput,
+  type PublishableSkillView,
+  type TeamSkillActivation,
+  type TeamSkillCatalogEntry,
+  type TeamSkillInstallation,
+  type TeamSkillRelease,
+  type TeamSkillReviewAction,
+} from "../shared/team-skills.ts";
 import { SQUAD_VERSION } from "../shared/version.ts";
 import {
   resolveDirectBaseUrl,
@@ -126,8 +143,12 @@ import {
 } from "./native-executor.ts";
 import { RelayClient, RelayClientError } from "./relay-client.ts";
 import { RelayServer } from "./relay.ts";
-import { OrganizationAuthority } from "./organization.ts";
+import {
+  OrganizationAuthority,
+  verifyOrganizationDirectory,
+} from "./organization.ts";
 import { UpdateController } from "./update-controller.ts";
+import { TeamSkillManager, verifyTeamSkillRelease } from "./team-skills.ts";
 import {
   DirectEnvelopeTransport,
   DirectTransportError,
@@ -195,6 +216,10 @@ export interface SquadLocalState {
     rules: AutomationRuleView[];
     legacyPrefixCount: number;
   };
+  teamSkills: {
+    catalog: TeamSkillCatalogEntry[];
+    installations: TeamSkillInstallation[];
+  };
   peers: PeerRecord[];
   organizations: OrganizationView[];
   sessionOrganizations: Record<string, string>;
@@ -261,6 +286,7 @@ export class SquadService extends Service {
   readonly executor: NativeDelegationExecutor;
   readonly attachments: AttachmentVerifier;
   readonly updates: UpdateController;
+  readonly teamSkills: TeamSkillManager;
   readonly #starting = new Set<string>();
   readonly #dispatchingPlans = new Map<string, Promise<TeamPlan>>();
   readonly #stateListeners = new Set<(revision: number) => void>();
@@ -276,6 +302,7 @@ export class SquadService extends Service {
   #relayLastError: string | undefined = undefined;
   #relayRemoteVersion: string | undefined = undefined;
   #relayProtocolVersions: number[] | undefined = undefined;
+  #teamSkillSyncLastError: string | undefined = undefined;
   #directLastReceivedAt: string | undefined = undefined;
   #directVerifiedAt: string | undefined = undefined;
   #directLastError: string | undefined = undefined;
@@ -374,7 +401,12 @@ export class SquadService extends Service {
       this.identity,
       (nodeId) => this.database.findPeer(nodeId),
     );
-    this.executor = new NativeDelegationExecutor(ctx, config.execution);
+    this.teamSkills = new TeamSkillManager(ctx, this.database, config.dataDir);
+    this.executor = new NativeDelegationExecutor(
+      ctx,
+      config.execution,
+      this.teamSkills,
+    );
     this.attachments = new AttachmentVerifier(
       join(config.dataDir, "attachments"),
     );
@@ -1080,6 +1112,269 @@ export class SquadService extends Service {
     }
     if (changed) this.touchLocalState();
     return changed;
+  }
+
+  private async syncTeamSkills(): Promise<boolean> {
+    const relayClient = this.relayClient;
+    if (relayClient === undefined) return false;
+    const catalog = (await relayClient.teamSkills()).map((entry) =>
+      this.verifyTeamSkillCatalogEntry(entry),
+    );
+    const changed = this.database.applyTeamSkillCatalog(catalog);
+    this.#teamSkillSyncLastError = undefined;
+    if (changed) {
+      this.teamSkills.invalidate();
+      this.touchLocalState();
+    }
+    return changed;
+  }
+
+  listPublishableSkills(): Promise<PublishableSkillView[]> {
+    return this.teamSkills.publishableSkills();
+  }
+
+  private organizationForTeamSkill(
+    organizationId: string,
+  ): OrganizationDirectoryRecord {
+    const directory = this.database.organizationDirectory(organizationId);
+    if (directory === undefined) throw new Error("organization was not found");
+    this.selfOrganizationMember(directory);
+    return directory;
+  }
+
+  private verifyDownloadedTeamSkill(
+    release: TeamSkillRelease,
+    bundle: Parameters<typeof verifyTeamSkillRelease>[1],
+  ): void {
+    const directory = this.organizationForTeamSkill(release.organizationId);
+    const publisher = directory.members.get(release.publisherMembershipId);
+    if (
+      publisher === undefined ||
+      publisher.nodeId !== release.publisherNodeId
+    ) {
+      throw new Error("team Skill publisher is not in the signed directory");
+    }
+    verifyTeamSkillRelease(release, bundle, publisher.publicKey);
+  }
+
+  private verifyTeamSkillCatalogEntry(
+    entry: TeamSkillCatalogEntry,
+  ): TeamSkillCatalogEntry {
+    const release = entry.release;
+    const directory = this.organizationForTeamSkill(release.organizationId);
+    const publisher = directory.members.get(release.publisherMembershipId);
+    if (
+      publisher === undefined ||
+      publisher.nodeId !== release.publisherNodeId ||
+      !verifySignature(
+        unsignedTeamSkillRelease(release),
+        release.signature,
+        publisher.publicKey,
+      )
+    ) {
+      throw new Error("team Skill catalog publisher signature is invalid");
+    }
+    if (entry.status === "PENDING") {
+      if (entry.latestReview !== undefined) {
+        throw new Error("pending team Skill unexpectedly has a review");
+      }
+      return entry;
+    }
+    const review = entry.latestReview;
+    if (
+      review === undefined ||
+      review.organizationId !== release.organizationId ||
+      review.releaseId !== release.releaseId ||
+      review.action !== (entry.status === "APPROVED" ? "APPROVE" : "REVOKE")
+    ) {
+      throw new Error("team Skill catalog review does not match its status");
+    }
+    const historical = verifyOrganizationDirectory(
+      directory.document,
+      directory.events.filter(
+        (event) => event.organizationRevision <= review.organizationRevision,
+      ),
+    );
+    if (historical.revision !== review.organizationRevision) {
+      throw new Error("team Skill review organization revision is unavailable");
+    }
+    const reviewer = historical.members.get(review.reviewerMembershipId);
+    if (
+      reviewer === undefined ||
+      reviewer.nodeId !== review.reviewerNodeId ||
+      reviewer.status !== "ACTIVE" ||
+      !["OWNER", "ADMIN"].includes(reviewer.role) ||
+      !verifySignature(
+        unsignedTeamSkillReview(review),
+        review.signature,
+        reviewer.publicKey,
+      )
+    ) {
+      throw new Error("team Skill catalog manager review is invalid");
+    }
+    return entry;
+  }
+
+  private signedTeamSkillReview(
+    release: TeamSkillRelease,
+    action: TeamSkillReviewAction,
+    reason?: string,
+  ) {
+    const directory = this.organizationForTeamSkill(release.organizationId);
+    const reviewer = this.selfOrganizationMember(directory);
+    if (!["OWNER", "ADMIN"].includes(reviewer.role)) {
+      throw new Error("Owner or Admin role is required to review a team Skill");
+    }
+    const unsigned = unsignedTeamSkillReviewSchema.parse({
+      version: 1,
+      reviewId: randomUUID(),
+      organizationId: release.organizationId,
+      organizationRevision: directory.revision,
+      releaseId: release.releaseId,
+      action,
+      reviewerMembershipId: reviewer.membershipId,
+      reviewerNodeId: this.identity.nodeId,
+      ...(reason === undefined || reason.trim().length === 0
+        ? {}
+        : { reason: reason.trim() }),
+      reviewedAt: new Date().toISOString(),
+    });
+    return { ...unsigned, signature: this.identity.sign(unsigned) };
+  }
+
+  async publishTeamSkill(
+    inputCandidate: PublishTeamSkillInput,
+  ): Promise<TeamSkillCatalogEntry> {
+    const input = publishTeamSkillInputSchema.parse(inputCandidate);
+    const relay = this.requireRelayClient();
+    const directory = this.organizationForTeamSkill(input.organizationId);
+    const publisher = this.selfOrganizationMember(directory);
+    const { definition, bundle, metrics } = await this.teamSkills.bundleSource(
+      input.sourceName,
+    );
+    const unsigned = unsignedTeamSkillReleaseSchema.parse({
+      version: 1,
+      releaseId: randomUUID(),
+      organizationId: input.organizationId,
+      skillName: definition.name,
+      skillVersion: input.skillVersion,
+      description: definition.description,
+      ...(definition.whenToUse === undefined
+        ? {}
+        : { whenToUse: definition.whenToUse }),
+      ...(input.changelog === undefined ? {} : { changelog: input.changelog }),
+      publisherMembershipId: publisher.membershipId,
+      publisherNodeId: this.identity.nodeId,
+      bundleSha256: metrics.sha256,
+      bundleSize: metrics.bundleSize,
+      fileCount: metrics.fileCount,
+      unpackedSize: metrics.unpackedSize,
+      createdAt: new Date().toISOString(),
+    });
+    const release: TeamSkillRelease = {
+      ...unsigned,
+      signature: this.identity.sign(unsigned),
+    };
+    let entry = await relay.publishTeamSkill(
+      input.organizationId,
+      release,
+      bundle,
+    );
+    if (["OWNER", "ADMIN"].includes(publisher.role)) {
+      entry = await relay.reviewTeamSkill(
+        input.organizationId,
+        release.releaseId,
+        this.signedTeamSkillReview(release, "APPROVE"),
+      );
+    }
+    await this.syncTeamSkills();
+    return entry;
+  }
+
+  async reviewTeamSkill(
+    releaseId: string,
+    action: TeamSkillReviewAction,
+    reason?: string,
+  ): Promise<TeamSkillCatalogEntry> {
+    const relay = this.requireRelayClient();
+    const entry = this.database.findTeamSkillCatalogEntry(
+      idSchema.parse(releaseId),
+    );
+    if (entry === undefined)
+      throw new Error("team Skill release was not found");
+    const reviewed = await relay.reviewTeamSkill(
+      entry.release.organizationId,
+      entry.release.releaseId,
+      this.signedTeamSkillReview(entry.release, action, reason),
+    );
+    await this.syncTeamSkills();
+    return reviewed;
+  }
+
+  async installTeamSkill(
+    releaseIdCandidate: string,
+    inputCandidate: unknown,
+  ): Promise<TeamSkillInstallation> {
+    const releaseId = idSchema.parse(releaseIdCandidate);
+    const input = installTeamSkillInputSchema.parse(inputCandidate);
+    const entry = this.database.findTeamSkillCatalogEntry(releaseId);
+    if (entry === undefined)
+      throw new Error("team Skill release was not found");
+    if (entry.status !== "APPROVED") {
+      throw new Error("only an approved team Skill can be installed");
+    }
+    const localName = input.localName ?? entry.release.skillName;
+    this.teamSkills.assertInstallNameAvailable(localName, entry.release);
+    await this.teamSkills.assertNoNativeCollision(localName);
+    const download =
+      await this.requireRelayClient().downloadTeamSkill(releaseId);
+    if (download.release.releaseId !== releaseId) {
+      throw new Error("Relay returned the wrong team Skill release");
+    }
+    this.verifyDownloadedTeamSkill(download.release, download.bundle);
+    const installPath = this.teamSkills.materialize(
+      download.release,
+      download.bundle,
+    );
+    const saved = this.database.saveTeamSkillInstallation({
+      release: download.release,
+      localName,
+      activation: input.activation,
+      installPath,
+    });
+    this.teamSkills.invalidate();
+    this.touchLocalState();
+    const { installPath: _installPath, ...installation } = saved;
+    return installation;
+  }
+
+  setTeamSkillActivation(
+    releaseIdCandidate: string,
+    activationCandidate: TeamSkillActivation,
+  ): TeamSkillInstallation {
+    const releaseId = idSchema.parse(releaseIdCandidate);
+    const activation = teamSkillActivationSchema.parse(activationCandidate);
+    if (activation !== "DISABLED") {
+      const entry = this.database.findTeamSkillCatalogEntry(releaseId);
+      if (entry?.status !== "APPROVED") {
+        throw new Error(
+          "a revoked or unavailable team Skill cannot be enabled",
+        );
+      }
+    }
+    const saved = this.database.setTeamSkillActivation(releaseId, activation);
+    this.teamSkills.invalidate();
+    this.touchLocalState();
+    const { installPath: _installPath, ...installation } = saved;
+    return installation;
+  }
+
+  removeTeamSkill(releaseIdCandidate: string): void {
+    this.database.removeTeamSkillInstallation(
+      idSchema.parse(releaseIdCandidate),
+    );
+    this.teamSkills.invalidate();
+    this.touchLocalState();
   }
 
   async createOrganization(nameCandidate: string): Promise<OrganizationView> {
@@ -2928,6 +3223,21 @@ export class SquadService extends Service {
         this.#pumpRequested = false;
         try {
           await this.syncOrganizations();
+          try {
+            await this.syncTeamSkills();
+          } catch (error) {
+            // Team Skill discovery is an optional control-plane feature. An
+            // older or temporarily degraded Relay must not block Delegations.
+            const detail = this.connectionError(error);
+            if (detail !== this.#teamSkillSyncLastError) {
+              this.#teamSkillSyncLastError = detail;
+              this.database.diagnostic(
+                "TEAM_SKILL_SYNC_FAILED",
+                undefined,
+                detail,
+              );
+            }
+          }
           await this.flushOutbox();
           await this.pollMailbox();
           await this.flushOutbox();
@@ -2991,6 +3301,14 @@ export class SquadService extends Service {
         rules: this.automationRules(),
         legacyPrefixCount:
           this.config.execution.legacySafeObjectivePrefixes.length,
+      },
+      teamSkills: {
+        catalog: this.database.listTeamSkillCatalog(),
+        installations: this.database
+          .listTeamSkillInstallations()
+          .map(
+            ({ installPath: _installPath, ...installation }) => installation,
+          ),
       },
       peers: this.database.listPeers(),
       organizations: this.database.listOrganizations(this.identity.nodeId),

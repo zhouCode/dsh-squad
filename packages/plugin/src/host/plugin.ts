@@ -1,6 +1,7 @@
 import type { Context } from "@deepseek-ai/cordis";
 import type {} from "@deepseek-ai/dsh-commands";
 import type {} from "@deepseek-ai/dsh-host-webserver";
+import type {} from "@deepseek-ai/dsh-skill";
 import { registerSquadCommands } from "./commands.ts";
 import { resolveConfig, type SquadConfig } from "./config.ts";
 import { createHttpHandler } from "./http.ts";
@@ -14,6 +15,7 @@ export const inject = [
   "agentPresets",
   "commands",
   "sessionPersistence",
+  "skills",
   "tools",
   "webServer",
 ];
@@ -23,6 +25,9 @@ export async function apply(
   config: SquadConfig = {},
 ): Promise<() => Promise<void>> {
   const squad = new SquadService(ctx, resolveConfig(config));
+  const disposeSkills = ctx.skills.registerProvider((control) =>
+    squad.teamSkills.provider(control),
+  );
   const disposeTools = registerSquadTools(ctx, squad);
   const disposeCommands = registerSquadCommands(ctx, squad);
   const disposeRoute = ctx.webServer.register({
@@ -36,6 +41,7 @@ export async function apply(
     disposeRoute();
     for (const dispose of disposeCommands.reverse()) dispose();
     for (const dispose of disposeTools.reverse()) dispose();
+    disposeSkills();
     await squad.close();
     throw error;
   }
@@ -43,6 +49,7 @@ export async function apply(
     disposeRoute();
     for (const dispose of disposeCommands.reverse()) dispose();
     for (const dispose of disposeTools.reverse()) dispose();
+    disposeSkills();
     await squad.close();
   };
 }

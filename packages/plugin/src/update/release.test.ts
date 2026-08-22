@@ -3,7 +3,9 @@ import { describe, expect, it } from "vitest";
 import { canonicalBytes, sha256Hex } from "../shared/canonical.ts";
 import type { ReleaseManifest } from "../shared/updates.ts";
 import {
+  assertCompatibleDshVersion,
   checkLatestRelease,
+  installedDshVersion,
   releaseKeyId,
   verifyReleaseManifest,
 } from "./release.ts";
@@ -38,6 +40,16 @@ function fixture() {
 }
 
 describe("signed Squad releases", () => {
+  it("checks the release minimum against the installed Harness version", () => {
+    expect(installedDshVersion()).toMatch(/^0\.1\.[01]-rc\.\d+$/u);
+    expect(() =>
+      assertCompatibleDshVersion("0.1.1-rc.2", "0.1.0-rc.6"),
+    ).toThrow("this Node runs 0.1.0-rc.6");
+    expect(() =>
+      assertCompatibleDshVersion("0.1.0-rc.6", "0.1.1-rc.2"),
+    ).not.toThrow();
+  });
+
   it("accepts a manifest signed by the pinned key argument", () => {
     const value = fixture();
     expect(

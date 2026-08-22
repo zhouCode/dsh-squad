@@ -10,6 +10,7 @@ DSH Squad 把运行在不同电脑、网络和地点上的个人 Agent，组成�
 
 - **两种组队方式，按网络条件选择**：Relay 模式适合跨地域、成员经常离线或不方便开放入站端口的团队；Direct 模式适合局域网、VPN 或已有可达 HTTPS 地址的小团队，无需部署中心中继。
 - **组织一次加入，不再两两配对**：在 Relay 模式中，节点通过一次性邀请和人工审批加入带签名的组织成员目录，无论团队规模如何，都不需要每两个人分别交换 Peer 配置；一个节点可以同时属于多个组织。
+- **团队 Skill 与原生 Skill 共用一个入口**：把已有原生 Skill 发布为节点签名、版本不可变的组织 Skill；Owner/Admin 审核后由成员显式安装，并在 DSH 原生 `/` 菜单中与本机 Skill 一起发现和调用。
 - **本地规划，权力仍属于个人**：Team Planner 可以把会议或团队目标整理成多人分派草案，但它不是持有全员权限的共享超级 Agent；负责人确认后才会发送，每位接收方仍由自己的策略和审批边界决定是否执行。
 - **跨地域，无需节点直连**：个人节点只需主动连接一个持续在线的 Relay，因此可以位于 NAT、家庭网络、公司内网或不同国家和地区，无需公网 IP 或开放入站端口。
 - **离线状态有明确语义**：Relay 模式由中继持久保存任务；Direct 模式由发送方本地 SQLite 保存并自动重试，界面会显示等待、重试时间、失败次数和最近错误。重复投递不会重复创建 Session 或执行任务。
@@ -55,7 +56,7 @@ Direct 模式不提供 NAT 穿透、分布式代存或去中心化组织共识�
 
 - 发送方只提交目标、上下文、完成条件和经过校验的 HTTPS 附件引用。
 - 接收方的 PeerPolicy 决定拒绝、等待本人接受或自动执行。
-- 接收方 Agent 自己选择本地 Skill 和工具；协议没有远程 Skill、Shell、MCP 或 Credential 字段。
+- 接收方 Agent 自己选择已在本机安装并启用的 Skill 和工具；每条委派本身仍没有远程 Skill、Shell、MCP 或 Credential 字段。团队 Skill 使用独立的审核与安装流程，安装后才成为接收方的本地能力。
 - Relay 只提供受认证的 at-least-once 邮箱；Direct 只提供经过固定公钥验证的点对点投递。Receiver 使用本地 SQLite、Envelope ID 和 Delegation ID 保证重复投递不重复执行。
 - HumanTodo、原生 Session ID、人工回复、凭据和工作区始终只保存在接收方。
 - 发送方只能看到接收方明确发布的状态、摘要和 Outcome。
@@ -102,6 +103,23 @@ Owner 也可以从 WebUI 不可逆地解散组织。解散会追加一条 Owner 
 
 当前已经提供的是 **Team Planner**，它只是本地草案能力。未来若加入 **Organization Coordinator Agent**，它会是组织中的一个可选服务成员，而不是凌驾于成员之上的超级 Agent：只接收明确发布的会议材料和状态投影，只生成摘要、建议或待审草案，不继承成员工作区、凭据、私有 Session 或工具权限，也不默认代替任何人批准或执行任务。
 
+## 团队 Skill：共享指令，不共享权限
+
+在`智能体收件箱 → 团队 Skill`中，成员可以把 DSH 已发现的原生 Skill 发布到当前组织。每个发布版本包含 `SKILL.md` 及其目录资源，由发布节点签名并以内容哈希固定；Member 提交后等待 Owner/Admin 审核，审核记录会绑定当时的组织目录修订并由审核节点签名。Owner/Admin 自己发布的版本也会留下审核记录。其他成员看到已批准版本后仍须在自己的节点显式安装，加入组织不会自动下载或执行团队代码。
+
+安装后的团队 Skill 由 DSH 原生 Skill Registry 提供，因此原生 Skill 与团队 Skill 使用同一个对话框 `/` 菜单和同一种调用机制。每项安装可以在界面中独立选择：
+
+| 本地开关 | `/` 菜单 | 本地对话中的 Agent | Squad 委派执行 |
+| -------- | -------- | ------------------ | -------------- |
+| 禁用     | 不显示   | 不可调用           | 不可调用       |
+| 仅手动   | 显示     | 不会自动选择       | 不会自动选择   |
+| 本地     | 显示     | 可以自动选择       | 不会自动选择   |
+| 委派     | 显示     | 可以自动选择       | 可以自动选择   |
+
+新安装默认是`仅手动`。原生 Skill 保持原有调用策略；如果本地名称与原生 Skill 冲突，安装会要求换名，运行时也始终让原生 Provider 优先。组织撤销某个版本后，已安装副本会自动切换为禁用，但本地审计记录和不可变缓存仍保留。
+
+团队 Skill 包不会携带工具授权、MCP 连接、账号或凭据，实际运行仍使用接收节点自己的工具与 Permission/Approval。发布端拒绝符号链接、路径穿越、私钥内容和典型密钥文件名，并限制文件数与体积；接收端再次验证组织目录中的发布者身份、签名、哈希和包结构。Relay 能读取其转发和保存的 Skill 内容，因此它仍是受信任中转方，审核也是一次明确的代码信任决定，而不是安全沙箱的替代品。
+
 ## 典型 Relay 部署：异地组成团队
 
 ```text
@@ -116,7 +134,7 @@ Owner 也可以从 WebUI 不可逆地解散组织。解散会追加一条 Owner 
 
 ## 安装
 
-固定运行基线：Node.js `24.18.0`、pnpm `10.28.2`、DeepSeek Harness `0.1.0-rc.6`、Cordis `4.0.1`。
+主开发与验收环境：Node.js `24.18.0`、pnpm `10.28.2`、DeepSeek Harness `0.1.1-rc.2`、Cordis `4.0.1`。发布包同时声明兼容 Harness `0.1.0-rc.6`，并通过独立的完整回归保留旧版支持。
 
 当前仓库只发布 `@dsh-squad/plugin`，不包含独立 SPA、第二套 Runtime CLI 或 Docker 编排；Docker 是可选的部署隔离手段，不是运行要求。
 
@@ -125,7 +143,7 @@ Owner 也可以从 WebUI 不可逆地解散组织。解散会追加一条 Owner 
 ```bash
 pnpm install --frozen-lockfile
 pnpm run pack
-dsh plugin --profile web add ./artifacts/dsh-squad-plugin-0.7.2.tgz --offline
+dsh plugin --profile web add ./artifacts/dsh-squad-plugin-0.7.3.tgz --offline
 dsh web
 ```
 
@@ -343,6 +361,7 @@ pnpm typecheck
 pnpm build
 pnpm test
 pnpm smoke:delegation
+pnpm compat:rc6
 ```
 
 发布维护者需要离线备份发布私钥，且绝不能把它放进仓库。`release-signing-key*.pem` 已被 `.gitignore` 拒绝；打包和签名命令会检查私钥是普通文件、仅所有者可访问，并与包内公钥匹配：
@@ -352,9 +371,9 @@ DSH_SQUAD_RELEASE_SIGNING_KEY=/secure/path/release-signing-key.pem \
   pnpm release:prepare
 ```
 
-发布 `v0.7.2` 时需要把 `artifacts/` 中的 `dsh-squad-plugin-0.7.2.tgz`、同名 `.sha256`、`dsh-squad-update-manifest-0.7.2.json` 和 `.sig` 四个文件全部作为 GitHub Release assets 上传。缺少任意一个、签名不符或 Release tag 不一致时，客户端都会拒绝更新。
+发布 `v0.7.3` 时需要把 `artifacts/` 中的 `dsh-squad-plugin-0.7.3.tgz`、同名 `.sha256`、`dsh-squad-update-manifest-0.7.3.json` 和 `.sig` 四个文件全部作为 GitHub Release assets 上传。缺少任意一个、签名不符或 Release tag 不一致时，客户端都会拒绝更新。
 
-`smoke:delegation` 会构建真实 tarball，安装到 Alice、Bob、Relay 三套隔离 DSH Home，并用真实 Chromium 验证：WebUI 配对、Team Planner 草案审批与幂等分派、Bob 离线投递、Relay/Node 重启、接收端专属 Skill、HumanTodo 部分完成、相同 Session 恢复、Outcome 隐私边界和插件可逆禁用；组织协议另由签名目录、Relay 权限与本地持久化集成测试覆盖。Direct 的签名回执、伪造回执拒绝、离线排队、恢复在线自动重投和幂等接收由独立端到端测试覆盖。
+`smoke:delegation` 默认在 Harness `0.1.1-rc.2` 下构建真实 tarball，安装到 Alice、Bob、Relay 三套隔离 DSH Home，并用真实 Chromium 验证：WebUI 配对、Team Planner 草案审批与幂等分派、Bob 离线投递、Relay/Node 重启、接收端专属 Skill、HumanTodo 部分完成、相同 Session 恢复、Outcome 隐私边界和插件可逆禁用；组织协议另由签名目录、Relay 权限与本地持久化集成测试覆盖。Direct 的签名回执、伪造回执拒绝、离线排队、恢复在线自动重投和幂等接收由独立端到端测试覆盖。`compat:rc6` 会在隔离副本中安装 Harness `0.1.0-rc.6`，重新执行类型检查、构建、全部测试和同一套三节点 Smoke，避免旧版兼容性只停留在版本声明上。
 
 ## 许可证
 

@@ -39,6 +39,12 @@ import type {
   UpdateReadiness,
   UpdateSnapshot,
 } from "../shared/updates.ts";
+import type {
+  PublishableSkillView,
+  TeamSkillActivation,
+  TeamSkillCatalogEntry,
+  TeamSkillInstallation,
+} from "../shared/team-skills.ts";
 import { tabAfterKey, tabStopForGroup } from "./accessibility.ts";
 import {
   parseAttachmentDrafts,
@@ -167,6 +173,10 @@ interface LocalState {
   automation: {
     rules: AutomationRuleView[];
     legacyPrefixCount: number;
+  };
+  teamSkills: {
+    catalog: TeamSkillCatalogEntry[];
+    installations: TeamSkillInstallation[];
   };
   peers: PeerView[];
   organizations: OrganizationView[];
@@ -655,6 +665,7 @@ type Tab =
   | "completed"
   | "archived"
   | "organizations"
+  | "skills"
   | "diagnostics"
   | "updates"
   | "settings";
@@ -668,6 +679,7 @@ const tabKeys = {
   completed: "tab.completed",
   archived: "tab.archived",
   organizations: "tab.organizations",
+  skills: "tab.skills",
   diagnostics: "tab.diagnostics",
   updates: "tab.updates",
   settings: "tab.settings",
@@ -689,7 +701,7 @@ const tabGroups: readonly {
       "archived",
     ],
   },
-  { label: "nav.team", tabs: ["organizations"] },
+  { label: "nav.team", tabs: ["organizations", "skills"] },
   { label: "nav.system", tabs: ["diagnostics", "updates", "settings"] },
 ];
 
@@ -3062,6 +3074,467 @@ function OrganizationCenter({
       {error ? <p className="squad-error">{error}</p> : null}
       {confirmation}
     </div>
+  );
+}
+
+const teamSkillStatusKeys = {
+  PENDING: "teamSkills.status.PENDING",
+  APPROVED: "teamSkills.status.APPROVED",
+  REVOKED: "teamSkills.status.REVOKED",
+} as const satisfies Record<TeamSkillCatalogEntry["status"], SquadLocaleKey>;
+
+const teamSkillActivationKeys = {
+  DISABLED: "teamSkills.activation.DISABLED",
+  MANUAL: "teamSkills.activation.MANUAL",
+  LOCAL: "teamSkills.activation.LOCAL",
+  DELEGATION: "teamSkills.activation.DELEGATION",
+} as const satisfies Record<TeamSkillActivation, SquadLocaleKey>;
+
+function TeamSkillsCenter({
+  state,
+  refresh,
+  t,
+}: {
+  state: LocalState;
+  refresh: () => Promise<void>;
+  t: SquadTranslate;
+}) {
+  const [nativeSkills, setNativeSkills] = useState<PublishableSkillView[]>([]);
+  const [nativeLoading, setNativeLoading] = useState(true);
+  const [busy, setBusy] = useState<string>();
+  const [error, setError] = useState<string>();
+  const [notice, setNotice] = useState<string>();
+  const [localNames, setLocalNames] = useState<Record<string, string>>({});
+  const { confirm, confirmation } = useConfirmation(t);
+
+  useEffect(() => {
+    let active = true;
+    setNativeLoading(true);
+    void api<{ skills: PublishableSkillView[] }>("/team-skills/native")
+      .then((result) => {
+        if (active) setNativeSkills(result.skills);
+      })
+      .catch((cause) => {
+        if (active) {
+          setError(describeError(cause, t, "teamSkills.error.action"));
+        }
+      })
+      .finally(() => {
+        if (active) setNativeLoading(false);
+      });
+    return () => {
+      active = false;
+    };
+  }, [t]);
+
+  const run = async (
+    key: string,
+    action: () => Promise<unknown>,
+    success: SquadLocaleKey,
+  ) => {
+    setBusy(key);
+    setError(undefined);
+    setNotice(undefined);
+    try {
+      await action();
+      await refresh();
+      setNotice(t(success));
+    } catch (cause) {
+      setError(describeError(cause, t, "teamSkills.error.action"));
+    } finally {
+      setBusy(undefined);
+    }
+  };
+
+  const activeOrganizations = state.organizations.filter(
+    (organization) =>
+      organization.lifecycleStatus === "ACTIVE" &&
+      organization.membershipStatus === "ACTIVE",
+  );
+
+  const publish = async (event: FormEvent<HTMLFormElement>) => {
+    event.preventDefault();
+    const form = event.currentTarget;
+    const data = new FormData(form);
+    await run(
+      "publish",
+      () =>
+        api("/team-skills/publish", {
+          method: "POST",
+          body: JSON.stringify({
+            organizationId: String(data.get("organizationId") ?? ""),
+            sourceName: String(data.get("sourceName") ?? ""),
+            skillVersion: String(data.get("skillVersion") ?? ""),
+            changelog: String(data.get("changelog") ?? "").trim() || undefined,
+          }),
+        }),
+      "teamSkills.notice.published",
+    );
+  };
+
+  const review = (entry: TeamSkillCatalogEntry, action: "APPROVE" | "REVOKE") =>
+    run(
+      `review:${entry.release.releaseId}`,
+      () =>
+        api(`/team-skills/${entry.release.releaseId}/review`, {
+          method: "POST",
+          body: JSON.stringify({ action }),
+        }),
+      action === "APPROVE"
+        ? "teamSkills.notice.approved"
+        : "teamSkills.notice.revoked",
+    );
+
+  const install = (
+    entry: TeamSkillCatalogEntry,
+    previous: TeamSkillInstallation | undefined,
+  ) => {
+    const release = entry.release;
+    const localName =
+      localNames[release.releaseId] ?? previous?.localName ?? release.skillName;
+    return run(
+      `install:${release.releaseId}`,
+      () =>
+        api(`/team-skills/${release.releaseId}/install`, {
+          method: "POST",
+          body: JSON.stringify({
+            localName,
+            activation: previous?.activation ?? "MANUAL",
+          }),
+        }),
+      previous === undefined
+        ? "teamSkills.notice.installed"
+        : "teamSkills.notice.updated",
+    );
+  };
+
+  const setActivation = async (
+    installation: TeamSkillInstallation,
+    activation: TeamSkillActivation,
+  ) => {
+    if (
+      activation === "DELEGATION" &&
+      installation.activation !== "DELEGATION" &&
+      !(await confirm({
+        title: t("confirm.teamSkillDelegationTitle"),
+        message: t("confirm.teamSkillDelegation"),
+        confirmLabel: t("confirm.enableTeamSkillDelegationAction"),
+        danger: true,
+      }))
+    ) {
+      return;
+    }
+    await run(
+      `activation:${installation.release.releaseId}`,
+      () =>
+        api(`/team-skills/${installation.release.releaseId}/activation`, {
+          method: "POST",
+          body: JSON.stringify({ activation }),
+        }),
+      "teamSkills.notice.activationSaved",
+    );
+  };
+
+  const remove = (installation: TeamSkillInstallation) =>
+    run(
+      `remove:${installation.release.releaseId}`,
+      () =>
+        api(`/team-skills/${installation.release.releaseId}`, {
+          method: "DELETE",
+        }),
+      "teamSkills.notice.removed",
+    );
+
+  const installationControls = (
+    installation: TeamSkillInstallation,
+    catalogEntry: TeamSkillCatalogEntry | undefined,
+  ) => (
+    <div className="squad-team-skill-controls">
+      <label>
+        {t("teamSkills.activation")}
+        <select
+          value={installation.activation}
+          disabled={busy !== undefined}
+          onChange={(event) =>
+            void setActivation(
+              installation,
+              event.currentTarget.value as TeamSkillActivation,
+            )
+          }
+        >
+          {(["DISABLED", "MANUAL", "LOCAL", "DELEGATION"] as const).map(
+            (activation) => (
+              <option
+                key={activation}
+                value={activation}
+                disabled={
+                  activation !== "DISABLED" &&
+                  catalogEntry?.status !== "APPROVED"
+                }
+              >
+                {t(teamSkillActivationKeys[activation])}
+              </option>
+            ),
+          )}
+        </select>
+      </label>
+      <small>{t(`teamSkills.activationHint.${installation.activation}`)}</small>
+      <button
+        type="button"
+        className="squad-secondary"
+        disabled={busy !== undefined}
+        onClick={() => void remove(installation)}
+      >
+        {t("teamSkills.remove")}
+      </button>
+    </div>
+  );
+
+  return (
+    <main className="squad-team-skills">
+      <header>
+        <div>
+          <h2>{t("teamSkills.title")}</h2>
+          <p className="squad-muted">{t("teamSkills.intro")}</p>
+        </div>
+      </header>
+      <p className="squad-notice">{t("teamSkills.slashHint")}</p>
+      {!state.relay.configured ? (
+        <p className="squad-warning">{t("teamSkills.relayRequired")}</p>
+      ) : null}
+      {state.relay.configured ? (
+        <section className="squad-team-skill-publish">
+          <div>
+            <h3>{t("teamSkills.publishTitle")}</h3>
+            <p className="squad-muted">{t("teamSkills.publishHint")}</p>
+          </div>
+          <form onSubmit={(event) => void publish(event)}>
+            <label>
+              {t("teamSkills.organization")}
+              <select name="organizationId" required>
+                <option value="">{t("teamSkills.selectOrganization")}</option>
+                {activeOrganizations.map((organization) => (
+                  <option
+                    key={organization.organizationId}
+                    value={organization.organizationId}
+                  >
+                    {organization.name} · {organization.role ?? "MEMBER"}
+                  </option>
+                ))}
+              </select>
+            </label>
+            <label>
+              {t("teamSkills.nativeSkill")}
+              <select name="sourceName" required disabled={nativeLoading}>
+                <option value="">
+                  {nativeLoading
+                    ? t("teamSkills.loadingNative")
+                    : t("teamSkills.selectNative")}
+                </option>
+                {nativeSkills.map((skill) => (
+                  <option
+                    key={`${skill.provider}:${skill.name}`}
+                    value={skill.name}
+                  >
+                    /{skill.name} · {skill.source}
+                  </option>
+                ))}
+              </select>
+            </label>
+            <label>
+              {t("teamSkills.version")}
+              <input
+                name="skillVersion"
+                required
+                pattern="[0-9]+\.[0-9]+\.[0-9]+(?:-[0-9A-Za-z.-]+)?(?:\+[0-9A-Za-z.-]+)?"
+                placeholder="1.0.0"
+              />
+            </label>
+            <label className="squad-team-skill-changelog">
+              {t("teamSkills.changelog")}
+              <textarea name="changelog" rows={2} maxLength={10_000} />
+            </label>
+            <button
+              type="submit"
+              disabled={
+                busy !== undefined ||
+                activeOrganizations.length === 0 ||
+                nativeSkills.length === 0
+              }
+            >
+              {t("teamSkills.publish")}
+            </button>
+          </form>
+        </section>
+      ) : null}
+      {state.relay.configured ? (
+        <section className="squad-team-skill-catalog">
+          <h3>{t("teamSkills.catalogTitle")}</h3>
+          {state.teamSkills.catalog.length === 0 ? (
+            <p className="squad-empty">{t("teamSkills.empty")}</p>
+          ) : null}
+          <div className="squad-team-skill-list">
+            {state.teamSkills.catalog.map((entry) => {
+              const release = entry.release;
+              const organization = state.organizations.find(
+                (candidate) =>
+                  candidate.organizationId === release.organizationId,
+              );
+              const publisher = organization?.members.find(
+                (member) =>
+                  member.membershipId === release.publisherMembershipId,
+              );
+              const canReview =
+                organization?.role === "OWNER" ||
+                organization?.role === "ADMIN";
+              const installedForSkill = state.teamSkills.installations.find(
+                (installation) =>
+                  installation.release.organizationId ===
+                    release.organizationId &&
+                  installation.release.skillName === release.skillName,
+              );
+              const installed =
+                installedForSkill?.release.releaseId === release.releaseId
+                  ? installedForSkill
+                  : undefined;
+              return (
+                <article
+                  key={release.releaseId}
+                  className={`squad-team-skill-card ${entry.status.toLowerCase()}`}
+                >
+                  <header>
+                    <div>
+                      <h4>/{release.skillName}</h4>
+                      <span>
+                        v{release.skillVersion} ·{" "}
+                        {organization?.name ?? release.organizationId}
+                      </span>
+                    </div>
+                    <span className="squad-team-skill-status">
+                      {t(teamSkillStatusKeys[entry.status])}
+                    </span>
+                  </header>
+                  <p>{release.description}</p>
+                  <dl>
+                    <div>
+                      <dt>{t("teamSkills.publisher")}</dt>
+                      <dd>
+                        {publisher?.displayName ?? release.publisherNodeId}
+                      </dd>
+                    </div>
+                    <div>
+                      <dt>{t("teamSkills.packageSize")}</dt>
+                      <dd>
+                        {release.fileCount} · {release.unpackedSize} B
+                      </dd>
+                    </div>
+                  </dl>
+                  {release.changelog ? (
+                    <p className="squad-muted">
+                      {t("teamSkills.changelog")}: {release.changelog}
+                    </p>
+                  ) : null}
+                  {entry.status === "PENDING" && canReview ? (
+                    <div className="squad-actions">
+                      <button
+                        type="button"
+                        disabled={busy !== undefined}
+                        onClick={() => void review(entry, "APPROVE")}
+                      >
+                        {t("teamSkills.approve")}
+                      </button>
+                      <button
+                        type="button"
+                        className="squad-danger"
+                        disabled={busy !== undefined}
+                        onClick={() => void review(entry, "REVOKE")}
+                      >
+                        {t("teamSkills.revoke")}
+                      </button>
+                    </div>
+                  ) : null}
+                  {entry.status === "APPROVED" && installed === undefined ? (
+                    <div className="squad-team-skill-install">
+                      <label>
+                        {t("teamSkills.localName")}
+                        <input
+                          value={
+                            localNames[release.releaseId] ??
+                            installedForSkill?.localName ??
+                            release.skillName
+                          }
+                          onChange={(event) =>
+                            setLocalNames((current) => ({
+                              ...current,
+                              [release.releaseId]: event.currentTarget.value,
+                            }))
+                          }
+                        />
+                      </label>
+                      <button
+                        type="button"
+                        disabled={busy !== undefined}
+                        onClick={() => void install(entry, installedForSkill)}
+                      >
+                        {installedForSkill === undefined
+                          ? t("teamSkills.install")
+                          : t("teamSkills.update")}
+                      </button>
+                    </div>
+                  ) : null}
+                  {installed ? (
+                    <p className="squad-notice">
+                      {t("teamSkills.installedVersion", {
+                        name: installed.localName,
+                      })}
+                    </p>
+                  ) : null}
+                </article>
+              );
+            })}
+          </div>
+        </section>
+      ) : null}
+      <section className="squad-team-skill-catalog">
+        <h3>{t("teamSkills.installedTitle")}</h3>
+        {state.teamSkills.installations.length === 0 ? (
+          <p className="squad-empty">{t("teamSkills.installedEmpty")}</p>
+        ) : null}
+        <div className="squad-team-skill-list">
+          {state.teamSkills.installations.map((installation) => {
+            const release = installation.release;
+            const catalogEntry = state.teamSkills.catalog.find(
+              (entry) => entry.release.releaseId === release.releaseId,
+            );
+            const organization = state.organizations.find(
+              (candidate) =>
+                candidate.organizationId === release.organizationId,
+            );
+            return (
+              <article
+                key={release.releaseId}
+                className="squad-team-skill-card"
+              >
+                <header>
+                  <div>
+                    <h4>/{installation.localName}</h4>
+                    <span>
+                      {release.skillName} v{release.skillVersion} ·{" "}
+                      {organization?.name ?? release.organizationId}
+                    </span>
+                  </div>
+                </header>
+                <p>{release.description}</p>
+                {installationControls(installation, catalogEntry)}
+              </article>
+            );
+          })}
+        </div>
+      </section>
+      {notice ? <p className="squad-notice">{notice}</p> : null}
+      {error ? <p className="squad-error">{error}</p> : null}
+      {confirmation}
+    </main>
   );
 }
 
@@ -5460,6 +5933,8 @@ function SquadPanel({
           />
         ) : tab === "organizations" && state ? (
           <OrganizationCenter state={state} refresh={refresh} t={t} />
+        ) : tab === "skills" && state ? (
+          <TeamSkillsCenter state={state} refresh={refresh} t={t} />
         ) : tab === "diagnostics" && state ? (
           <ConnectionDiagnostics state={state} refresh={refresh} t={t} />
         ) : tab === "updates" && state ? (
@@ -5642,6 +6117,7 @@ const css = `
 .squad-automation{margin:24px 0;padding:18px 0;border-top:1px solid var(--dsw-alias-border-l2,#ddd);border-bottom:1px solid var(--dsw-alias-border-l2,#ddd)}.squad-automation>h2{margin:0}.squad-automation-list{display:grid;gap:10px;margin:14px 0}.squad-automation-list>article{padding:13px;border:1px solid var(--dsw-alias-border-l2,#ddd);border-radius:12px}.squad-automation-list>article.disabled{opacity:.68}.squad-automation-list>article>header{display:flex;align-items:flex-start;justify-content:space-between;gap:12px}.squad-automation-list>article>header>div:first-child{display:grid;gap:4px}.squad-automation-list>article>header span{font-size:11px;color:var(--dsw-alias-label-secondary,#666)}.squad-automation-list code{display:block;margin-top:9px;overflow-wrap:anywhere}.squad-automation-list form{margin-top:14px;padding-top:10px;border-top:1px solid var(--dsw-alias-border-l2,#ddd)}.squad-automation-limits{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:0 10px}.squad-settings .squad-check{display:flex;align-items:center;gap:9px}.squad-settings .squad-check input{width:auto}.squad-automation-create{margin-top:12px;padding:12px;border:1px dashed var(--dsw-alias-border-l2,#ccc);border-radius:12px}.squad-automation-create>summary{cursor:pointer;color:#315ee8}.squad-automation-create form{margin-top:12px}.squad-automation small{color:var(--dsw-alias-label-secondary,#666);line-height:1.4}@media(max-width:700px){.squad-automation-list>article>header,.squad-automation-limits{display:grid;grid-template-columns:1fr}}
 .squad-plan-editor input,.squad-plan-editor textarea,.squad-plan-editor select{box-sizing:border-box;width:100%;border:1px solid var(--dsw-alias-border-l2,#ccc);border-radius:9px;background:var(--dsw-specific-dialog-fill,#fff);color:inherit;padding:9px;font:inherit}.squad-plan-editor-items{display:grid;gap:14px;margin:16px 0}.squad-plan-editor-item{min-width:0;margin:0;padding:14px;border:1px solid var(--dsw-alias-border-l2,#ddd);border-radius:12px}.squad-plan-editor-item>legend{padding:0 6px;font-size:13px;font-weight:700}.squad-plan-editor-order{display:flex;align-items:center;gap:7px;flex-wrap:wrap}.squad-plan-editor-order .squad-link-button{margin:0 0 0 auto}.squad-plan-editor .squad-attachment-editor{margin-top:18px}.squad-plan-editor>button.squad-secondary{margin-top:2px}@media(max-width:700px){.squad-plan-editor-order .squad-link-button{margin-left:0}.squad-plan-editor-item{padding:11px}}
 .squad-plan-rollup{margin:16px 0}.squad-plan-progress{height:7px;overflow:hidden;border-radius:999px;background:var(--dsw-alias-interactive-bg-hover,#eee)}.squad-plan-progress>span{display:block;height:100%;border-radius:inherit;background:#315ee8;transition:width .2s ease}.squad-plan-metrics{display:grid;grid-template-columns:repeat(5,minmax(0,1fr));gap:8px;margin-top:10px}.squad-plan-metrics>div{display:grid;gap:2px;padding:9px;border:1px solid var(--dsw-alias-border-l2,#ddd);border-radius:9px}.squad-plan-metrics>div.problem{border-color:#b13c35;background:#fde4e1;color:#a52a24}.squad-plan-metrics strong{font-size:18px}.squad-plan-metrics span{font-size:10px;color:var(--dsw-alias-label-secondary,#666)}.squad-plan-result{margin-top:12px;padding-top:1px;border-top:1px solid var(--dsw-alias-border-l2,#ddd)}.squad-plan-result h4{margin:10px 0 5px;font-size:12px}@media(max-width:700px){.squad-plan-metrics{grid-template-columns:repeat(2,minmax(0,1fr))}}
+.squad-team-skills{overflow:auto;padding:22px 26px;flex:1}.squad-team-skills>header h2,.squad-team-skill-publish h3,.squad-team-skill-catalog>h3{margin:0}.squad-team-skill-publish{display:grid;grid-template-columns:minmax(180px,.7fr) minmax(360px,1.3fr);gap:18px;margin:18px 0;padding:16px;border:1px solid var(--dsw-alias-border-l2,#ddd);border-radius:13px}.squad-team-skill-publish form{display:grid;grid-template-columns:1fr 1fr;gap:9px 12px;align-items:end}.squad-team-skills label{display:grid;gap:5px;font-size:12px}.squad-team-skills input,.squad-team-skills select,.squad-team-skills textarea{box-sizing:border-box;width:100%;border:1px solid var(--dsw-alias-border-l2,#ccc);border-radius:9px;background:var(--dsw-specific-dialog-fill,#fff);color:inherit;padding:8px;font:inherit}.squad-team-skills button{border:0;border-radius:9px;padding:8px 12px;background:#315ee8;color:#fff;cursor:pointer}.squad-team-skills button:disabled{opacity:.5;cursor:not-allowed}.squad-team-skills .squad-secondary{border:1px solid var(--dsw-alias-border-l2,#ccc);background:transparent;color:inherit}.squad-team-skills .squad-danger{background:#b13c35}.squad-team-skill-changelog{grid-column:1/-1}.squad-team-skill-list{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:12px;margin-top:12px}.squad-team-skill-card{min-width:0;padding:14px;border:1px solid var(--dsw-alias-border-l2,#ddd);border-radius:12px}.squad-team-skill-card.revoked{opacity:.72}.squad-team-skill-card>header{display:flex;justify-content:space-between;gap:12px}.squad-team-skill-card h4{margin:0 0 4px;font-size:16px}.squad-team-skill-card header span{font-size:11px;color:var(--dsw-alias-label-secondary,#666)}.squad-team-skill-status{align-self:flex-start;border-radius:999px;padding:4px 8px;background:var(--dsw-alias-interactive-bg-hover,#eee);white-space:nowrap}.squad-team-skill-card dl{display:grid;grid-template-columns:1fr 1fr;gap:8px;margin:10px 0}.squad-team-skill-card dl>div{min-width:0}.squad-team-skill-card dt{font-size:10px;color:var(--dsw-alias-label-secondary,#666)}.squad-team-skill-card dd{margin:2px 0 0;overflow-wrap:anywhere;font-size:12px}.squad-team-skill-install{display:grid;grid-template-columns:1fr auto;align-items:end;gap:8px;margin-top:12px}.squad-team-skill-controls{display:grid;grid-template-columns:minmax(180px,1fr) 1.3fr auto;align-items:end;gap:8px;margin-top:12px;padding-top:12px;border-top:1px solid var(--dsw-alias-border-l2,#ddd)}.squad-team-skill-controls small{align-self:center;color:var(--dsw-alias-label-secondary,#666);line-height:1.35}@media(max-width:800px){.squad-team-skill-publish,.squad-team-skill-list{grid-template-columns:1fr}.squad-team-skill-controls{grid-template-columns:1fr}.squad-team-skills{padding:16px}}@media(max-width:560px){.squad-team-skill-publish form{grid-template-columns:1fr}.squad-team-skill-changelog{grid-column:auto}.squad-team-skill-install{grid-template-columns:1fr}}
 `;
 
 function installStyles(): () => void {

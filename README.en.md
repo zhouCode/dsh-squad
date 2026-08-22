@@ -10,6 +10,7 @@ DSH Squad turns personal Agents running on different computers, networks, and lo
 
 - **Two team modes for different networks**: Relay mode fits cross-location teams, intermittently offline members, and nodes that cannot expose inbound ports. Direct mode fits a LAN, VPN, or small team whose nodes already have reachable HTTPS endpoints, without operating a central intermediary.
 - **Join an organization once, not every pair**: in Relay mode, Nodes enter a signed organization directory through one-time invitations and human approval. Team growth no longer requires every pair of people to exchange Peer configuration, and one Node may belong to multiple organizations.
+- **Team Skills share the native Skill entry point**: publish an existing native Skill as a Node-signed, immutable organization release. After Owner/Admin review and explicit member installation, it appears beside local Skills in DSH's native `/` menu.
 - **Locally planned, individually controlled**: Team Planner can turn a meeting or team objective into a multi-person delegation draft, but it is not a shared super-Agent holding everyone's authority. The planner's owner must approve dispatch, and every recipient still decides execution through their own policy and approval boundary.
 - **Cross-location without direct node connectivity**: personal nodes only need an outbound connection to an always-on Relay, so they can sit behind NAT, home networks, corporate networks, or national borders without public IP addresses or inbound ports.
 - **Offline behavior has explicit semantics**: Relay mode persists work independently at the intermediary. Direct mode persists it in the sender's local SQLite outbox and retries automatically, while the WebUI shows waiting state, next retry, failed attempts, and the latest error. Duplicate delivery cannot create duplicate Sessions or executions.
@@ -55,7 +56,7 @@ Direct mode does not provide NAT traversal, distributed store-and-forward, or de
 
 - The sender submits only an objective, context, acceptance criteria, and validated HTTPS attachment references.
 - The recipient's PeerPolicy decides whether to reject, wait for owner acceptance, or execute automatically.
-- The recipient Agent chooses its own local Skills and tools. The protocol has no remote Skill, Shell, MCP, or Credential field.
+- The recipient Agent chooses Skills already installed and enabled on that Node plus its own tools. An individual Delegation still has no remote Skill, Shell, MCP, or Credential field. Team Skills use a separate review and installation flow and become local capabilities only after installation.
 - Relay is only an authenticated, at-least-once mailbox; Direct is only pinned-key peer delivery. Receiver-side SQLite, Envelope IDs, and Delegation IDs prevent duplicate delivery from causing duplicate execution.
 - HumanTodo details, native Session IDs, human responses, credentials, and workspaces remain on the recipient node.
 - The sender sees only the status, summary, and Outcome that the recipient explicitly publishes.
@@ -100,6 +101,23 @@ One Node may join multiple organizations, but each DSH Session selects at most o
 
 The implemented capability is **Team Planner**, a local draft mechanism. A future **Organization Coordinator Agent**, if added, will be an optional service member rather than a sovereign super-Agent: it may receive deliberately published meeting material and status projections and create summaries, recommendations, or reviewable drafts, but it will inherit no member workspace, credentials, private Sessions, or tool authority and will not approve or execute work for people by default.
 
+## Team Skills: share instructions, not authority
+
+Under `Agent Inbox → Team Skills`, a member can publish a native Skill already discovered by DSH into an organization. Every release contains `SKILL.md` and its directory resources, is signed by the publishing Node, and is pinned to a content hash. Member submissions wait for Owner/Admin review; every review binds the organization-directory revision at that moment and is signed by the reviewing Node. Releases published by an Owner or Admin also retain an approval record. Other members must still install an approved release explicitly on their own Nodes. Joining an organization never downloads or executes team code automatically.
+
+Installed Team Skills are exposed through DSH's native Skill Registry, so native and team Skills use the same chat `/` menu and invocation mechanism. Each installation has an independent WebUI policy:
+
+| Local policy | `/` menu | Agent in local chats | Squad delegated runs |
+| ------------ | -------- | -------------------- | -------------------- |
+| Disabled     | Hidden   | Unavailable          | Unavailable          |
+| Manual only  | Shown    | Never auto-selected  | Never auto-selected  |
+| Local        | Shown    | May auto-select      | Never auto-selected  |
+| Delegation   | Shown    | May auto-select      | May auto-select      |
+
+New installations default to `Manual only`. Native Skills keep their existing invocation policy. Installation requires another local name when a native Skill already owns that name, and native providers retain runtime priority. Revoking an organization release automatically disables installed copies while preserving local audit data and the immutable cache.
+
+A Team Skill bundle grants no tool authority, MCP connection, account, or credential; execution still uses the receiving Node's own tools and Permission/Approval boundary. Publication rejects symlinks, path traversal, private-key material, and common secret filenames and enforces file-count and size limits. The receiver verifies the publisher against its signed organization directory, then verifies the signature, hash, and bundle structure again. Relay can read the Skill content it stores and forwards, so it remains a trusted intermediary, and approval is an explicit code-trust decision rather than a substitute for sandboxing.
+
 ## Typical Relay deployment: a cross-location team
 
 ```text
@@ -114,7 +132,7 @@ This is an application-layer Agent collaboration network, not a VPN: it does not
 
 ## Installation
 
-Pinned runtime baseline: Node.js `24.18.0`, pnpm `10.28.2`, DeepSeek Harness `0.1.0-rc.6`, and Cordis `4.0.1`.
+Primary development and acceptance environment: Node.js `24.18.0`, pnpm `10.28.2`, DeepSeek Harness `0.1.1-rc.2`, and Cordis `4.0.1`. The release package also declares compatibility with Harness `0.1.0-rc.6`, backed by a separate full regression run.
 
 This repository publishes only `@dsh-squad/plugin`. It contains no standalone SPA, second runtime CLI, or Docker orchestration. Docker is an optional isolation mechanism, not a runtime requirement.
 
@@ -123,7 +141,7 @@ Build and install the tarball from this repository:
 ```bash
 pnpm install --frozen-lockfile
 pnpm run pack
-dsh plugin --profile web add ./artifacts/dsh-squad-plugin-0.7.2.tgz --offline
+dsh plugin --profile web add ./artifacts/dsh-squad-plugin-0.7.3.tgz --offline
 dsh web
 ```
 
@@ -341,6 +359,7 @@ pnpm typecheck
 pnpm build
 pnpm test
 pnpm smoke:delegation
+pnpm compat:rc6
 ```
 
 Release maintainers must keep an offline backup of the release private key and never place it in the repository. `.gitignore` rejects `release-signing-key*.pem`; packaging and signing verify that the key is a regular owner-only file and matches the public key shipped in the package:
@@ -350,9 +369,9 @@ DSH_SQUAD_RELEASE_SIGNING_KEY=/secure/path/release-signing-key.pem \
   pnpm release:prepare
 ```
 
-A `v0.7.2` GitHub Release must upload all four files from `artifacts/`: `dsh-squad-plugin-0.7.2.tgz`, its `.sha256`, `dsh-squad-update-manifest-0.7.2.json`, and its `.sig`. Clients reject an update when any asset is missing, the signature fails, or the Release tag does not match.
+A `v0.7.3` GitHub Release must upload all four files from `artifacts/`: `dsh-squad-plugin-0.7.3.tgz`, its `.sha256`, `dsh-squad-update-manifest-0.7.3.json`, and its `.sig`. Clients reject an update when any asset is missing, the signature fails, or the Release tag does not match.
 
-`smoke:delegation` builds a real tarball, installs it into isolated Alice, Bob, and Relay DSH homes, and uses real Chromium to verify WebUI pairing, Team Planner approval and idempotent dispatch, delivery while Bob is offline, Relay and Node restarts, a recipient-only Skill, partial HumanTodo completion, same-Session resume, Outcome privacy boundaries, and reversible plugin disablement. Signed-directory, Relay-authorization, and local-persistence integration tests separately cover organizations. Dedicated end-to-end tests cover Direct signed receipts, forged-receipt rejection, offline queueing, automatic retry after reconnect, and idempotent receipt.
+`smoke:delegation` runs on Harness `0.1.1-rc.2` by default. It builds a real tarball, installs it into isolated Alice, Bob, and Relay DSH homes, and uses real Chromium to verify WebUI pairing, Team Planner approval and idempotent dispatch, delivery while Bob is offline, Relay and Node restarts, a recipient-only Skill, partial HumanTodo completion, same-Session resume, Outcome privacy boundaries, and reversible plugin disablement. Signed-directory, Relay-authorization, and local-persistence integration tests separately cover organizations. Dedicated end-to-end tests cover Direct signed receipts, forged-receipt rejection, offline queueing, automatic retry after reconnect, and idempotent receipt. `compat:rc6` creates an isolated copy with Harness `0.1.0-rc.6`, then repeats type-checking, the build, the complete test suite, and the same three-node smoke so legacy compatibility is tested rather than merely declared.
 
 ## License
 

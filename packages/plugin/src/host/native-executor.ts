@@ -24,6 +24,10 @@ interface LiveExecution {
   collector: OutcomeCollector;
 }
 
+interface DelegationSkillScope {
+  markDelegationScope(scope: object): void;
+}
+
 export class ExecutionFailure extends Error {
   constructor(
     readonly code: string,
@@ -160,6 +164,7 @@ export class NativeDelegationExecutor {
   constructor(
     private readonly ctx: Context,
     private readonly options: { cwd: string; preset?: string },
+    private readonly delegationSkills?: DelegationSkillScope,
   ) {}
 
   sessionIdFor(delegationId: string): string {
@@ -186,6 +191,10 @@ export class NativeDelegationExecutor {
     );
     const selection = this.ctx.agentDefaultModel.currentSelection();
     const setup = async (agentCtx: Context): Promise<void> => {
+      if (agentCtx.agent === undefined) {
+        throw new Error("delegated Agent setup has no Agent scope");
+      }
+      this.delegationSkills?.markDelegationScope(agentCtx.agent);
       await this.ctx.agentPresets.mount(agentCtx, preset.id);
       if (automationRule !== undefined) {
         const allowed = new Set(automationRule.allowedTools);

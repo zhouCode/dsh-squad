@@ -11,6 +11,14 @@ import {
   type OrganizationOwnershipTransferProposal,
   type OrganizationRenameEvent,
 } from "../shared/organizations.ts";
+import {
+  teamSkillBundleSchema,
+  teamSkillCatalogEntrySchema,
+  type TeamSkillBundle,
+  type TeamSkillCatalogEntry,
+  type TeamSkillRelease,
+  type TeamSkillReview,
+} from "../shared/team-skills.ts";
 import type { NodeIdentity } from "./identity.ts";
 import { signedRequest } from "./relay.ts";
 
@@ -245,6 +253,63 @@ export class RelayClient {
     }
     return body.organizations.map((organization) =>
       organizationDirectoryBundleSchema.parse(organization),
+    );
+  }
+
+  async teamSkills(): Promise<TeamSkillCatalogEntry[]> {
+    const body = (await this.request("GET", "/squad/v1/team-skills")) as {
+      skills?: unknown;
+    };
+    if (!Array.isArray(body.skills)) {
+      throw new RelayClientError(
+        502,
+        "INVALID_RESPONSE",
+        "Relay team Skill catalog response is invalid",
+      );
+    }
+    return body.skills.map((entry) => teamSkillCatalogEntrySchema.parse(entry));
+  }
+
+  async publishTeamSkill(
+    organizationId: string,
+    release: TeamSkillRelease,
+    bundle: TeamSkillBundle,
+  ): Promise<TeamSkillCatalogEntry> {
+    return teamSkillCatalogEntrySchema.parse(
+      await this.request(
+        "POST",
+        `/squad/v1/organizations/${organizationId}/team-skills`,
+        { release, bundle },
+      ),
+    );
+  }
+
+  async downloadTeamSkill(releaseId: string): Promise<{
+    release: TeamSkillRelease;
+    bundle: TeamSkillBundle;
+  }> {
+    const body = (await this.request(
+      "GET",
+      `/squad/v1/team-skills/${releaseId}`,
+    )) as Record<string, unknown>;
+    const entry = teamSkillCatalogEntrySchema.shape.release.parse(body.release);
+    return {
+      release: entry,
+      bundle: teamSkillBundleSchema.parse(body.bundle),
+    };
+  }
+
+  async reviewTeamSkill(
+    organizationId: string,
+    releaseId: string,
+    review: TeamSkillReview,
+  ): Promise<TeamSkillCatalogEntry> {
+    return teamSkillCatalogEntrySchema.parse(
+      await this.request(
+        "POST",
+        `/squad/v1/organizations/${organizationId}/team-skills/${releaseId}/reviews`,
+        { review },
+      ),
     );
   }
 
